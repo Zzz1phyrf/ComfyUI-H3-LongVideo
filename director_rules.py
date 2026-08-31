@@ -34,7 +34,10 @@ def validate_config(value):
 
     framing_values = {"medium close-up", "medium shot"}
     angle_values = {"front", "front three-quarter left", "front three-quarter right"}
-    movement_values = {"steady", "dolly_in", "truck_left", "truck_right"}
+    movement_values = {
+        "steady", "dolly_in", "truck_left", "truck_right",
+        "micro_reframe", "arc_left", "arc_right",
+    }
 
     def string_list(source, name, allowed, unique=True):
         supplied = source.get(name)

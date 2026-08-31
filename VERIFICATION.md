@@ -4,8 +4,8 @@ Last verified: 2026-08-31 on Windows 11, Python 3.12 and ComfyUI portable.
 
 ## Passed
 
-- Candidate package: 58 automated tests passed.
-- Installed package: the same 58 automated tests passed.
+- Candidate package: 59 automated tests passed.
+- Installed package: the same 59 automated tests passed.
 - Frontend JavaScript passed `node --check`.
 - ComfyUI started successfully and loaded `H3LVUnified` plus the settings and director-rules routes.
 - Faster-Whisper 1.2.1 imported from the active ComfyUI Python.

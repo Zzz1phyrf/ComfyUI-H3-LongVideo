@@ -10,14 +10,18 @@
       "front three-quarter left"
     ],
     "allowed_movements": [
+      "micro_reframe",
+      "arc_left",
+      "arc_right",
       "truck_left",
       "truck_right"
     ],
     "movement_pattern": [
-      "truck_right",
-      "truck_right",
+      "micro_reframe",
+      "arc_right",
+      "micro_reframe",
       "truck_left",
-      "truck_left"
+      "arc_left"
     ],
     "every_segment_moves": true,
     "constant_subject_scale": true

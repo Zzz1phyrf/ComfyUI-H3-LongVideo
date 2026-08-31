@@ -600,6 +600,20 @@ def _movement_for(framing, angle, band, activity, sizes, states, rules=None):
         return ("medium close-up", "dolly in", "forward",
                 f"a {pace} physical dolly in from waist-up to chest-up framing with readable background parallax",
                 "dolly-in motion is already gently readable at the cut", "dolly-in motion remains active at the cut")
+    if planned == "micro_reframe" or allowed == {"micro_reframe"}:
+        pace = "barely perceptible" if band == "low" else "restrained"
+        return (framing, "micro reframe", "", (
+                f"a {pace} tripod-based breathing reframe around the established composition; "
+                "the performer, eye line and background landmarks remain spatially anchored"),
+                "micro-reframing is already gently readable at the cut",
+                "micro-reframing remains active at the cut")
+    if planned in {"arc_left", "arc_right"}:
+        direction = "left" if planned == "arc_left" else "right"
+        return (framing, "arc", direction, (
+                f"a short shallow arc move a few degrees to the {direction} around the performer; "
+                f"{framing} scale and centered eye line stay stable while local background parallax remains subtle"),
+                f"shallow arc motion to the {direction} is already gently readable at the cut",
+                f"shallow arc motion to the {direction} remains active at the cut")
     if planned in {"truck_left", "truck_right"}:
         direction = "left" if planned == "truck_left" else "right"
     elif recent_families == ["lateral", "lateral"] and previous_direction:
@@ -683,7 +697,8 @@ def camera_sequence(mode, rows, director=None):
             index, band, rows, sizes, previous_end, states, angles=angles)
         pattern = singing.get("movement_pattern") or []
         planned = pattern[index % len(pattern)] if pattern else None
-        if planned in {"truck_left", "truck_right"} and "medium close-up" in sizes:
+        if planned in {"truck_left", "truck_right", "micro_reframe", "arc_left", "arc_right"} \
+                and "medium close-up" in sizes:
             framing = "medium close-up"
         elif planned == "dolly_in" and "medium shot" in sizes:
             framing = "medium shot"
@@ -741,9 +756,13 @@ def ai_camera_sequence(mode, rows, director, items, enforce_motion_distribution=
             raise ValueError(f"AI导演第 {index+1} 段包含不支持的景别、角度或运镜。")
         if index:
             current_family = "lateral" if movement in {"truck_left", "truck_right"} else (
-                "dolly in" if movement == "dolly_in" else "steady")
+                "arc" if movement in {"arc_left", "arc_right"} else (
+                    "micro reframe" if movement == "micro_reframe" else (
+                        "dolly in" if movement == "dolly_in" else "steady")))
             current_direction = "left" if movement == "truck_left" else (
-                "right" if movement == "truck_right" else ("forward" if movement == "dolly_in" else ""))
+                "right" if movement == "truck_right" else (
+                    "left" if movement == "arc_left" else (
+                        "right" if movement == "arc_right" else ("forward" if movement == "dolly_in" else ""))))
             same_lateral_motion_match = (
                 states
                 and states[-1].get("camera_move_family") == current_family == "lateral"
@@ -793,6 +812,21 @@ def ai_camera_sequence(mode, rows, director, items, enforce_motion_distribution=
             move = "a controlled physical dolly in from waist-up to chest-up framing with readable background parallax"
             entry_motion = "dolly-in motion is already gently readable at the cut"
             exit_motion = "dolly-in motion remains active at the cut"
+        elif movement == "micro_reframe":
+            ending, family, direction = framing, "micro reframe", ""
+            move = ("a restrained tripod-based breathing reframe around the established composition; "
+                    "the performer, eye line and background landmarks remain spatially anchored")
+            entry_motion = "micro-reframing is already gently readable at the cut"
+            exit_motion = "micro-reframing remains active at the cut"
+        elif movement in {"arc_left", "arc_right"}:
+            if framing != "medium close-up":
+                raise ValueError(f"AI导演第 {index+1} 段小弧度绕拍只允许使用 medium close-up。")
+            ending, family = framing, "arc"
+            direction = "left" if movement == "arc_left" else "right"
+            move = (f"a short shallow arc move a few degrees to the {direction} around the performer; "
+                    "medium close-up scale and centered eye line stay stable while local background parallax remains subtle")
+            entry_motion = f"shallow arc motion to the {direction} is already gently readable at the cut"
+            exit_motion = f"shallow arc motion to the {direction} remains active at the cut"
         else:
             if framing != "medium close-up":
                 raise ValueError(f"AI导演第 {index+1} 段横移只允许使用 medium close-up；中景横移实测容易变成大幅变焦。")
@@ -877,6 +911,11 @@ def _zh_camera_operation(row, framing, ending):
         return f"摄影机平稳前移，由{_zh_framing(framing)}推进到{_zh_framing(ending)}；人物尺度逐渐增大，背景地标产生可见视差"
     if family == "dolly out":
         return f"摄影机平稳后移，由{_zh_framing(framing)}拉开到{_zh_framing(ending)}；人物尺度逐渐减小，背景地标产生可见视差"
+    if family == "micro reframe":
+        return f"摄影机以三脚架为基准做轻微呼吸式构图调整，始终保持{_zh_framing(framing)}；人物、眼线和背景锚点保持稳定"
+    if family == "arc":
+        side = "左侧" if direction == "left" else "右侧"
+        return f"摄影机围绕人物向{side}做数度的小弧线移动，始终保持{_zh_framing(framing)}和人物中心；背景只产生轻微局部视差"
     side = "左侧" if direction == "left" else "右侧"
     background = "右移" if direction == "left" else "左移"
     return f"摄影机以固定观看角度向{side}平稳横移，始终保持{_zh_framing(framing)}；背景地标相对人物向画面{background}"
@@ -891,6 +930,11 @@ def _zh_motion(row, entry=True):
         return "前移运镜已自然进行" if entry else "前移运镜保持进行"
     if family == "dolly out":
         return "后移运镜已自然进行" if entry else "后移运镜保持进行"
+    if family == "micro reframe":
+        return "轻微构图调整已自然进行" if entry else "轻微构图调整保持进行"
+    if family == "arc":
+        side = "左" if direction == "left" else "右"
+        return f"向{side}小弧线运镜已自然进行" if entry else f"向{side}小弧线运镜保持进行"
     side = "左" if direction == "left" else "右"
     return f"向{side}横移已自然进行" if entry else f"向{side}横移保持进行"
 

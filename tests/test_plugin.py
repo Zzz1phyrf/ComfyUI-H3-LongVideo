@@ -416,8 +416,8 @@ class CoreTests(unittest.TestCase):
         core.decorate(p)
         self.assertEqual(p["shot_plan_version"], 10)
         self.assertEqual(p["ai_shot_plan"][1]["opening_framing"], "medium close-up")
-        self.assertIn(p["ai_shot_plan"][1]["movement"], {"truck_left", "truck_right"})
-        self.assertEqual(p["segments"][1]["camera_move_family"], "lateral")
+        self.assertEqual(p["ai_shot_plan"][1]["movement"], "arc_right")
+        self.assertEqual(p["segments"][1]["camera_move_family"], "arc")
         self.assertTrue(any("后拉镜头已改为稳定镜头" in value for value in p["warnings"]))
         self.assertTrue(any("固定机位已转换为轻运镜" in value for value in p["warnings"]))
 
@@ -436,8 +436,8 @@ class CoreTests(unittest.TestCase):
         core.decorate(p)
         self.assertEqual(p["shot_plan_version"], 10)
         self.assertEqual(p["ai_shot_plan"][2]["opening_framing"], "medium close-up")
-        self.assertIn(p["ai_shot_plan"][2]["movement"], {"truck_left", "truck_right"})
-        self.assertEqual(p["segments"][2]["camera_move_family"], "lateral")
+        self.assertEqual(p["ai_shot_plan"][2]["movement"], "micro_reframe")
+        self.assertEqual(p["segments"][2]["camera_move_family"], "micro reframe")
         self.assertTrue(any("中景横移已改为稳定镜头" in value for value in p["warnings"]))
 
     def test_new_ai_medium_shot_lateral_is_rejected(self):
@@ -483,7 +483,7 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(reset["revision"], first["revision"])
             self.assertEqual(
                 json.loads(reset["config_text"])["singing"]["movement_pattern"],
-                ["truck_right", "truck_right", "truck_left", "truck_left"],
+                ["micro_reframe", "arc_right", "micro_reframe", "truck_left", "arc_left"],
             )
 
     def test_faster_whisper_is_declared_without_a_second_runtime(self):
@@ -545,16 +545,23 @@ class CoreTests(unittest.TestCase):
     def test_every_singing_boundary_has_an_explicit_non_jump_cut(self):
         p = sample_plan()
         self.assertTrue(all(row["camera_move_family"] != "steady" for row in p["segments"]))
+        self.assertEqual([row["camera_move_family"] for row in p["segments"]],
+                         ["micro reframe", "arc", "micro reframe"])
         for previous, current in zip(p["segments"], p["segments"][1:]):
             same_size = current["camera_start"] == previous["camera_end"]
             same_angle = current["camera_start_angle"] == previous["camera_end_angle"]
             self.assertFalse(same_angle)
             self.assertTrue(same_size)
-            self.assertEqual(previous["camera_move_family"], "lateral")
-            self.assertEqual(current["camera_move_family"], "lateral")
             self.assertEqual(current["entry_cut_strategy"], "30-degree angle cut")
             self.assertIn("出口运动状态：", previous["prompt"])
             self.assertIn("承接上一段", current["prompt"])
+
+    def test_default_singing_pattern_uses_lateral_as_an_occasional_accent(self):
+        rows = [{"energy_db": -20+i, "text": "vocal"} for i in range(5)]
+        states = core.camera_sequence("singing", rows, core.director_preferences(sample_plan()))
+        self.assertEqual([state["camera_move_family"] for state in states],
+                         ["micro reframe", "arc", "micro reframe", "lateral", "arc"])
+        self.assertEqual(sum(state["camera_move_family"] == "lateral" for state in states), 1)
 
     def test_new_ai_motion_contract_rejects_any_steady_shot(self):
         p = sample_plan()

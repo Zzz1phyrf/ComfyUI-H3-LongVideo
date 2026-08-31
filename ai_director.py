@@ -137,7 +137,7 @@ def plan_shots(plan, images, settings, timeout=180):
         f"opening_angle uses one of {json.dumps(angles, ensure_ascii=False)}. "
         f"movement uses one of {json.dumps(movements, ensure_ascii=False)}. "
         + motion_target + " "
-        "Consecutive segments that continue the same lateral movement may keep the same opening angle for a motion-matched cut. "
+        "Distribute the available movement types across the sequence. Use micro_reframe and shallow arc moves as the primary choices; use lateral truck moves only as occasional rhythmic accents, never in adjacent segments. "
         "Never switch directly between front three-quarter left and front three-quarter right; return through front when changing sides. "
         "The local validator checks segment count, reference roles and supported combinations, and repairs a safe front-angle transition when possible. "
         "Return JSON only. Example shape: " + json.dumps(schema, ensure_ascii=False) + "\n\n" +
