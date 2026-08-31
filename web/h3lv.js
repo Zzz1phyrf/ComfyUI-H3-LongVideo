@@ -696,8 +696,11 @@ async function openReview(owner) {
       const result = element("section", undefined, segmentsBody, "h3lv-result");
       const resultHeader = element("div", undefined, result, "h3lv-result-header");
       element("h3", plan.final_stale ? "当前旧版成片（有片段待更新）" : "合并结果", resultHeader);
-      actionButton(resultHeader, "打开文件位置", async () => {
+      const revealButton = actionButton(resultHeader, "打开文件位置", async () => {
         await request(endpoint("/reveal-final"), {});
+        revealButton.textContent = "已打开并选中文件";
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        revealButton.textContent = "打开文件位置";
       }, "reveal-final");
       const video = element("video", undefined, result);
       video.controls = true;

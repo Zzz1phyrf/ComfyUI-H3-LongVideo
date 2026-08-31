@@ -261,10 +261,44 @@ def command(args, timeout=1800):
 
 def reveal_command(path, os_name=None, platform=None):
     if (os_name or os.name) == "nt":
-        return ["explorer.exe", "/select,", str(path)]
+        return ["explorer.exe", "/separate,", "/select,", str(path)]
     if (platform or sys.platform) == "darwin":
         return ["open", "-R", str(path)]
     return ["xdg-open", str(Path(path).parent)]
+
+
+def explorer_windows():
+    if os.name != "nt":
+        return set()
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    handles = set()
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    @callback_type
+    def collect(hwnd, _):
+        name = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(hwnd, name, len(name))
+        if name.value in {"CabinetWClass", "ExploreWClass"}:
+            handles.add(int(hwnd))
+        return True
+
+    user32.EnumWindows(collect, 0)
+    return handles
+
+
+def activate_explorer_window(hwnd):
+    import ctypes
+    user32 = ctypes.windll.user32
+    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    user32.BringWindowToTop(hwnd)
+    if not user32.SetForegroundWindow(hwnd):
+        # Windows can reject foreground activation from a background process.
+        # A brief Alt key transition releases that foreground lock for this user action.
+        user32.keybd_event(0x12, 0, 0, 0)
+        user32.keybd_event(0x12, 0, 0x0002, 0)
+        user32.SetForegroundWindow(hwnd)
 
 
 def reveal_file(path):
@@ -272,8 +306,17 @@ def reveal_file(path):
     path = Path(path).resolve()
     if not path.is_file():
         raise FileNotFoundError(path)
+    before = explorer_windows()
     args = reveal_command(path)
     subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if os.name == "nt":
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            created = explorer_windows() - before
+            if created:
+                activate_explorer_window(next(iter(created)))
+                break
+            time.sleep(.05)
     return str(path)
 
 

@@ -60,15 +60,18 @@ class CoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             final = Path(directory)/"final video.mp4"
             final.write_bytes(b"video")
-            command = ["explorer.exe", "/select,", str(final.resolve())]
+            command = ["explorer.exe", "/separate,", "/select,", str(final.resolve())]
             self.assertEqual(controller.reveal_command(
                 final.resolve(), os_name="nt", platform="win32"), command)
             with patch.object(controller, "reveal_command", return_value=command), \
+                 patch.object(controller, "explorer_windows", side_effect=[{10}, {10, 20}]), \
+                 patch.object(controller, "activate_explorer_window") as activate, \
                  patch.object(controller.subprocess, "Popen") as launch:
                 self.assertEqual(controller.reveal_file(final), str(final.resolve()))
             launch.assert_called_once_with(
                 command,
                 stdout=controller.subprocess.DEVNULL, stderr=controller.subprocess.DEVNULL)
+            activate.assert_called_once_with(20)
 
     def test_review_preview_uses_versioned_output_url(self):
         script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
@@ -78,6 +81,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn('web.FileResponse(file, headers={"Cache-Control": "no-store"})',
                       routes_source)
         self.assertIn('request(endpoint("/reveal-final"), {})', script)
+        self.assertIn('revealButton.textContent = "已打开并选中文件";', script)
         self.assertIn('@routes.post("/h3lv/project/{project_id}/reveal-final")',
                       routes_source)
 
