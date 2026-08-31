@@ -153,11 +153,11 @@ async function openDirectorRules() {
   const title = element("div", undefined, panel, "h3lv-title-row");
   element("h2", "导演规则", title);
   actionButton(title, "关闭", () => shade.remove(), "h3lv-close");
-  element("p", "规则保存在当前 ComfyUI 用户目录，不写入节点，也不会被插件更新覆盖。AI 规则决定大模型如何规划镜头；JSON 配置同时约束规则导演和 AI 导演。新规则只用于重新分析的新项目。", panel, "h3lv-help");
+  element("p", "规则保存在当前 ComfyUI 用户目录，不写入节点，也不会被插件更新覆盖。导演规则文本决定 AI 导演所调用的大模型如何规划镜头；JSON 配置同时约束规则导演、AI 导演和本地校验。运镜序列只按实际分段数量循环，不决定音频被切成几段。新规则只用于重新分析的新项目。", panel, "h3lv-help");
   const rules = await request("/h3lv/rules");
   const location = element("p", `保存位置：${rules.directory}`, panel, "h3lv-notice");
   const form = element("div", undefined, panel, "h3lv-settings-form");
-  const aiLabel = element("label", "AI 导演创作规则", form);
+  const aiLabel = element("label", "导演镜头规划规则（供大模型读取）", form);
   const aiRule = element("textarea", undefined, aiLabel, "h3lv-rule-editor");
   aiRule.value = rules.ai_rule;
   aiRule.rows = 12;
