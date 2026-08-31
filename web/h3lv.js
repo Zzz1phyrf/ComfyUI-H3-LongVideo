@@ -76,6 +76,37 @@ function messageDialog({title, message, buttonText = "知道了", tone = ""}) {
   return confirmDialog({title, message, confirmText: buttonText, cancelText: null, tone});
 }
 
+function editPromptDialog(index, value) {
+  return new Promise(resolve => {
+    const shade = element("div", undefined, document.body,
+      "h3lv-shade h3lv-settings-shade h3lv-prompt-editor-shade");
+    const panel = element("div", undefined, shade, "h3lv-settings-panel h3lv-prompt-editor-panel");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    const title = element("div", undefined, panel, "h3lv-title-row");
+    element("h2", `编辑第 ${index + 1} 段镜头简报`, title);
+    element("p", "这是交给 PromptExpand 的结构化输入，不是最终 H3 提示词。保留参考图映射，主要调整构图、运镜、衔接和表演。", panel, "h3lv-help");
+    const editor = element("textarea", undefined, panel, "h3lv-prompt-editor");
+    editor.value = value;
+    editor.spellcheck = false;
+    const buttons = element("div", undefined, panel, "h3lv-actions h3lv-confirm-actions");
+    let finished = false;
+    const finish = result => {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener("keydown", onKeyDown);
+      shade.remove();
+      resolve(result);
+    };
+    actionButton(buttons, "取消", () => finish(null));
+    actionButton(buttons, "应用到当前草稿", () => finish(editor.value), "primary");
+    const onKeyDown = event => { if (event.key === "Escape") finish(null); };
+    window.addEventListener("keydown", onKeyDown);
+    shade.onclick = event => { if (event.target === shade) finish(null); };
+    queueMicrotask(() => editor.focus());
+  });
+}
+
 function confirmReanalysis() {
   return confirmDialog({
     title: "重新分析当前音频？",
@@ -213,6 +244,15 @@ function cutLabel(value) {
 
 function needsReplacement(row) {
   return Boolean(row.needs_regeneration && row.job?.status === "completed" && row.job?.video);
+}
+
+function outputPreviewUrl(preview) {
+  const query = new URLSearchParams({
+    filename: preview.filename,
+    subfolder: preview.subfolder || "",
+    type: preview.type || "output",
+  });
+  return api.apiURL(`/view?${query.toString()}`);
 }
 
 function showFinalOnVideoNode(preview, projectId) {
@@ -547,6 +587,15 @@ async function openReview(owner) {
       else if (row.job?.status) element("span", row.job.status, summary, "h3lv-chip neutral");
       card.ontoggle = () => { if (card.open) updateSelected(row.index); };
       const inner = element("div", undefined, card, "h3lv-card-body");
+      if (row.video_preview?.filename) {
+        const preview = element("figure", undefined, inner, "h3lv-segment-preview");
+        element("figcaption", "当前分段结果", preview);
+        const video = element("video", undefined, preview);
+        video.controls = true;
+        video.preload = "metadata";
+        video.playsInline = true;
+        video.src = outputPreviewUrl(row.video_preview);
+      }
       element("p", row.text || "未识别出文字，人声状态仍需试听确认。", inner, "h3lv-lyrics");
       if (row.warnings?.length) {
         const warningList = element("ul", undefined, inner, "h3lv-warnings");
@@ -573,11 +622,20 @@ async function openReview(owner) {
         cut.src = api.apiURL(endpoint(`/audio?index=${row.index}&boundary=1&vocals=1&revision=${plan.revision}`));
       }
       const advanced = element("details", undefined, inner, "h3lv-advanced");
-      element("summary", "高级：自动分镜 / PromptExpand 输入", advanced);
-      const promptLabel = element("label", "可编辑；这不是最终 H3 提示词", advanced);
-      const prompt = element("textarea", undefined, promptLabel);
-      prompt.value = row.prompt; prompt.rows = 7;
+      element("summary", "镜头简报 / PromptExpand 输入", advanced);
+      element("p", "这不是最终 H3 提示词。", advanced, "h3lv-notice");
+      const promptActions = element("div", undefined, advanced, "h3lv-actions h3lv-prompt-actions");
+      const promptPreview = element("pre", row.prompt, advanced, "h3lv-prompt-preview");
+      const prompt = element("textarea", undefined, advanced, "h3lv-prompt-source");
+      prompt.value = row.prompt;
       prompt.oninput = markDirty;
+      actionButton(promptActions, "编辑本段镜头简报", async () => {
+        const updated = await editPromptDialog(row.index, prompt.value);
+        if (updated === null || updated === prompt.value) return;
+        prompt.value = updated;
+        promptPreview.textContent = updated;
+        prompt.dispatchEvent(new Event("input"));
+      }, "prompt-edit");
       rows.push({end, prompt, duration, time, generationFrames, editFrames, cut});
       details.push(card);
       if (row.job || needsReplacement(row)) {

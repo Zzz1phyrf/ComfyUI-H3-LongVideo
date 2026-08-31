@@ -87,6 +87,9 @@ def register_routes():
         plan = read_plan(root, request.match_info["project_id"])
         plan["controller_active"] = plan["id"] in controller.TASKS
         plan["final_preview"] = output_preview(storage_root().parent, plan.get("final_video"))
+        for row in plan["segments"]:
+            job = row.get("job") or {}
+            row["video_preview"] = output_preview(storage_root().parent, job.get("video"))
         return web.json_response(plan)
 
     @routes.get("/h3lv/project/{project_id}/analysis")
