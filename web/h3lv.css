@@ -1,10 +1,11 @@
 .h3lv-shade {
   position: fixed; inset: 0; z-index: 10001; padding: 2vh 3vw;
+  display: flex; justify-content: center;
   box-sizing: border-box; background: rgba(0, 0, 0, .7);
   color: #eef1f5; font: 14px/1.45 Inter, "Microsoft YaHei", sans-serif;
 }
 .h3lv-panel {
-  height: 96vh; overflow: auto; border: 1px solid #4b5666; border-radius: 12px;
+  width: min(1440px, 100%); height: 96vh; overflow: auto; border: 1px solid #4b5666; border-radius: 12px;
   background: #1b1f26; box-shadow: 0 20px 60px rgba(0,0,0,.45);
 }
 .h3lv-settings-shade { display: grid; place-items: center; z-index: 10002; }
@@ -101,35 +102,24 @@
 .h3lv-chip.review { color: #ffd36f; background: rgba(222,157,28,.17); }
 .h3lv-chip.risk { color: #ff9c9c; background: rgba(219,70,70,.18); }
 .h3lv-chip.neutral { color: #bac5d3; background: rgba(147,161,180,.15); }
-.h3lv-card-body { padding: 12px 14px 15px; }
+.h3lv-card-body { position: relative; padding: 12px 14px 15px; }
+.h3lv-card-body.has-preview { min-height: 205px; padding-right: 350px; }
 .h3lv-card-body::after { display: block; clear: both; content: ""; }
 .h3lv-segment-preview {
-  float: right; width: min(360px, 31vw); margin: 0 0 12px 20px;
+  position: absolute; top: 12px; right: 14px; width: 316px; margin: 0;
   border: 1px solid #414c5b; border-radius: 7px; overflow: hidden; background: #11151c;
 }
 .h3lv-segment-preview figcaption { padding: 6px 9px; color: #b7c5d7; font-size: 12px; }
-.h3lv-segment-preview video { display: block; width: 100%; max-height: 260px; background: #080a0e; }
+.h3lv-segment-preview video {
+  display: block; width: 100%; height: 176px; object-fit: contain; background: #080a0e;
+}
 .h3lv-lyrics { margin: 0 0 8px; color: #f0f3f7; }
 .h3lv-warnings { margin: 6px 0 10px; padding-left: 22px; color: #ffbf7a; }
 .h3lv-metrics { margin: 9px 0; color: #aeb8c6; }
-.h3lv-metrics label { margin-left: auto; }
-.h3lv-metrics input {
-  width: 90px; margin-left: 7px; padding: 5px 7px; border: 1px solid #596676;
-  border-radius: 5px; background: #12161d; color: #f0f3f7;
-}
 .h3lv-audio-label { margin: 10px 0 5px; color: #aeb8c6; font-size: 12px; }
 .h3lv-cut-audio { display: block; width: 100%; height: 34px; }
-.h3lv-advanced { margin-top: 11px; border-top: 1px solid #39424e; padding-top: 9px; }
-.h3lv-advanced > summary { cursor: pointer; color: #b8c4d3; }
-.h3lv-advanced > .h3lv-notice { margin: 7px 0; }
-.h3lv-prompt-actions { margin: 7px 0; }
+.h3lv-prompt-actions { margin: 12px 0 0; }
 .h3lv-button.prompt-edit { border-color: #4f9fe8; color: #d8ecff; background: #203b55; }
-.h3lv-prompt-preview {
-  max-height: 260px; overflow: auto; box-sizing: border-box; margin: 7px 0 0; padding: 10px;
-  border: 1px solid #4c5665; border-radius: 6px; background: #11151c; color: #dfe5ed;
-  font: 12px/1.55 Consolas, "Microsoft YaHei", monospace; white-space: pre-wrap; overflow-wrap: anywhere;
-}
-.h3lv-prompt-source { display: none; }
 .h3lv-prompt-editor-panel { width: min(1180px, 94vw); height: min(820px, 92vh); display: flex; flex-direction: column; }
 .h3lv-prompt-editor-panel > .h3lv-help { margin: 10px 0; }
 .h3lv-prompt-editor {
@@ -146,5 +136,6 @@
   .h3lv-card > summary { grid-template-columns: 1fr auto; }
   .h3lv-reason { grid-column: 1 / -1; }
   .h3lv-selected-bar audio { width: 100%; }
-  .h3lv-segment-preview { float: none; width: 100%; margin: 0 0 12px; }
+  .h3lv-card-body.has-preview { min-height: 0; padding-right: 14px; }
+  .h3lv-segment-preview { position: static; width: 100%; margin: 0 0 12px; }
 }

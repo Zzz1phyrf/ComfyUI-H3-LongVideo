@@ -588,6 +588,7 @@ async function openReview(owner) {
       card.ontoggle = () => { if (card.open) updateSelected(row.index); };
       const inner = element("div", undefined, card, "h3lv-card-body");
       if (row.video_preview?.filename) {
+        inner.classList.add("has-preview");
         const preview = element("figure", undefined, inner, "h3lv-segment-preview");
         element("figcaption", "当前分段结果", preview);
         const video = element("video", undefined, preview);
@@ -604,8 +605,7 @@ async function openReview(owner) {
       const metrics = element("div", undefined, inner, "h3lv-metrics");
       const generationFrames = element("span", `${row.generation_frames} 生成帧`, metrics);
       const editFrames = element("span", `${row.edit_frames} 剪辑帧`, metrics);
-      const line = element("label", "结束时间（秒）", metrics);
-      const end = element("input", undefined, line);
+      const end = document.createElement("input");
       end.type = "number"; end.step = ".01"; end.value = row.end;
       end.disabled = row.index === plan.segments.length-1;
       end.min = row.start+3; end.max = row.start+plan.max_seconds;
@@ -621,19 +621,14 @@ async function openReview(owner) {
         cut.controls = true; cut.preload = "metadata";
         cut.src = api.apiURL(endpoint(`/audio?index=${row.index}&boundary=1&vocals=1&revision=${plan.revision}`));
       }
-      const advanced = element("details", undefined, inner, "h3lv-advanced");
-      element("summary", "镜头简报 / PromptExpand 输入", advanced);
-      element("p", "这不是最终 H3 提示词。", advanced, "h3lv-notice");
-      const promptActions = element("div", undefined, advanced, "h3lv-actions h3lv-prompt-actions");
-      const promptPreview = element("pre", row.prompt, advanced, "h3lv-prompt-preview");
-      const prompt = element("textarea", undefined, advanced, "h3lv-prompt-source");
+      const promptActions = element("div", undefined, inner, "h3lv-actions h3lv-prompt-actions");
+      const prompt = document.createElement("textarea");
       prompt.value = row.prompt;
       prompt.oninput = markDirty;
       actionButton(promptActions, "编辑本段镜头简报", async () => {
         const updated = await editPromptDialog(row.index, prompt.value);
         if (updated === null || updated === prompt.value) return;
         prompt.value = updated;
-        promptPreview.textContent = updated;
         prompt.dispatchEvent(new Event("input"));
       }, "prompt-edit");
       rows.push({end, prompt, duration, time, generationFrames, editFrames, cut});
