@@ -756,11 +756,16 @@ class CoreTests(unittest.TestCase):
             final = controller.assemble(root, p["id"])
             normalized = sorted((directory/"cache").glob("*.mp4"))
             cached_mtimes = {path.name: path.stat().st_mtime_ns for path in normalized}
-            second_final = controller.assemble(root, p["id"])
-            self.assertEqual(final, second_final)
+            # A browser may still be previewing the previous result on Windows.
+            with Path(final).open("rb"):
+                second_final = controller.assemble(root, p["id"])
+            self.assertNotEqual(final, second_final)
             self.assertEqual(Path(final).parent, Path(d)/"H3LongVideo"/"final_videos")
             stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(p["created"]))
             self.assertEqual(Path(final).name, f"{stamp}_singing_aaaaaaaa.mp4")
+            self.assertEqual(Path(second_final).name, f"{stamp}_singing_aaaaaaaa_v2.mp4")
+            self.assertTrue(Path(final).is_file())
+            self.assertTrue(Path(second_final).is_file())
             self.assertEqual(list((directory/"work").iterdir()), [])
             self.assertEqual(cached_mtimes, {path.name: path.stat().st_mtime_ns
                                              for path in (directory/"cache").glob("*.mp4")})

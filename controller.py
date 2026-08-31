@@ -331,7 +331,12 @@ def assemble(root, project_id):
     mode = "speaking" if plan.get("mode") == "speaking" else "singing"
     final_directory = Path(root).resolve().parent / "final_videos"
     final_directory.mkdir(parents=True, exist_ok=True)
-    final = final_directory/f"{stamp}_{mode}_{project_id[:8]}.mp4"
+    stem = f"{stamp}_{mode}_{project_id[:8]}"
+    final = final_directory/f"{stem}.mp4"
+    version = 2
+    while final.exists():
+        final = final_directory/f"{stem}_v{version}.mp4"
+        version += 1
     os.replace(temporary_final, final)
     shutil.rmtree(work, ignore_errors=True)
     return str(final)
