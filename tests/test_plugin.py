@@ -56,12 +56,29 @@ def sample_plan():
 
 
 class CoreTests(unittest.TestCase):
+    def test_reveal_file_opens_windows_explorer_on_exact_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            final = Path(directory)/"final video.mp4"
+            final.write_bytes(b"video")
+            command = ["explorer.exe", "/select,", str(final.resolve())]
+            self.assertEqual(controller.reveal_command(
+                final.resolve(), os_name="nt", platform="win32"), command)
+            with patch.object(controller, "reveal_command", return_value=command), \
+                 patch.object(controller.subprocess, "Popen") as launch:
+                self.assertEqual(controller.reveal_file(final), str(final.resolve()))
+            launch.assert_called_once_with(
+                command,
+                stdout=controller.subprocess.DEVNULL, stderr=controller.subprocess.DEVNULL)
+
     def test_review_preview_uses_versioned_output_url(self):
         script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
         routes_source = (ROOT/"routes.py").read_text(encoding="utf-8")
         self.assertIn("video.src = outputPreviewUrl(plan.final_preview);", script)
         self.assertNotIn('video.src = api.apiURL(endpoint("/final"));', script)
         self.assertIn('web.FileResponse(file, headers={"Cache-Control": "no-store"})',
+                      routes_source)
+        self.assertIn('request(endpoint("/reveal-final"), {})', script)
+        self.assertIn('@routes.post("/h3lv/project/{project_id}/reveal-final")',
                       routes_source)
 
     def test_final_output_has_vhs_preview_descriptor(self):

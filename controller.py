@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 
@@ -256,6 +257,24 @@ def command(args, timeout=1800):
     if result.returncode:
         raise RuntimeError("视频合并工具失败："+result.stderr[-2000:])
     return result.stdout
+
+
+def reveal_command(path, os_name=None, platform=None):
+    if (os_name or os.name) == "nt":
+        return ["explorer.exe", "/select,", str(path)]
+    if (platform or sys.platform) == "darwin":
+        return ["open", "-R", str(path)]
+    return ["xdg-open", str(Path(path).parent)]
+
+
+def reveal_file(path):
+    """Open the platform file manager and reveal one completed output file."""
+    path = Path(path).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    args = reveal_command(path)
+    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return str(path)
 
 
 def probe_video(path):

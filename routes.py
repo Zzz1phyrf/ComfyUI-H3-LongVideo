@@ -312,3 +312,11 @@ def register_routes():
         # This compatibility endpoint is stable while the selected final file can
         # change after reassembly. Never let clients reuse byte ranges from an older MP4.
         return web.FileResponse(file, headers={"Cache-Control": "no-store"})
+
+    @routes.post("/h3lv/project/{project_id}/reveal-final")
+    @endpoint
+    async def reveal_final(request):
+        plan = read_plan(data_root(), request.match_info["project_id"])
+        file = inside(storage_root()/"final_videos", plan["final_video"])
+        revealed = await asyncio.to_thread(controller.reveal_file, file)
+        return web.json_response({"path": revealed})

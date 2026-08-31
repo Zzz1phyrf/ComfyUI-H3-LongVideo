@@ -129,6 +129,9 @@
 }
 .h3lv-job { color: #b7c5d7; }
 .h3lv-result { margin-top: 16px; }
+.h3lv-result-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.h3lv-result-header h3 { margin: 0; }
+.h3lv-button.reveal-final { padding: 5px 9px; }
 .h3lv-result video { max-width: 100%; max-height: 60vh; }
 @media (max-width: 900px) {
   .h3lv-shade { padding: 0; }
