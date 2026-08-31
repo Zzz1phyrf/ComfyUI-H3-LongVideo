@@ -692,12 +692,16 @@ async function openReview(owner) {
     renderCards();
     updateSelected(selected);
     if (details[selected]) details[selected].open = true;
-    if (plan.final_video) {
+    if (plan.final_video && plan.final_preview?.filename) {
       const result = element("section", undefined, segmentsBody, "h3lv-result");
       element("h3", plan.final_stale ? "当前旧版成片（有片段待更新）" : "合并结果", result);
       const video = element("video", undefined, result);
       video.controls = true;
-      video.src = api.apiURL(endpoint("/final"));
+      video.preload = "metadata";
+      video.playsInline = true;
+      // Every assembly has a versioned filename. Using the standard output URL keeps
+      // browser byte-range caches from mixing an older MP4 with the new assembly.
+      video.src = outputPreviewUrl(plan.final_preview);
     }
   }
 

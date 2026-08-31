@@ -309,4 +309,6 @@ def register_routes():
     async def final(request):
         plan = read_plan(data_root(), request.match_info["project_id"])
         file = inside(storage_root()/"final_videos", plan["final_video"])
-        return web.FileResponse(file)
+        # This compatibility endpoint is stable while the selected final file can
+        # change after reassembly. Never let clients reuse byte ranges from an older MP4.
+        return web.FileResponse(file, headers={"Cache-Control": "no-store"})

@@ -56,6 +56,14 @@ def sample_plan():
 
 
 class CoreTests(unittest.TestCase):
+    def test_review_preview_uses_versioned_output_url(self):
+        script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
+        routes_source = (ROOT/"routes.py").read_text(encoding="utf-8")
+        self.assertIn("video.src = outputPreviewUrl(plan.final_preview);", script)
+        self.assertNotIn('video.src = api.apiURL(endpoint("/final"));', script)
+        self.assertIn('web.FileResponse(file, headers={"Cache-Control": "no-store"})',
+                      routes_source)
+
     def test_final_output_has_vhs_preview_descriptor(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
