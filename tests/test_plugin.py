@@ -469,6 +469,8 @@ class CoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             first = director_rules.public_rules(directory)
             self.assertEqual(first["directory"], directory)
+            self.assertIn("相邻片段不采用完全相同", first["ai_rule"])
+            self.assertIn("间隔片段或重复音乐段落中复用", first["ai_rule"])
             self.assertEqual(json.loads(first["config_text"])["singing"]["allowed_framings"],
                              ["medium close-up"])
             updated = director_rules.write_rules(directory, {
