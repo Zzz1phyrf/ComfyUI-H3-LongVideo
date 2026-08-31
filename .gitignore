@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Runtime data belongs to the active ComfyUI user and output directories.
+H3LongVideo/
+models/
+output/
+temp/
+*.log
+

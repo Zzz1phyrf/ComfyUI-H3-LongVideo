@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "singing": {
+    "allowed_framings": [
+      "medium close-up"
+    ],
+    "allowed_angles": [
+      "front",
+      "front three-quarter right",
+      "front three-quarter left"
+    ],
+    "allowed_movements": [
+      "truck_left",
+      "truck_right"
+    ],
+    "movement_pattern": [
+      "truck_right",
+      "truck_right",
+      "truck_left",
+      "truck_left"
+    ],
+    "every_segment_moves": true,
+    "constant_subject_scale": true
+  },
+  "speaking": {
+    "framing": "medium close-up",
+    "angle": "front",
+    "movement": "steady",
+    "keep_composition_across_segments": true
+  }
+}
