@@ -90,14 +90,14 @@
 .h3lv-segments { margin-top: 14px; }
 .h3lv-card { margin: 8px 0; border: 1px solid #404956; border-radius: 8px; background: #20252d; }
 .h3lv-card > summary {
-  display: grid; grid-template-columns: minmax(260px, 1.2fr) minmax(180px, 1fr) auto auto;
+  display: grid; grid-template-columns: minmax(260px, 1.2fr) minmax(180px, 1fr) 96px;
   align-items: center; gap: 12px; padding: 11px 13px; cursor: pointer; list-style-position: inside;
 }
 .h3lv-card[open] > summary { border-bottom: 1px solid #3d4652; background: #252b34; }
 .h3lv-summary-main strong { color: #f6f8fa; }
 .h3lv-time, .h3lv-duration { color: #aeb8c6; font-variant-numeric: tabular-nums; }
-.h3lv-reason { overflow: hidden; color: #d5dde8; text-overflow: ellipsis; white-space: nowrap; }
-.h3lv-chip { padding: 3px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+.h3lv-reason { overflow: hidden; color: #d5dde8; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.h3lv-chip { justify-self: end; padding: 3px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
 .h3lv-chip.safe { color: #90efba; background: rgba(39,169,101,.18); }
 .h3lv-chip.review { color: #ffd36f; background: rgba(222,157,28,.17); }
 .h3lv-chip.risk { color: #ff9c9c; background: rgba(219,70,70,.18); }
@@ -137,7 +137,8 @@
   .h3lv-shade { padding: 0; }
   .h3lv-panel { height: 100vh; border-radius: 0; }
   .h3lv-card > summary { grid-template-columns: 1fr auto; }
-  .h3lv-reason { grid-column: 1 / -1; }
+  .h3lv-reason { grid-column: 1 / -1; grid-row: 2; justify-self: start; text-align: left; }
+  .h3lv-chip { grid-column: 2; grid-row: 1; }
   .h3lv-selected-bar audio { width: 100%; }
   .h3lv-card-body.has-preview { min-height: 0; padding-right: 14px; }
   .h3lv-segment-preview { position: static; width: 100%; margin: 0 0 12px; }

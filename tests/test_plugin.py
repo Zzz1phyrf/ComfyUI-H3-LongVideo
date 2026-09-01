@@ -81,6 +81,11 @@ class CoreTests(unittest.TestCase):
         self.assertIn('actionButton(promptActions, "编辑本段镜头简报"', script)
         self.assertNotIn('element("label", "结束时间（秒）", metrics)', script)
         self.assertIn("width: min(1440px, 100%)", styles)
+        self.assertIn(
+            "grid-template-columns: minmax(260px, 1.2fr) minmax(180px, 1fr) 96px",
+            styles,
+        )
+        self.assertIn(".h3lv-chip { justify-self: end;", styles)
         self.assertIn("video.src = outputPreviewUrl(plan.final_preview);", script)
         self.assertIn("row.video_preview?.filename", script)
         self.assertIn('request(endpoint("/reveal-final"), {})', script)
