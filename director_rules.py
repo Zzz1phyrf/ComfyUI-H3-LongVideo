@@ -1,4 +1,4 @@
-"""Editable director rules with a fixed, validated runtime contract."""
+"""Editable local singing and speaking rules with a validated runtime contract."""
 
 import copy
 import hashlib
@@ -7,78 +7,131 @@ from pathlib import Path
 import uuid
 
 
-AI_RULE_NAME = "ai_director_rule.txt"
 CONFIG_NAME = "director_config.json"
+MOVEMENTS = {
+    "steady", "dolly_in", "dolly_out", "truck_left", "truck_right",
+    "micro_reframe", "arc_left", "arc_right",
+}
+FRAMINGS = {"medium close-up", "medium shot"}
+ANGLES = {"front", "front three-quarter left", "front three-quarter right"}
 
 
 def _default_directory():
     return Path(__file__).with_name("defaults")
 
 
-def _read_defaults():
-    directory = _default_directory()
+def _read_default_config():
+    return json.loads((_default_directory() / CONFIG_NAME).read_text(encoding="utf-8"))
+
+
+def _string_list(source, name, allowed, *, minimum=1):
+    supplied = source.get(name)
+    if not isinstance(supplied, list) or len(supplied) < minimum:
+        raise ValueError(f"导演规则 {name} 至少需要 {minimum} 个值。")
+    cleaned = []
+    for item in supplied:
+        item = str(item).strip()
+        if item not in allowed:
+            raise ValueError(f"导演规则 {name} 包含不支持的值：{item}")
+        if item not in cleaned:
+            cleaned.append(item)
+    return cleaned
+
+
+def _movement_family(value):
+    if value.startswith("truck_"):
+        return "lateral"
+    if value.startswith("arc_"):
+        return "arc"
+    if value.startswith("dolly_"):
+        return "dolly"
+    if value == "micro_reframe":
+        return "micro"
+    return value
+
+
+def _upgrade_schema_1(value):
+    """Preserve an old movement vocabulary while adopting constrained pools."""
+    singing = value.get("singing") or {}
+    allowed = [str(item) for item in singing.get("allowed_movements") or []]
+    allowed = [item for item in allowed if item in MOVEMENTS and item != "steady"]
+    if len({_movement_family(item) for item in allowed}) < 2:
+        allowed = ["micro_reframe", "arc_left", "arc_right", "truck_left", "truck_right"]
+
+    def pool(preferred):
+        result = [item for item in preferred if item in allowed]
+        if len({_movement_family(item) for item in result}) < 2:
+            result = list(allowed)
+        return result
+
     return {
-        "ai_rule": (directory / AI_RULE_NAME).read_text(encoding="utf-8").strip(),
-        "config": json.loads((directory / CONFIG_NAME).read_text(encoding="utf-8")),
+        "schema": 2,
+        "singing": {
+            "allowed_framings": singing.get("allowed_framings") or ["medium close-up"],
+            "allowed_angles": singing.get("allowed_angles") or [
+                "front", "front three-quarter right", "front three-quarter left"],
+            "energy_movements": {
+                "low": pool(["micro_reframe", "arc_left", "arc_right", "dolly_out"]),
+                "medium": pool(["arc_left", "arc_right", "truck_left", "truck_right", "micro_reframe"]),
+                "high": pool(["dolly_in", "dolly_out", "arc_left", "arc_right", "truck_left", "truck_right"]),
+            },
+            "every_segment_moves": bool(singing.get("every_segment_moves", True)),
+            "no_adjacent_same_family": True,
+            "alternate_lateral_direction": True,
+            "avoid_direct_axis_cross": True,
+        },
+        "speaking": value.get("speaking") or {
+            "framing": "medium close-up", "angle": "front", "movement": "steady",
+            "keep_composition_across_segments": True,
+        },
     }
 
 
 def validate_config(value):
-    if not isinstance(value, dict) or int(value.get("schema", 0)) != 1:
-        raise ValueError("导演规则配置必须使用 schema 1。")
-    result = {"schema": 1}
+    if not isinstance(value, dict):
+        raise ValueError("导演规则配置必须是 JSON 对象。")
+    schema = int(value.get("schema", 0))
+    if schema == 1:
+        value = _upgrade_schema_1(value)
+    elif schema != 2:
+        raise ValueError("导演规则配置必须使用 schema 2。")
+
     singing = value.get("singing")
     speaking = value.get("speaking")
     if not isinstance(singing, dict) or not isinstance(speaking, dict):
-        raise ValueError("导演规则必须同时包含 singing 和 speaking。")
+        raise ValueError("运镜规则必须同时包含 singing 和 speaking。")
 
-    framing_values = {"medium close-up", "medium shot"}
-    angle_values = {"front", "front three-quarter left", "front three-quarter right"}
-    movement_values = {
-        "steady", "dolly_in", "truck_left", "truck_right",
-        "micro_reframe", "arc_left", "arc_right",
-    }
+    energy = singing.get("energy_movements")
+    if not isinstance(energy, dict):
+        raise ValueError("唱歌规则必须包含 energy_movements。")
+    energy_result = {}
+    for band in ("low", "medium", "high"):
+        values = _string_list(energy, band, MOVEMENTS - {"steady"}, minimum=2)
+        if len({_movement_family(item) for item in values}) < 2:
+            raise ValueError(f"唱歌规则 energy_movements.{band} 至少需要两类不同运镜。")
+        energy_result[band] = values
 
-    def string_list(source, name, allowed, unique=True):
-        supplied = source.get(name)
-        if not isinstance(supplied, list) or not supplied:
-            raise ValueError(f"导演规则 {name} 必须是非空数组。")
-        cleaned = []
-        for item in supplied:
-            item = str(item).strip()
-            if item not in allowed:
-                raise ValueError(f"导演规则 {name} 包含不支持的值：{item}")
-            if not unique or item not in cleaned:
-                cleaned.append(item)
-        return cleaned
-
+    singing_angles = _string_list(singing, "allowed_angles", ANGLES, minimum=2)
+    if "front" not in singing_angles:
+        raise ValueError("唱歌规则 allowed_angles 必须包含 front 以保持可读表演轴线。")
     singing_result = {
-        "allowed_framings": string_list(singing, "allowed_framings", framing_values),
-        "allowed_angles": string_list(singing, "allowed_angles", angle_values),
-        "allowed_movements": string_list(singing, "allowed_movements", movement_values),
-        # A shot rhythm is an ordered sequence. Repeated directions are
-        # meaningful because adjacent segments can deliberately continue the
-        # same screen motion before changing direction.
-        "movement_pattern": string_list(
-            singing, "movement_pattern", movement_values, unique=False),
+        "allowed_framings": _string_list(singing, "allowed_framings", FRAMINGS),
+        "allowed_angles": singing_angles,
+        "energy_movements": energy_result,
         "every_segment_moves": bool(singing.get("every_segment_moves", True)),
-        "constant_subject_scale": bool(singing.get("constant_subject_scale", True)),
+        "no_adjacent_same_family": bool(singing.get("no_adjacent_same_family", True)),
+        "alternate_lateral_direction": bool(singing.get("alternate_lateral_direction", True)),
+        "avoid_direct_axis_cross": bool(singing.get("avoid_direct_axis_cross", True)),
     }
-    if any(item not in singing_result["allowed_movements"]
-           for item in singing_result["movement_pattern"]):
-        raise ValueError("movement_pattern 只能使用 allowed_movements 中已允许的运镜。")
-    if singing_result["every_segment_moves"] and "steady" in singing_result["movement_pattern"]:
-        raise ValueError("every_segment_moves 为 true 时，movement_pattern 不能包含 steady。")
-    if "dolly_in" in singing_result["allowed_movements"] \
-            and "medium shot" not in singing_result["allowed_framings"]:
-        raise ValueError("允许 dolly_in 时必须同时允许 medium shot。")
-    if singing_result["constant_subject_scale"] and "dolly_in" in singing_result["movement_pattern"]:
-        raise ValueError("constant_subject_scale 为 true 时不能在 movement_pattern 中使用 dolly_in。")
+    if not singing_result["every_segment_moves"]:
+        raise ValueError("当前唱歌规则要求每段都有运镜，every_segment_moves 必须为 true。")
+    if not singing_result["no_adjacent_same_family"]:
+        raise ValueError("当前唱歌规则要求相邻片段运镜不重复，no_adjacent_same_family 必须为 true。")
 
     framing = str(speaking.get("framing", "")).strip()
     angle = str(speaking.get("angle", "")).strip()
     movement = str(speaking.get("movement", "")).strip()
-    if framing not in framing_values or angle not in angle_values or movement not in movement_values:
+    if framing not in FRAMINGS or angle not in ANGLES or movement not in MOVEMENTS:
         raise ValueError("口播规则包含不支持的景别、角度或运镜。")
     if movement != "steady":
         raise ValueError("当前口播模式使用固定机位，speaking.movement 必须为 steady。")
@@ -89,8 +142,7 @@ def validate_config(value):
         "keep_composition_across_segments": bool(
             speaking.get("keep_composition_across_segments", True)),
     }
-    result.update(singing=singing_result, speaking=speaking_result)
-    return result
+    return {"schema": 2, "singing": singing_result, "speaking": speaking_result}
 
 
 def _write_atomic(path, text):
@@ -102,70 +154,59 @@ def _write_atomic(path, text):
 
 def ensure_rules(directory):
     directory = Path(directory)
-    defaults = _read_defaults()
-    ai_path, config_path = directory / AI_RULE_NAME, directory / CONFIG_NAME
-    if not ai_path.is_file():
-        _write_atomic(ai_path, defaults["ai_rule"] + "\n")
+    config_path = directory / CONFIG_NAME
     if not config_path.is_file():
         _write_atomic(config_path, json.dumps(
-            validate_config(defaults["config"]), ensure_ascii=False, indent=2) + "\n")
+            validate_config(_read_default_config()), ensure_ascii=False, indent=2) + "\n")
     return directory
 
 
 def read_rules(directory):
     directory = ensure_rules(directory)
-    ai_rule = (directory / AI_RULE_NAME).read_text(encoding="utf-8").strip()
-    if not ai_rule:
-        raise ValueError("AI 导演规则不能为空。")
-    if len(ai_rule) > 30000:
-        raise ValueError("AI 导演规则超过 30000 字符，请精简后保存。")
     try:
-        config = json.loads((directory / CONFIG_NAME).read_text(encoding="utf-8"))
+        raw = json.loads((directory / CONFIG_NAME).read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ValueError("导演规则 JSON 格式无效。") from exc
-    config = validate_config(config)
+        raise ValueError("运镜规则 JSON 格式无效。") from exc
+    config = validate_config(raw)
     serialized = json.dumps(config, ensure_ascii=False, sort_keys=True)
-    revision = hashlib.sha256((ai_rule + "\n" + serialized).encode("utf-8")).hexdigest()[:12]
-    return {"ai_rule": ai_rule, "config": config, "revision": revision,
-            "directory": str(directory)}
+    revision = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:12]
+    return {"config": config, "revision": revision, "directory": str(directory)}
 
 
 def public_rules(directory):
     result = read_rules(directory)
-    return {"ai_rule": result["ai_rule"],
-            "config_text": json.dumps(result["config"], ensure_ascii=False, indent=2),
+    return {"config_text": json.dumps(result["config"], ensure_ascii=False, indent=2),
             "revision": result["revision"], "directory": result["directory"]}
 
 
 def write_rules(directory, payload):
     current = read_rules(directory)
-    ai_rule = str(payload.get("ai_rule", current["ai_rule"])).strip()
-    if not ai_rule:
-        raise ValueError("AI 导演规则不能为空。")
-    if len(ai_rule) > 30000:
-        raise ValueError("AI 导演规则超过 30000 字符，请精简后保存。")
     config_text = payload.get("config_text")
     try:
-        config = (current["config"] if config_text is None
-                  else json.loads(str(config_text)))
+        config = current["config"] if config_text is None else json.loads(str(config_text))
     except json.JSONDecodeError as exc:
-        raise ValueError("导演规则 JSON 格式无效。") from exc
+        raise ValueError("运镜规则 JSON 格式无效。") from exc
     config = validate_config(config)
     directory = Path(directory)
-    _write_atomic(directory / AI_RULE_NAME, ai_rule + "\n")
     _write_atomic(directory / CONFIG_NAME,
                   json.dumps(config, ensure_ascii=False, indent=2) + "\n")
     return public_rules(directory)
 
 
-def reset_rules(directory):
-    defaults = _read_defaults()
+def reset_rules(directory, mode=None):
     directory = Path(directory)
-    _write_atomic(directory / AI_RULE_NAME, defaults["ai_rule"] + "\n")
+    defaults = validate_config(_read_default_config())
+    if mode is not None:
+        mode = str(mode).strip()
+        if mode not in {"singing", "speaking"}:
+            raise ValueError("只能恢复 singing 或 speaking 的默认规则。")
+        config = read_rules(directory)["config"]
+        config[mode] = copy.deepcopy(defaults[mode])
+        defaults = validate_config(config)
     _write_atomic(directory / CONFIG_NAME,
-                  json.dumps(validate_config(defaults["config"]), ensure_ascii=False, indent=2) + "\n")
+                  json.dumps(defaults, ensure_ascii=False, indent=2) + "\n")
     return public_rules(directory)
 
 
 def default_config():
-    return copy.deepcopy(validate_config(_read_defaults()["config"]))
+    return copy.deepcopy(validate_config(_read_default_config()))

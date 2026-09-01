@@ -421,9 +421,8 @@ def camera_plan(mode, index, count, energy, median, previous_camera="", previous
 
 
 def director_preferences(plan):
-    """Normalize V3 controls while keeping legacy saved projects readable."""
+    """Normalize local-rule controls while keeping legacy saved projects readable."""
     supplied = plan.get("director") or {}
-    mode = supplied.get("mode", "rule")
     performance = supplied.get("performance_intensity", "auto")
     camera = supplied.get("camera_activity", "auto")
     widest = supplied.get("widest_framing", "medium close-up")
@@ -432,20 +431,15 @@ def director_preferences(plan):
         performance = "auto"
     if camera not in {"auto", "steady", "moderate", "dynamic"}:
         camera = "auto"
-    # Singing clips always use physical camera movement. ``steady`` remains
-    # readable only as a legacy saved-workflow value and maps to the gentlest
-    # supported moving plan. Speaking has its own locked-camera path below.
     if plan.get("mode") == "singing" and camera == "steady":
         camera = "moderate"
     if widest not in {"medium close-up", "medium shot"}:
         widest = "medium close-up"
-    if mode not in {"rule", "ai"}:
-        mode = "rule"
     rules = (validate_config(supplied["rule_config"])
              if isinstance(supplied.get("rule_config"), dict) else default_config())
-    return {"mode": mode, "performance_intensity": performance, "camera_activity": camera,
+    return {"mode": "rule", "performance_intensity": performance, "camera_activity": camera,
             "widest_framing": widest, "note": note, "rule_config": rules,
-            "ai_rule": str(supplied.get("ai_rule") or ""),
+            "schedule_seed": str(supplied.get("schedule_seed") or plan.get("id") or "h3lv"),
             "rule_revision": str(supplied.get("rule_revision") or "legacy")}
 
 
@@ -457,6 +451,84 @@ REFERENCE_LAYOUT_ALIASES = {
     "单人+场景：图1人物，图2场景": "solo_scene",
     "双图：图1人物，图2场景": "solo_scene",
 }
+
+REFERENCE_ROLE_LABELS = {
+    "performer": "主表演者",
+    "performer_environment": "人物与环境同图",
+    "performer_reference": "人物补充参考",
+    "environment": "场景环境",
+    "appearance": "服装或外形参考",
+    "prop": "道具参考",
+    "other": "其他可见参考",
+    "ignore": "不参与提示词",
+}
+
+
+def dynamic_reference_manifest(definitions, picture_count=None):
+    """Validate user-declared roles without inferring meaning from image count."""
+    if isinstance(definitions, str):
+        try:
+            definitions = json.loads(definitions or "[]")
+        except json.JSONDecodeError as exc:
+            raise ValueError("参考图职责设置无法读取，请重新打开“设置参考图职责”保存。") from exc
+    if isinstance(definitions, dict):
+        definitions = definitions.get("assets", [])
+    if not isinstance(definitions, list):
+        raise ValueError("参考图职责必须是按图片顺序保存的列表。")
+    count = int(picture_count if picture_count is not None else len(definitions))
+    if not 1 <= count <= 9:
+        raise ValueError("请连接 1至9 张参考图。")
+    if len(definitions) != count:
+        raise ValueError(f"已连接 {count} 张图，但参考图职责保存了 {len(definitions)} 项；请重新确认。")
+    assets = []
+    for index, supplied in enumerate(definitions, 1):
+        if not isinstance(supplied, dict):
+            raise ValueError(f"图{index}的参考职责无效。")
+        role = str(supplied.get("role") or "unspecified").strip()
+        if role not in REFERENCE_ROLE_LABELS:
+            raise ValueError(f"图{index}尚未指定参考职责，请打开“设置参考图职责”。")
+        name = str(supplied.get("name") or REFERENCE_ROLE_LABELS[role]).strip()[:80]
+        if role == "other" and not str(supplied.get("name") or "").strip():
+            raise ValueError(f"图{index}选择了“其他可见参考”，请填写它的名称。")
+        asset = {"id": f"ref_{index:02d}", "picture": index,
+                 "role": role, "name": name}
+        snapshot = str(supplied.get("snapshot") or "").strip()
+        if snapshot:
+            asset["snapshot"] = snapshot
+        assets.append(asset)
+    primary = [item for item in assets if item["role"] in {"performer", "performer_environment"}]
+    if len(primary) != 1:
+        raise ValueError("参考图职责中需要且只能指定1张“主表演者”或“人物与环境同图”。")
+    performer_pictures = [item["picture"] for item in assets
+                          if item["role"] in {"performer", "performer_environment",
+                                              "performer_reference", "appearance"}]
+    # A combined performer/environment image still defines only Subject 1.
+    # It must not recreate the old single-picture bug by inventing Subject 2.
+    environment_pictures = [item["picture"] for item in assets if item["role"] == "environment"]
+    subjects = []
+    subjects.append({"id": "performer_1", "subject": 1, "kind": "performer",
+                     "name": primary[0]["name"], "pictures": performer_pictures,
+                     "includes_environment": primary[0]["role"] == "performer_environment"})
+    next_subject = 2
+    if environment_pictures:
+        subjects.append({"id": "environment", "subject": next_subject, "kind": "environment",
+                         "name": "环境", "pictures": environment_pictures})
+        next_subject += 1
+    for item in assets:
+        if item["role"] in {"prop", "other"}:
+            subjects.append({"id": item["id"], "subject": next_subject,
+                             "kind": item["role"], "name": item["name"],
+                             "pictures": [item["picture"]]})
+            next_subject += 1
+    environment = next((item for item in subjects if item["kind"] == "environment"), None)
+    return {"schema": 3, "layout": "dynamic", "picture_count": count,
+            "assets": assets, "subjects": subjects,
+            "performers": [{"id": "performer_1", "subject": 1,
+                            "picture": primary[0]["picture"], "pictures": performer_pictures,
+                            "speaker": "S1"}],
+            "environment": ({"id": "environment", "subject": environment["subject"],
+                             "picture": environment_pictures[0], "pictures": environment_pictures}
+                            if environment else None)}
 
 def reference_manifest(layout="solo_scene"):
     """Return one stable picture/Subject contract for the whole project."""
@@ -473,7 +545,9 @@ def reference_manifest(layout="solo_scene"):
 
 def normalize_reference_manifest(plan):
     supplied = plan.get("references")
-    if isinstance(supplied, dict) and supplied.get("layout"):
+    if isinstance(supplied, dict) and supplied.get("schema") == 3:
+        manifest = dynamic_reference_manifest(supplied.get("assets", []), supplied.get("picture_count"))
+    elif isinstance(supplied, dict) and supplied.get("layout"):
         manifest = reference_manifest(supplied["layout"])
     else:
         # Legacy projects used Picture 1 as performer and Picture 2 as environment.
@@ -483,6 +557,21 @@ def normalize_reference_manifest(plan):
 
 
 def reference_brief_lines(manifest, mode="singing"):
+    if manifest.get("schema") == 3:
+        parts = []
+        for subject in manifest["subjects"]:
+            pictures = "、".join(f"<Picture {number}>" for number in subject["pictures"])
+            if subject["kind"] == "performer":
+                suffix = "及同图可见环境；环境不单独编号" if subject.get("includes_environment") else ""
+                role = f"{pictures}=主表演者 <Subject {subject['subject']}>{suffix}"
+            elif subject["kind"] == "environment":
+                role = f"{pictures}=场景环境 <Subject {subject['subject']}>"
+            else:
+                role = f"{pictures}={subject['name']} <Subject {subject['subject']}>"
+            parts.append(role)
+        vocal_action = "说话" if mode == "speaking" else "唱歌"
+        return "参考：动态参考图；" + "；".join(parts) + \
+            f"。 <Audio 1>=<Subject 1> 的{vocal_action}参考。\n"
     performer = manifest["performers"][0]
     environment = manifest["environment"]
     if manifest["layout"] == "single_composite":
@@ -514,7 +603,8 @@ def performance_direction(preference, band):
     }[resolved]
 
 
-def _start_composition(index, band, rows, sizes, previous_end, states, angles=None):
+def _start_composition(index, band, rows, sizes, previous_end, states, angles=None,
+                       seed_key="", avoid_axis_cross=True):
     if index == 0:
         has_vocal = bool(str(rows[index].get("text", "")).strip()) or "含识别人声" in str(rows[index].get("vocal_state", ""))
         if "medium shot" in sizes and band == "high":
@@ -541,24 +631,7 @@ def _start_composition(index, band, rows, sizes, previous_end, states, angles=No
             side = "right" if "right" in angle else ("left" if "left" in angle else "front")
             # A direct left-quarter/right-quarter reversal crosses the readable
             # performance axis and is harder to read than returning through front.
-            if previous_side != "front" and side != "front" and side != previous_side:
-                continue
-            # The real H3 acceptance renders showed that a one-step size change on
-            # the same frontal axis reads as an accidental jump cut. Size changes
-            # therefore need a supporting front-side angle change.
-            if framing != previous_end["framing"] and angle == previous_angle:
-                continue
-            # When both supported shot sizes are available, angle alone is not
-            # enough separation for independently generated clips. Real renders
-            # read as a jump when the previous ending and next opening keep the
-            # same scale, even with a front/three-quarter angle change.
-            allow_moving_angle_cut = (
-                states
-                and states[-1].get("camera_move_family") == "dolly in"
-                and framing == previous_end["framing"] == "medium close-up"
-                and angle != previous_angle
-            )
-            if len(sizes) > 1 and framing == previous_end["framing"] and not allow_moving_angle_cut:
+            if avoid_axis_cross and previous_side != "front" and side != "front" and side != previous_side:
                 continue
             score = 0.0
             if framing != target_size:
@@ -568,68 +641,98 @@ def _start_composition(index, band, rows, sizes, previous_end, states, angles=No
                 score += .25
             if states and angle == states[-1]["camera_start_angle"]:
                 score += .3
-            score += angles.index(angle)*.01 + sizes.index(framing)*.001
-            candidates.append((score, framing, angle))
-    _, framing, angle = min(candidates)
+            tie = hashlib.sha256(
+                f"{seed_key}|composition|{index}|{framing}|{angle}".encode("utf-8")
+            ).hexdigest()
+            candidates.append((score, tie, framing, angle))
+    _, _, framing, angle = min(candidates)
     return framing, angle
 
 
-def _movement_for(framing, angle, band, activity, sizes, states, rules=None):
+def _movement_type_family(value):
+    if value.startswith("truck_") or value == "lateral":
+        return "lateral"
+    if value.startswith("arc_") or value == "arc":
+        return "arc"
+    if value.startswith("dolly_") or value in {"dolly in", "dolly out"}:
+        return "dolly"
+    if value in {"micro_reframe", "micro reframe"}:
+        return "micro"
+    return value
+
+
+def _select_movement(rules, band, states, seed_key):
+    candidates = list(rules["energy_movements"][band])
+    previous_family = _movement_type_family(
+        states[-1].get("camera_move_type") or states[-1].get("camera_move_family", "")
+    ) if states else None
+    if rules.get("no_adjacent_same_family") and previous_family:
+        filtered = [item for item in candidates if _movement_type_family(item) != previous_family]
+        if filtered:
+            candidates = filtered
+
+    if rules.get("alternate_lateral_direction"):
+        last_lateral = next((state for state in reversed(states)
+                             if _movement_type_family(state.get("camera_move_type") or
+                                state.get("camera_move_family", "")) == "lateral"), None)
+        if last_lateral and last_lateral.get("camera_move_direction") in {"left", "right"}:
+            opposite = "truck_right" if last_lateral["camera_move_direction"] == "left" else "truck_left"
+            if opposite in candidates:
+                candidates = [item for item in candidates
+                              if _movement_type_family(item) != "lateral" or item == opposite]
+
+    if not candidates:
+        raise ValueError(f"唱歌规则在 {band} 能量下没有可用的非重复运镜。")
+    return min(candidates, key=lambda item: hashlib.sha256(
+        f"{seed_key}|movement|{len(states)}|{band}|{item}".encode("utf-8")
+    ).hexdigest())
+
+
+def _movement_for(framing, angle, band, activity, sizes, states, rules=None, seed_key=""):
     rules = rules or default_config()["singing"]
     resolved = activity if activity != "auto" else {
         "low": "moderate", "medium": "moderate", "high": "dynamic"}[band]
     if resolved == "steady":
         resolved = "moderate"
-    recent_families = [state.get("camera_move_family") for state in states[-2:]]
-    previous_family = states[-1].get("camera_move_family") if states else None
-    previous_direction = states[-1].get("camera_move_direction") if states else None
-    prior_lateral_direction = next((
-        state.get("camera_move_direction") for state in reversed(states)
-        if state.get("camera_move_family") == "lateral"
-    ), None)
-
-    pattern = list(rules.get("movement_pattern") or [])
-    planned = pattern[len(states) % len(pattern)] if pattern else None
-    allowed = set(rules.get("allowed_movements") or ["truck_left", "truck_right"])
-    if planned == "steady" or (allowed == {"steady"}):
-        return (framing, "steady", "", "a steady locked-off camera",
-                "camera is still at the cut", "camera remains still at the cut")
-    if framing == "medium shot" and "dolly_in" in allowed and planned in {None, "dolly_in"}:
+    planned = _select_movement(rules, band, states, seed_key)
+    if planned == "dolly_in":
         pace = "very slow controlled" if band == "low" else (
-            "controlled" if resolved == "moderate" else "deliberate controlled")
-        return ("medium close-up", "dolly in", "forward",
-                f"a {pace} physical dolly in from waist-up to chest-up framing with readable background parallax",
-                "dolly-in motion is already gently readable at the cut", "dolly-in motion remains active at the cut")
-    if planned == "micro_reframe" or allowed == {"micro_reframe"}:
+            "controlled" if resolved == "moderate" else "deliberate but restrained")
+        return (framing, "dolly in", "forward",
+                f"a {pace} short physical dolly in within the established {framing}; "
+                "the performer becomes only slightly larger and remains chest-up, with subtle readable background parallax",
+                "short dolly-in motion is already gently readable at the cut",
+                "short dolly-in motion remains active at the cut", planned)
+    if planned == "dolly_out":
+        pace = "very slow controlled" if band == "low" else "controlled"
+        return (framing, "dolly out", "backward",
+                f"a {pace} short physical dolly out within the established {framing}; "
+                "the performer becomes only slightly smaller while the frame remains above the waist, with subtle readable background parallax",
+                "short dolly-out motion is already gently readable at the cut",
+                "short dolly-out motion remains active at the cut", planned)
+    if planned == "micro_reframe":
         pace = "barely perceptible" if band == "low" else "restrained"
         return (framing, "micro reframe", "", (
                 f"a {pace} tripod-based breathing reframe around the established composition; "
                 "the performer, eye line and background landmarks remain spatially anchored"),
                 "micro-reframing is already gently readable at the cut",
-                "micro-reframing remains active at the cut")
+                "micro-reframing remains active at the cut", planned)
     if planned in {"arc_left", "arc_right"}:
         direction = "left" if planned == "arc_left" else "right"
         return (framing, "arc", direction, (
                 f"a short shallow arc move a few degrees to the {direction} around the performer; "
                 f"{framing} scale and centered eye line stay stable while local background parallax remains subtle"),
                 f"shallow arc motion to the {direction} is already gently readable at the cut",
-                f"shallow arc motion to the {direction} remains active at the cut")
-    if planned in {"truck_left", "truck_right"}:
-        direction = "left" if planned == "truck_left" else "right"
-    elif recent_families == ["lateral", "lateral"] and previous_direction:
-        direction = "right" if previous_direction == "left" else "left"
-    elif previous_family != "lateral" and prior_lateral_direction:
-        direction = "right" if prior_lateral_direction == "left" else "left"
-    else:
-        direction = previous_direction if previous_family == "lateral" else (
-            "left" if "right" in angle else "right")
+                f"shallow arc motion to the {direction} remains active at the cut", planned)
+    direction = "left" if planned == "truck_left" else "right"
     background = "right" if direction == "left" else "left"
     speed = "slow" if resolved == "moderate" else "deliberate"
     move = (f"a {speed} lateral camera truck to the {direction} at a constant viewing angle; "
-            f"reference-stage landmarks slide {background} relative to the singer while {framing} framing is maintained")
+            f"background landmarks shift briefly {background} relative to the singer while {framing} framing is maintained; "
+            "the move stays short and does not become continuous background travel")
     return (framing, "lateral", direction, move,
             f"lateral motion to the {direction} is already gently readable at the cut",
-            f"lateral motion to the {direction} remains active at the cut")
+            f"lateral motion to the {direction} remains active at the cut", planned)
 
 
 def _cut_relationship(previous_end, framing, angle, previous_state, current_family, current_direction):
@@ -659,6 +762,14 @@ def _cut_relationship(previous_end, framing, angle, previous_state, current_fami
     return strategy, reason, risk
 
 
+def _arc_ending_angle(angle, direction, allowed_angles):
+    angle_order = ["front three-quarter left", "front", "front three-quarter right"]
+    position = angle_order.index(angle)
+    step = -1 if direction == "left" else 1
+    candidate = angle_order[max(0, min(len(angle_order) - 1, position + step))]
+    return candidate if candidate in allowed_angles else angle
+
+
 def camera_sequence(mode, rows, director=None):
     """Plan the full editorial sequence from relative audio evidence and prior camera state."""
     prefs = director or {"performance_intensity": "auto", "camera_activity": "auto",
@@ -678,7 +789,7 @@ def camera_sequence(mode, rows, director=None):
             "entry_motion_state": "still", "exit_motion_state": "still",
             "previous_end_framing": framing, "previous_end_angle": angle,
             "exit_cut_strategy": "locked-camera continuity cut" if index + 1 < len(rows) else "ending",
-            "camera_move_family": "steady", "camera_move_direction": "",
+            "camera_move_family": "steady", "camera_move_direction": "", "camera_move_type": "steady",
             "relative_energy": "medium",
             "performance_direction": "restrained fixed-camera spoken delivery with direct gaze and compact natural gestures",
             "composition_anchor": "speaker centered with a stable upper-third eye line, direct reference-consistent gaze, shoulder line, hand position and visible tabletop props",
@@ -688,23 +799,21 @@ def camera_sequence(mode, rows, director=None):
     if prefs["widest_framing"] == "medium close-up":
         sizes = [item for item in sizes if item == "medium close-up"] or ["medium close-up"]
     angles = list(singing["allowed_angles"])
+    seed_key = f"{prefs.get('schedule_seed', 'h3lv')}|{prefs.get('rule_revision', 'legacy')}"
     bands = energy_bands(rows)
     states = []
     previous_end = {"framing": "medium close-up", "angle": "front", "motion": "still"}
     for index, row in enumerate(rows):
         band = bands[index]
         framing, angle = _start_composition(
-            index, band, rows, sizes, previous_end, states, angles=angles)
-        pattern = singing.get("movement_pattern") or []
-        planned = pattern[index % len(pattern)] if pattern else None
-        if planned in {"truck_left", "truck_right", "micro_reframe", "arc_left", "arc_right"} \
-                and "medium close-up" in sizes:
-            framing = "medium close-up"
-        elif planned == "dolly_in" and "medium shot" in sizes:
-            framing = "medium shot"
-        ending, family, direction, move, entry_motion, exit_motion = _movement_for(
-            framing, angle, band, prefs["camera_activity"], sizes, states, rules=singing)
+            index, band, rows, sizes, previous_end, states, angles=angles,
+            seed_key=seed_key, avoid_axis_cross=singing.get("avoid_direct_axis_cross", True))
+        ending, family, direction, move, entry_motion, exit_motion, movement_type = _movement_for(
+            framing, angle, band, prefs["camera_activity"], sizes, states,
+            rules=singing, seed_key=seed_key)
         ending_angle = angle
+        if family == "arc":
+            ending_angle = _arc_ending_angle(angle, direction, angles)
         if index == 0:
             strategy, reason, risk = "opening", "no preceding edit", "low"
         else:
@@ -718,6 +827,7 @@ def camera_sequence(mode, rows, director=None):
             "previous_end_framing": previous_end["framing"],
             "previous_end_angle": previous_end["angle"],
             "camera_move_family": family, "camera_move_direction": direction,
+            "camera_move_type": movement_type,
             "relative_energy": band,
             "performance_direction": performance_direction(prefs["performance_intensity"], band),
             "composition_anchor": "performer centered with the eye line near the upper third; reference-consistent gaze and microphone screen side",
@@ -725,143 +835,6 @@ def camera_sequence(mode, rows, director=None):
         previous_end = {"framing": ending, "angle": ending_angle, "motion": exit_motion}
     for index, state in enumerate(states):
         state["exit_cut_strategy"] = states[index + 1]["entry_cut_strategy"] if index + 1 < len(states) else "ending"
-    return states
-
-
-def ai_camera_sequence(mode, rows, director, items, enforce_motion_distribution=False):
-    """Validate a compact AI shot list and expand it into the trusted camera-state schema."""
-    if mode == "speaking":
-        return camera_sequence(mode, rows, director)
-    if not isinstance(items, list) or len(items) != len(rows):
-        raise ValueError("AI导演返回的分段数量与音频分段不一致。")
-    rules = validate_config(director.get("rule_config") or default_config())["singing"]
-    sizes = set(rules["allowed_framings"])
-    if director.get("widest_framing") == "medium close-up":
-        sizes = {"medium close-up"}
-    angles = set(rules["allowed_angles"])
-    movements = set(rules["allowed_movements"])
-    require_motion = bool(rules.get("every_segment_moves")) or enforce_motion_distribution
-    bands = energy_bands(rows)
-    states = []
-    previous_end = {"framing": "medium close-up", "angle": "front", "motion": "still"}
-    for index, item in enumerate(items):
-        if not isinstance(item, dict) or int(item.get("index", -1)) != index:
-            raise ValueError(f"AI导演第 {index+1} 段缺少正确的 index。")
-        framing = item.get("opening_framing")
-        angle = item.get("opening_angle")
-        movement = item.get("movement")
-        if movement == "steady" and require_motion:
-            raise ValueError(f"AI导演第 {index+1} 段使用了固定机位；唱歌模式要求每段都有真实运镜。")
-        if framing not in sizes or angle not in angles or movement not in movements:
-            raise ValueError(f"AI导演第 {index+1} 段包含不支持的景别、角度或运镜。")
-        if index:
-            current_family = "lateral" if movement in {"truck_left", "truck_right"} else (
-                "arc" if movement in {"arc_left", "arc_right"} else (
-                    "micro reframe" if movement == "micro_reframe" else (
-                        "dolly in" if movement == "dolly_in" else "steady")))
-            current_direction = "left" if movement == "truck_left" else (
-                "right" if movement == "truck_right" else (
-                    "left" if movement == "arc_left" else (
-                        "right" if movement == "arc_right" else ("forward" if movement == "dolly_in" else ""))))
-            same_lateral_motion_match = (
-                states
-                and states[-1].get("camera_move_family") == current_family == "lateral"
-                and states[-1].get("camera_move_direction") == current_direction
-                and framing == previous_end["framing"]
-            )
-            previous_side = "right" if "right" in previous_end["angle"] else (
-                "left" if "left" in previous_end["angle"] else "front")
-            current_side = "right" if "right" in angle else ("left" if "left" in angle else "front")
-            if previous_side != "front" and current_side != "front" and current_side != previous_side:
-                # Preserve a proven same-direction lateral motion match. When
-                # the movement reverses, return through front instead of
-                # rejecting the whole AI draft for a repairable angle choice.
-                if same_lateral_motion_match:
-                    angle = previous_end["angle"]
-                    item["opening_angle"] = angle
-                elif "front" in angles:
-                    angle = "front"
-                    item["opening_angle"] = angle
-                else:
-                    raise ValueError(
-                        f"AI导演第 {index+1} 段需要经过正面机位完成换向，但当前导演规则未允许 front。")
-            size_changed = framing != previous_end["framing"]
-            angle_changed = angle != previous_end["angle"]
-            allow_moving_angle_cut = (
-                states
-                and states[-1].get("camera_move_family") == "dolly in"
-                and framing == previous_end["framing"] == "medium close-up"
-                and angle_changed
-                and movement in {"truck_left", "truck_right"}
-            )
-            if not size_changed and not angle_changed and not same_lateral_motion_match:
-                raise ValueError(f"AI导演第 {index+1} 段与上一段结束景别和机位完全相同，无法形成明确剪辑关系。")
-            if (len(sizes) > 1 and (not size_changed or not angle_changed)
-                    and not allow_moving_angle_cut and not same_lateral_motion_match):
-                raise ValueError(f"AI导演第 {index+1} 段必须同时改变景别和前侧机位；实测只改变其中一项容易形成跳切。")
-
-        if movement == "steady":
-            ending, family, direction = framing, "steady", ""
-            move = "a steady locked-off camera"
-            entry_motion = "camera is still at the cut"
-            exit_motion = "camera remains still at the cut"
-        elif movement == "dolly_in":
-            if framing != "medium shot":
-                raise ValueError(f"AI导演第 {index+1} 段前推必须从 medium shot 开始。")
-            ending, family, direction = "medium close-up", "dolly in", "forward"
-            move = "a controlled physical dolly in from waist-up to chest-up framing with readable background parallax"
-            entry_motion = "dolly-in motion is already gently readable at the cut"
-            exit_motion = "dolly-in motion remains active at the cut"
-        elif movement == "micro_reframe":
-            ending, family, direction = framing, "micro reframe", ""
-            move = ("a restrained tripod-based breathing reframe around the established composition; "
-                    "the performer, eye line and background landmarks remain spatially anchored")
-            entry_motion = "micro-reframing is already gently readable at the cut"
-            exit_motion = "micro-reframing remains active at the cut"
-        elif movement in {"arc_left", "arc_right"}:
-            if framing != "medium close-up":
-                raise ValueError(f"AI导演第 {index+1} 段小弧度绕拍只允许使用 medium close-up。")
-            ending, family = framing, "arc"
-            direction = "left" if movement == "arc_left" else "right"
-            move = (f"a short shallow arc move a few degrees to the {direction} around the performer; "
-                    "medium close-up scale and centered eye line stay stable while local background parallax remains subtle")
-            entry_motion = f"shallow arc motion to the {direction} is already gently readable at the cut"
-            exit_motion = f"shallow arc motion to the {direction} remains active at the cut"
-        else:
-            if framing != "medium close-up":
-                raise ValueError(f"AI导演第 {index+1} 段横移只允许使用 medium close-up；中景横移实测容易变成大幅变焦。")
-            ending, family = framing, "lateral"
-            direction = "left" if movement == "truck_left" else "right"
-            background = "right" if direction == "left" else "left"
-            move = (f"a controlled lateral camera truck to the {direction} at a constant viewing angle; "
-                    f"reference-stage landmarks slide {background} relative to the performers while {framing} framing is maintained")
-            entry_motion = f"lateral motion to the {direction} is already gently readable at the cut"
-            exit_motion = f"lateral motion to the {direction} remains active at the cut"
-
-        if index == 0:
-            strategy, reason, risk = "opening", "no preceding edit", "low"
-        else:
-            strategy, reason, risk = _cut_relationship(previous_end, framing, angle, states[-1], family, direction)
-        states.append({
-            "camera_start": framing, "camera_end": ending,
-            "camera_start_angle": angle, "camera_end_angle": angle,
-            "camera_move": move, "entry_cut_strategy": strategy,
-            "entry_cut_risk": risk, "entry_cut_reason": reason,
-            "entry_motion_state": entry_motion, "exit_motion_state": exit_motion,
-            "previous_end_framing": previous_end["framing"],
-            "previous_end_angle": previous_end["angle"],
-            "camera_move_family": family, "camera_move_direction": direction,
-            "relative_energy": bands[index],
-            "performance_direction": performance_direction("auto", bands[index]),
-            "composition_anchor": "performer centered with the eye line near the upper third; reference-consistent gaze and microphone screen side",
-        })
-        previous_end = {"framing": ending, "angle": angle, "motion": exit_motion}
-    if require_motion:
-        moving = sum(item.get("movement") != "steady" for item in items)
-        if moving != len(items):
-            raise ValueError(f"AI导演运镜密度不足：当前 {moving}/{len(items)} 段，唱歌模式要求每段都有真实运镜。")
-    for index, state in enumerate(states):
-        state["exit_cut_strategy"] = states[index+1]["entry_cut_strategy"] if index+1 < len(states) else "ending"
     return states
 
 
@@ -906,19 +879,20 @@ def _zh_camera_operation(row, framing, ending):
     family = row.get("camera_move_family")
     direction = row.get("camera_move_direction")
     if family == "steady":
-        return f"固定机位，始终保持{_zh_framing(framing)}，仅保留人物自身的自然表演动作"
+        return "固定机位，人物与背景构图保持稳定"
     if family == "dolly in":
-        return f"摄影机平稳前移，由{_zh_framing(framing)}推进到{_zh_framing(ending)}；人物尺度逐渐增大，背景地标产生可见视差"
+        return f"摄影机短距离缓慢前移，人物仅轻微变大并保持{_zh_framing(framing)}，背景产生轻微视差"
     if family == "dolly out":
-        return f"摄影机平稳后移，由{_zh_framing(framing)}拉开到{_zh_framing(ending)}；人物尺度逐渐减小，背景地标产生可见视差"
+        return f"摄影机短距离缓慢后移，人物仅轻微变小并保持{_zh_framing(framing)}，背景产生轻微视差"
     if family == "micro reframe":
-        return f"摄影机以三脚架为基准做轻微呼吸式构图调整，始终保持{_zh_framing(framing)}；人物、眼线和背景锚点保持稳定"
+        return "摄影机仅做轻微呼吸式构图调整，人物、眼线和背景保持稳定"
     if family == "arc":
         side = "左侧" if direction == "left" else "右侧"
-        return f"摄影机围绕人物向{side}做数度的小弧线移动，始终保持{_zh_framing(framing)}和人物中心；背景只产生轻微局部视差"
+        return (f"摄影机实体向{side}环绕人物约20度，人物保持居中，"
+                "背景产生清晰但克制的局部视差；不是原地摇镜")
     side = "左侧" if direction == "left" else "右侧"
     background = "右移" if direction == "left" else "左移"
-    return f"摄影机以固定观看角度向{side}平稳横移，始终保持{_zh_framing(framing)}；背景地标相对人物向画面{background}"
+    return f"摄影机向{side}短距离平稳横移，人物保持居中，背景短暂向画面{background}产生视差"
 
 
 def _zh_motion(row, entry=True):
@@ -940,76 +914,179 @@ def _zh_motion(row, entry=True):
 
 
 def segment_brief(plan, row, framing, ending, move, previous_frame):
-    generation_duration = row["generation_frames"]/24
     mode = plan["mode"]
-    prefs = director_preferences(plan)
-    references = normalize_reference_manifest(plan)
     if mode == "speaking":
-        opening = "中近景（胸部以上），正面，人物居中，眼线位于画面上三分之一附近"
-        camera = "固定机位；全程保持相同景别、人物尺度、背景透视和构图"
-        ending_text = opening
-        entry = "沿用上一段相同的人物位置、背景透视与光线" if row["index"] else "开场"
-        exit_motion = "静止"
+        camera_plan = ("中近景（胸部以上）正面固定机位，人物居中，眼线位于画面上三分之一附近；"
+                       "全程不推拉、不平移、不摇摄、不变焦，人物尺度、背景透视和构图保持稳定")
         performance = "自然口型和克制的小幅动作"
-        mode_label = "口播"
     else:
-        opening = (f"{_zh_framing(framing)}，{_zh_angle(row.get('camera_start_angle', 'front'))}，"
-                   "人物居中，眼线位于画面上三分之一附近")
+        opening = f"{_zh_framing(framing)}{_zh_angle(row.get('camera_start_angle', 'front'))}开场，人物居中"
         camera = _zh_camera_operation(row, framing, ending)
-        ending_text = (f"{_zh_framing(ending)}，{_zh_angle(row.get('camera_end_angle', 'front'))}，"
-                       "保持人物中心和眼线连续")
-        if row["index"] == 0:
-            entry = "开场"
-        else:
-            entry = (f"承接上一段结束时的{_zh_framing(row.get('previous_end_framing', previous_frame))}和人物位置，"
-                     f"以{_zh_cut(row.get('entry_cut_strategy', 'reviewed'))}切入")
+        ending_text = f"{_zh_framing(ending)}{_zh_angle(row.get('camera_end_angle', 'front'))}"
         exit_motion = _zh_motion(row, entry=False)
+        ending_state = "静止结束" if exit_motion == "静止" else f"{exit_motion}至片段结束"
+        camera_plan = f"{opening}；{camera}；结束于{ending_text}，{ending_state}"
         performance = _zh_performance(row.get('performance_direction', 'natural controlled performance'), mode)
-        mode_label = "唱歌"
     return (
-        "协议：H3LV_SEGMENT_V1\n"
-        + f"片段：第 {row['index']+1}/{len(plan['segments'])} 段\n"
-        + f"模式：{mode_label}\n"
-        + f"生成时长：{generation_duration:.3f} 秒\n"
-        + "参考角色：" + reference_brief_lines(references, mode).removeprefix("参考：")
-        + f"开场构图：{opening}\n"
-        + f"段内运镜：{camera}\n"
-        + f"结束构图：{ending_text}\n"
-        + f"入口剪辑：{entry}\n"
-        + f"出口运动状态：{exit_motion}\n"
-        + f"表演：{performance}\n"
-        + "手持道具：以 <Picture 1> 中清晰可见项目为准；自动简报未识别具体清单，可手动改为“无”或列出具体项目\n"
-        + "穿戴配饰：以 <Picture 1> 中清晰可见项目为准；自动简报未识别具体清单，可手动改为“无”或列出具体项目\n"
+        f"镜头方案：{camera_plan}\n"
+        + f"表演节奏：{performance}\n"
     )
 
 
-H3LV_SEGMENT_FIELDS = (
-    "协议", "片段", "模式", "生成时长", "参考角色", "开场构图", "段内运镜",
-    "结束构图", "入口剪辑", "出口运动状态", "表演", "手持道具", "穿戴配饰",
+H3LV_CAMERA_FIELDS = ("镜头方案", "表演节奏")
+H3LV_CAMERA_LEGACY_FIELDS = (
+    "生成时长", "开场构图", "段内运镜", "结束构图",
+    "入口衔接", "出口运动状态", "表演节奏",
 )
 
 
 def validate_segment_brief(value):
-    """Validate the editable V1 handoff while allowing legacy saved projects."""
+    """Validate the material-agnostic camera handoff while allowing legacy projects."""
     text = str(value or "").strip()
-    if not text.startswith("协议：H3LV_SEGMENT_V1"):
+    if re.search(r"<(?:Picture|Subject)\s+\d+>", text):
+        raise ValueError("分段运镜简报不能声明参考图或主体关系；请在提示词小助手的用户提示词中填写素材说明。")
+    if text.startswith("协议：H3LV_SEGMENT_V1"):
         return text
     fields = {}
     for line in text.splitlines():
         if "：" in line:
             name, content = line.split("：", 1)
             fields[name.strip()] = content.strip()
-    missing = [name for name in H3LV_SEGMENT_FIELDS if not fields.get(name)]
-    if missing:
-        raise ValueError("分段镜头简报缺少字段：" + "、".join(missing))
-    if fields["协议"] != "H3LV_SEGMENT_V1":
+    if "协议" in fields and fields["协议"] != "H3LV_CAMERA_V1":
         raise ValueError("分段镜头简报协议版本无效。")
-    if "固定机位" in fields["段内运镜"] and fields["出口运动状态"] != "静止":
-        raise ValueError("固定机位的出口运动状态必须为“静止”。")
-    if "单图" in fields["参考角色"] and "<Subject 2>" in fields["参考角色"]:
-        raise ValueError("单图简报不能定义 <Subject 2>。")
-    if "双图" in fields["参考角色"] and "<Picture 2>" not in fields["参考角色"]:
-        raise ValueError("双图简报必须定义 <Picture 2> 环境。")
+    if "镜头方案" in fields:
+        missing = [name for name in H3LV_CAMERA_FIELDS if not fields.get(name)]
+        if missing:
+            raise ValueError("分段镜头简报缺少字段：" + "、".join(missing))
+        return text
+    if any(name in fields for name in H3LV_CAMERA_LEGACY_FIELDS):
+        missing = [name for name in H3LV_CAMERA_LEGACY_FIELDS if not fields.get(name)]
+        if missing:
+            raise ValueError("旧版分段镜头简报缺少字段：" + "、".join(missing))
+        if "固定机位" in fields["段内运镜"] and fields["出口运动状态"] != "静止":
+            raise ValueError("固定机位的出口运动状态必须为“静止”。")
+        return text
+    if "表演节奏" in fields:
+        raise ValueError("分段镜头简报缺少字段：镜头方案")
+    return text
+
+
+H3_REF2VA_SECTIONS = (
+    "subject_definitions", "summary", "retention_analysis", "detailed_description",
+    "overall_soundscape", "non_diegetic_music",
+)
+
+
+def _english_angle(value):
+    return {
+        "front": "frontal",
+        "front three-quarter left": "front three-quarter left",
+        "front three-quarter right": "front three-quarter right",
+    }.get(value, "frontal")
+
+
+def _composer_subjects(manifest):
+    if manifest.get("schema") == 3:
+        return list(manifest.get("subjects") or [])
+    performer = manifest["performers"][0]
+    subjects = [{"subject": 1, "kind": "performer", "name": "visible performer",
+                 "pictures": [performer["picture"]]}]
+    if manifest.get("layout") != "single_composite" and manifest.get("environment"):
+        environment = manifest["environment"]
+        subjects.append({"subject": environment["subject"], "kind": "environment",
+                         "name": "environment", "pictures": [environment["picture"]]})
+    return subjects
+
+
+def compose_h3_prompt(plan, row):
+    """Render trusted shot state into Ref2VA English without another model call."""
+    manifest = normalize_reference_manifest(plan)
+    subjects = _composer_subjects(manifest)
+    definitions, retention = [], []
+    for subject in subjects:
+        number = int(subject["subject"])
+        pictures = list(dict.fromkeys(int(value) for value in subject.get("pictures") or []))
+        sources = " and ".join(f"<Picture {value}>" for value in pictures)
+        if subject["kind"] == "performer":
+            visible_scope = ("identity, facial features, hairstyle, body proportions, clothing, "
+                             "only the worn accessories or handheld items visibly present, and the complete visible setting"
+                             if subject.get("includes_environment") else
+                             "identity, facial features, hairstyle, body proportions, clothing, and only the worn accessories or handheld items visibly present")
+            definitions.append(
+                f"<Subject {number}> is the visible on-camera performer defined by {sources}, "
+                f"preserving the referenced {visible_scope} in those references.")
+            retention.append(
+                f"<Subject {number}> (appears in [Shot 1]): fully_preserved - the referenced performer identity, "
+                "appearance, clothing, and visible carried or worn items remain consistent.")
+        elif subject["kind"] == "environment":
+            definitions.append(
+                f"<Subject {number}> is the visible environment defined by {sources}, preserving its spatial layout, "
+                "landmarks, materials, lighting, and color relationships.")
+            retention.append(
+                f"<Subject {number}> (appears in [Shot 1]): fully_preserved - the referenced environment layout, "
+                "landmarks, lighting, and color relationships remain consistent.")
+        else:
+            name = str(subject.get("name") or "visible reference item")
+            definitions.append(
+                f"<Subject {number}> is {name}, defined by {sources} and used only in that declared visible role.")
+            retention.append(
+                f"<Subject {number}> (appears in [Shot 1] only when visible in the reference composition): "
+                f"fully_preserved - the declared {name} reference remains consistent.")
+    action = "spoken delivery" if plan.get("mode") == "speaking" else "singing performance"
+    definitions.append(f"<Audio 1> is the vocal-performance reference for <Subject 1> (S1), guiding visible mouth articulation, {action} timing, pauses, and breathing.")
+    retention.append("<Audio 1>: reference - the current segment audio guides the visible vocal performance of <Subject 1> (S1) without being copied as the generated soundtrack.")
+
+    duration = float(row["generation_frames"]) / 24.0
+    environment = next((item for item in subjects if item["kind"] == "environment"), None)
+    environment_phrase = f" within <Subject {environment['subject']}>" if environment else " within the referenced visible setting"
+    summary = (f"[reference generation + audio reference] {duration:.3f} seconds, one continuous shot, "
+               f"{action}, with <Subject 1> as the on-camera performer{environment_phrase}; "
+               "<Audio 1> guides the visible vocal timing.")
+
+    framing = str(row.get("camera_start") or "medium close-up")
+    ending = str(row.get("camera_end") or framing)
+    angle = _english_angle(row.get("camera_start_angle"))
+    ending_angle = _english_angle(row.get("camera_end_angle"))
+    camera = str(row.get("camera_move") or "a steady locked-off camera")
+    anchor = str(row.get("composition_anchor") or "performer centered with a stable upper-third eye line")
+    performance = str(row.get("performance_direction") or (
+        "restrained fixed-camera spoken delivery with compact natural gestures"
+        if plan.get("mode") == "speaking" else
+        "natural music-driven expression with controlled head, shoulder and free-hand motion"))
+    vocal = "speaks" if plan.get("mode") == "speaking" else "sings"
+    detailed = (
+        f"[Shot 1] The shot opens in a {framing} from a {angle} view, with <Subject 1> (S1) {anchor}. "
+        f"The camera performs {camera}. <Subject 1> {vocal} in visible synchronization with <Audio 1>, "
+        f"using {performance}. The performance remains one continuous shot with natural mouth articulation, blinking, "
+        f"breathing, and restrained body motion. The shot ends in a {ending} from a {ending_angle} view while preserving "
+        "the declared reference identities, clothing, visible items, environment geometry, perspective, and lighting. "
+        "No additional performer, worn accessory, handheld prop, or cut is introduced.")
+    prompt = (
+        "subject_definitions:\n" + "\n".join(definitions) + "\n\n"
+        "summary:\n" + summary + "\n\n"
+        "retention_analysis:\n" + "\n".join(retention) + "\n\n"
+        "detailed_description:\n" + detailed + "\n\n"
+        "overall_soundscape:\n<Audio 1> guides the visible vocal performance; no additional diegetic sound is specified.\n\n"
+        "non_diegetic_music:\nN/A"
+    )
+    validate_h3_prompt(prompt, manifest)
+    return prompt
+
+
+def validate_h3_prompt(value, manifest=None):
+    text = str(value or "").strip()
+    positions = [text.find(section + ":") for section in H3_REF2VA_SECTIONS]
+    if any(position < 0 for position in positions) or positions != sorted(positions):
+        raise ValueError("最终H3提示词必须按顺序包含六个Ref2VA字段。")
+    detailed = text[positions[3]:positions[4]]
+    if detailed.count("[Shot 1]") != 1 or re.search(r"\[Shot\s+[2-9]\d*\]", detailed):
+        raise ValueError("每个分段的最终H3提示词只能包含一个 [Shot 1]。")
+    if manifest:
+        count = int(manifest.get("picture_count", 0))
+        referenced = {int(value) for value in re.findall(r"<Picture\s+(\d+)>", text)}
+        invalid = sorted(number for number in referenced if number < 1 or number > count)
+        if invalid:
+            raise ValueError("最终H3提示词引用了未连接的参考图：" + "、".join(f"Picture {n}" for n in invalid))
     return text
 
 
@@ -1020,73 +1097,10 @@ def decorate(plan, regenerate_prompts=True):
     last = 0
     prefs = director_preferences(plan)
     plan["director"] = prefs
-    normalize_reference_manifest(plan)
-    previous_shot_plan_version = int(plan.get("shot_plan_version", 0) or 0)
-    if prefs["mode"] == "ai" and previous_shot_plan_version < 6:
-        migrated = False
-        for item in plan.get("ai_shot_plan") or []:
-            if isinstance(item, dict) and item.get("movement") == "dolly_out":
-                item["movement"] = "steady"
-                migrated = True
-        if migrated:
-            warning = "旧版 AI 方案中的后拉镜头已改为稳定镜头；实测后拉容易越过腰部边界变成全身。"
-            warnings = plan.setdefault("warnings", [])
-            if warning not in warnings:
-                warnings.append(warning)
-    if prefs["mode"] == "ai" and previous_shot_plan_version < 7:
-        migrated = False
-        for item in plan.get("ai_shot_plan") or []:
-            if (isinstance(item, dict) and item.get("opening_framing") == "medium shot"
-                    and item.get("movement") in {"truck_left", "truck_right"}):
-                item["movement"] = "steady"
-                migrated = True
-        if migrated:
-            warning = "旧版 AI 方案中的中景横移已改为稳定镜头；实测 H3 容易把中景横移误执行为大幅变焦。"
-            warnings = plan.setdefault("warnings", [])
-            if warning not in warnings:
-                warnings.append(warning)
-    if prefs["mode"] == "ai" and previous_shot_plan_version < 9:
-        migrated = False
-        for index, item in enumerate(plan.get("ai_shot_plan") or []):
-            if isinstance(item, dict) and item.get("movement") == "steady":
-                item["movement"] = (
-                    "dolly_in" if item.get("opening_framing") == "medium shot"
-                    else ("truck_right" if index % 2 == 0 else "truck_left")
-                )
-                migrated = True
-        if migrated:
-            warning = "旧版 AI 方案中的固定机位已转换为轻运镜；新版唱歌模式每段都保持真实镜头运动。"
-            warnings = plan.setdefault("warnings", [])
-            if warning not in warnings:
-                warnings.append(warning)
-    if prefs["mode"] == "ai" and previous_shot_plan_version < 10:
-        rules = prefs["rule_config"]["singing"]
-        pattern = rules["movement_pattern"]
-        migrated = False
-        for index, item in enumerate(plan.get("ai_shot_plan") or []):
-            if not isinstance(item, dict):
-                continue
-            if item.get("opening_framing") not in rules["allowed_framings"]:
-                item["opening_framing"] = rules["allowed_framings"][0]
-                migrated = True
-            if item.get("opening_angle") not in rules["allowed_angles"]:
-                item["opening_angle"] = rules["allowed_angles"][0]
-                migrated = True
-            if item.get("movement") not in rules["allowed_movements"]:
-                item["movement"] = pattern[index % len(pattern)]
-                migrated = True
-        if migrated:
-            warning = "旧版 AI 镜头已按当前外置导演规则迁移；请重新检查分段镜头简报。"
-            warnings = plan.setdefault("warnings", [])
-            if warning not in warnings:
-                warnings.append(warning)
-    plan["shot_plan_version"] = 10
-    if prefs["mode"] == "ai":
-        camera_states = ai_camera_sequence(
-            plan["mode"], rows, prefs, plan.get("ai_shot_plan"),
-            enforce_motion_distribution=plan.get("ai_motion_contract") == 1)
-    else:
-        camera_states = camera_sequence(plan["mode"], rows, prefs)
+    plan["shot_plan_version"] = 14
+    plan.pop("ai_shot_plan", None)
+    plan.pop("ai_motion_contract", None)
+    camera_states = camera_sequence(plan["mode"], rows, prefs)
     for i, row in enumerate(rows):
         start, end = int(row["start_sample"]), int(row["end_sample"])
         duration = (end-start)/sr
@@ -1104,6 +1118,8 @@ def decorate(plan, regenerate_prompts=True):
             framing, ending, move = state["camera_start"], state["camera_end"], state["camera_move"]
             row["camera"] = f"{framing}; {move}"
             row["prompt"] = segment_brief(plan, row, framing, ending, move, state["previous_end_framing"])
+        row.pop("h3_prompt", None)
+        row.pop("h3_prompt_mode", None)
         row.setdefault("warnings", [])
     return plan
 
@@ -1173,5 +1189,6 @@ def edit_plan(plan, submitted):
 
 
 def fingerprint(plan):
-    data = [{k: row.get(k) for k in ("start_sample", "end_sample", "prompt")} for row in plan["segments"]]
+    data = [{k: row.get(k) for k in ("start_sample", "end_sample", "prompt")}
+            for row in plan["segments"]]
     return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode()).hexdigest()

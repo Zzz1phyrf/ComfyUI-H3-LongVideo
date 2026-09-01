@@ -29,6 +29,21 @@ def apply_bundled_prompt_rule(prompt):
     return prompt
 
 
+def validate_prompt_pipeline(prompt, loader_id):
+    """Require the approved camera-brief link; project material text is optional."""
+    formatters = [(node_id, node) for node_id, node in prompt.items()
+                  if node.get("class_type") == "PromptExpand"]
+    if len(formatters) != 1:
+        raise ValueError("当前工作流需要且只能有一个提示词小助手 PromptExpand 节点。")
+    _, formatter = formatters[0]
+    inputs = formatter.get("inputs", {})
+    source = inputs.get("source_text")
+    if not (isinstance(source, (list, tuple)) and len(source) >= 2
+            and str(source[0]) == str(loader_id) and str(source[1]) == "2"):
+        raise ValueError("请把长视频节点的 segment_brief 输出连接到提示词小助手的 source_text。")
+    return prompt
+
+
 def normalize_output_contract(snapshot):
     """Upgrade frozen queue graphs from the former 7-output loader contract."""
     loader = str(snapshot.get("loader_id", ""))
@@ -224,6 +239,7 @@ def start(root, project_id, payload, server):
             loader, video = str(payload.get("loader_id", "")), str(payload.get("video_id", ""))
             if prompt.get(loader, {}).get("class_type") not in SEGMENT_NODE_TYPES:
                 raise ValueError("请打开含 H3 分段读取节点或一体化节点的视频工作流。")
+            validate_prompt_pipeline(prompt, loader)
             if prompt.get(video, {}).get("class_type") != "VHS_VideoCombine":
                 raise ValueError("请选择此工作流的 VHS Video Combine 输出节点。")
             snapshot = normalize_output_contract({"prompt": prompt, "loader_id": loader,
@@ -291,11 +307,9 @@ def explorer_windows():
 def activate_explorer_window(hwnd):
     import ctypes
     user32 = ctypes.windll.user32
-    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    user32.ShowWindow(hwnd, 9)
     user32.BringWindowToTop(hwnd)
     if not user32.SetForegroundWindow(hwnd):
-        # Windows can reject foreground activation from a background process.
-        # A brief Alt key transition releases that foreground lock for this user action.
         user32.keybd_event(0x12, 0, 0, 0)
         user32.keybd_event(0x12, 0, 0x0002, 0)
         user32.SetForegroundWindow(hwnd)
@@ -307,8 +321,7 @@ def reveal_file(path):
     if not path.is_file():
         raise FileNotFoundError(path)
     before = explorer_windows()
-    args = reveal_command(path)
-    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(reveal_command(path), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if os.name == "nt":
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:

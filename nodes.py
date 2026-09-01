@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -6,10 +7,9 @@ import sys
 import time
 import uuid
 
-from . import ai_director
 from . import director_rules
-from .core import (audio_file, decorate, fingerprint, project_path, read_plan, reference_manifest,
-                   segmentation, validate_segment_brief, write_plan)
+from .core import (audio_file, decorate, fingerprint, project_path, read_plan, segmentation,
+                   validate_segment_brief, write_plan)
 
 
 def storage_root():
@@ -32,10 +32,6 @@ def user_data_root():
     return root/"H3LongVideo"
 
 
-def settings_path():
-    return user_data_root()/"settings.json"
-
-
 def rules_path():
     return user_data_root()/"rules"
 
@@ -55,19 +51,6 @@ def audio_array(audio):
     if not len(x) or not np.isfinite(x).all():
         raise ValueError("音频为空或无效。")
     return x, int(audio["sample_rate"])
-
-
-def route_reference_images(reference_layout, reference_image_1, reference_image_2):
-    """Make the selected reference layout authoritative for downstream H3 inputs."""
-    manifest = (reference_layout if isinstance(reference_layout, dict)
-                else reference_manifest(reference_layout))
-    if reference_image_1 is None:
-        raise ValueError("当前图片组合缺少图1，请连接人物图或人物+场景图。")
-    if int(manifest.get("picture_count", 1)) == 1:
-        return reference_image_1, None
-    if reference_image_2 is None:
-        raise ValueError("当前选择双图模式，请连接图2场景；如只上传一张图，请改为“单图：人物+场景”。")
-    return reference_image_1, reference_image_2
 
 
 def separate(audio, sr):
@@ -168,28 +151,14 @@ class Analyze:
         return {"required": {"audio": ("AUDIO",), "mode": (["singing", "speaking"],),
             "max_seconds": ("FLOAT", {"default": 15, "min": 5, "max": 15, "step": .1}),
             "target_seconds": ("FLOAT", {"default": 11, "min": 5, "max": 15, "step": .1}),
-            # Retained in its legacy position so saved workflows keep their widget alignment.
-            # The frontend hides it; new planning uses the structured controls below.
-            "visual_brief": ("STRING", {"multiline": True, "default": ""}),
-            # Hidden compatibility slots preserve old workflow widget alignment.
-            # Runtime and model discovery are now automatic and these values are ignored.
             "asr_python": ("STRING", {"default": ""}), "asr_model": ("STRING", {"default": ""}),
             "asr_device": (["auto", "cuda", "cpu"],),
-            # Compatibility slots remain in their saved-workflow positions. The
-            # frontend hides both; new projects derive performance per segment
-            # and no longer accept an unstructured global director note.
-            "performance_intensity": (["auto", "restrained", "natural", "energetic"],),
             "camera_activity": (["auto", "moderate", "dynamic"],),
             "widest_framing": (["medium close-up", "medium shot"],),
-            "director_note": ("STRING", {"multiline": True, "default": ""}),
-            "director_mode": (["规则导演", "AI导演"],),
-            "reference_layout": (["双图：图1人物，图2场景", "单图：人物+场景"],),
-            # Retained as a hidden one-value compatibility slot so existing saved
-            # workflows keep their later widget alignment.
-            "vocal_assignment": (["人物1主唱"],),
-            }, "optional": {"vocals": ("AUDIO",),
-                            "reference_image_1": ("IMAGE",),
-                            "reference_image_2": ("IMAGE",)}}
+            # Hidden and ignored compatibility slot. Keeping its position prevents
+            # older workflow widget values from shifting project_id/segment_index.
+            "director_mode": ("STRING", {"default": "本地规则"}),
+            }, "optional": {"vocals": ("AUDIO",)}}
     RETURN_TYPES = ("STRING", "INT")
     RETURN_NAMES = ("project_id", "segment_count")
     FUNCTION = "analyze"
@@ -200,19 +169,14 @@ class Analyze:
     def IS_CHANGED(cls, **kwargs):
         return float("nan")
 
-    def analyze(self, audio, mode, max_seconds, target_seconds, visual_brief,
-                asr_python, asr_model, asr_device="auto", performance_intensity="auto",
-                camera_activity="auto", widest_framing="medium close-up", director_note="",
-                director_mode="规则导演", reference_layout="双图：图1人物，图2场景",
-                vocal_assignment="人物1主唱", vocals=None, reference_image_1=None,
-                reference_image_2=None):
+    def analyze(self, audio, mode, max_seconds, target_seconds, asr_python, asr_model,
+                asr_device="auto", camera_activity="auto", widest_framing="medium close-up",
+                director_mode="本地规则", vocals=None):
         import soundfile as sf
         import numpy as np
-        references = reference_manifest(reference_layout)
-        rules = director_rules.read_rules(rules_path())
-        routed_image_1, routed_image_2 = route_reference_images(
-            references, reference_image_1, reference_image_2)
         mix, sr = audio_array(audio)
+        audio_seed = hashlib.sha256(np.ascontiguousarray(mix).tobytes()).hexdigest()[:16]
+        rules = director_rules.read_rules(rules_path())
         if vocals is not None:
             voice, vsr = audio_array(vocals)
             if vsr != sr or len(voice) != len(mix):
@@ -232,36 +196,25 @@ class Analyze:
         analysis_temp = directory/"state"/f".analysis-{uuid.uuid4().hex}.tmp"
         analysis_temp.write_text(json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
         analysis_temp.replace(directory/"state"/"analysis.json")
-        resolved_director_mode = "ai" if director_mode in {"ai", "AI导演"} else "rule"
         rhythm = analysis.get("rhythm") or {}
         audio_structure = {
             "tempo_bpm": rhythm.get("tempo_bpm"),
             "tempo_confidence": rhythm.get("confidence"),
             "sections": list(analysis.get("sections") or [])[:32],
         }
-        plan = {"id": project_id, "schema": 3, "analysis_schema": 2,
+        plan = {"id": project_id, "schema": 4, "analysis_schema": 2,
             "revision": 1, "created": time.time(),
             "mode": mode, "max_seconds": float(max_seconds), "target_seconds": float(target_seconds),
             "sample_rate": sr, "samples": len(mix), "duration": len(mix)/sr,
             "director": {"mode": "rule", "performance_intensity": "auto",
                          "camera_activity": camera_activity, "widest_framing": widest_framing,
                          "note": "", "rule_config": rules["config"],
-                         "ai_rule": rules["ai_rule"], "rule_revision": rules["revision"]},
+                         "schedule_seed": audio_seed, "rule_revision": rules["revision"]},
             "audio_structure": audio_structure,
-            "references": references,
             "segments": rows, "approved": False,
             "run_status": "draft", "warnings": ["ASR 文字和时间戳未经校对；请试听风险切点。",
             "气口、拖音和无人声段是声学估计；无文字不代表无人声。"]}
         plan = decorate(plan)
-        if resolved_director_mode == "ai" and mode == "singing":
-            plan["director"]["mode"] = "ai"
-            plan["ai_motion_contract"] = 1
-            plan["ai_shot_plan"] = ai_director.plan_shots(
-                plan, [image for image in (routed_image_1, routed_image_2) if image is not None],
-                ai_director.read_settings(settings_path()))
-            plan = decorate(plan)
-        elif resolved_director_mode == "ai":
-            plan["warnings"].append("固定机位口播使用本地连续性规则，本次未调用AI镜头导演，也未上传参考图。")
         reconstructed = np.concatenate([mix[r["start_sample"]:r["end_sample"]] for r in plan["segments"]])
         if not np.array_equal(reconstructed, mix):
             raise AssertionError("音频覆盖检查失败。")
@@ -323,8 +276,8 @@ class Unified:
                         segment_index=("INT", {"default": 0, "min": 0, "max": 10000}))
         return {"required": required, "optional": analyze.get("optional", {})}
 
-    RETURN_TYPES = LoadSegment.RETURN_TYPES + ("IMAGE", "IMAGE")
-    RETURN_NAMES = LoadSegment.RETURN_NAMES + ("reference_image_1", "reference_image_2")
+    RETURN_TYPES = LoadSegment.RETURN_TYPES
+    RETURN_NAMES = LoadSegment.RETURN_NAMES
     FUNCTION = "process"
     CATEGORY = "像素幻想/H3 长视频"
     OUTPUT_NODE = True
@@ -340,32 +293,23 @@ class Unified:
                 pass
         return float("nan")
 
-    def process(self, audio, mode, max_seconds, target_seconds, visual_brief,
-                asr_python, asr_model, asr_device="auto", performance_intensity="auto",
-                camera_activity="auto", widest_framing="medium close-up", director_note="",
-                director_mode="规则导演", reference_layout="双图：图1人物，图2场景",
-                vocal_assignment="人物1主唱", project_id="", segment_index=0, vocals=None,
-                reference_image_1=None, reference_image_2=None):
+    def process(self, audio, mode, max_seconds, target_seconds, asr_python, asr_model,
+                asr_device="auto", camera_activity="auto", widest_framing="medium close-up",
+                director_mode="本地规则", project_id="", segment_index=0, vocals=None):
         if str(project_id).strip():
             try:
                 plan = read_plan(data_root(), project_id)
                 if plan.get("approved"):
-                    routed = route_reference_images(
-                        plan.get("references", reference_layout),
-                        reference_image_1, reference_image_2)
-                    return (*LoadSegment().load(project_id, int(segment_index)), *routed)
+                    return LoadSegment().load(project_id, int(segment_index))
             except FileNotFoundError:
                 pass
-        analyzed = Analyze().analyze(audio, mode, max_seconds, target_seconds, visual_brief,
-                                     asr_python, asr_model, asr_device, performance_intensity,
-                                     camera_activity, widest_framing, director_note,
-                                     director_mode, reference_layout, vocal_assignment, vocals,
-                                     reference_image_1, reference_image_2)
-        routed = route_reference_images(reference_layout, reference_image_1, reference_image_2)
+        analyzed = Analyze().analyze(audio, mode, max_seconds, target_seconds,
+                                     asr_python, asr_model, asr_device, camera_activity,
+                                     widest_framing, director_mode, vocals)
         # Native Run targets only this node. These placeholders are not sent downstream;
         # the approved controller run replaces them with the selected segment outputs.
         return {"ui": analyzed["ui"],
-                "result": (audio, vocals or audio, "", 0, "", *routed)}
+                "result": (audio, vocals or audio, "", 0, "")}
 
 
 def math_ceil_samples(frames, sr):

@@ -4,12 +4,11 @@ import io
 import json
 
 from . import controller
-from . import ai_director
 from . import director_rules
 from .core import (LOCK, archive_take, audio_file, edit_plan, fingerprint, inside, preview_bounds,
                    output_preview, project_path, read_plan, read_project_transcript, request_regeneration,
                    segmentation, state_file, write_plan)
-from .nodes import data_root, rules_path, settings_path, storage_root
+from .nodes import data_root, rules_path, storage_root
 
 
 def register_routes():
@@ -30,17 +29,6 @@ def register_routes():
                 return web.json_response({"error": str(exc)}, status=500)
         return wrapped
 
-    @routes.get("/h3lv/settings")
-    @endpoint
-    async def get_settings(request):
-        return web.json_response(ai_director.public_settings(settings_path()))
-
-    @routes.post("/h3lv/settings")
-    @endpoint
-    async def save_settings(request):
-        payload = await request.json()
-        return web.json_response(ai_director.write_settings(settings_path(), payload))
-
     @routes.get("/h3lv/rules")
     @endpoint
     async def get_rules(request):
@@ -55,7 +43,9 @@ def register_routes():
     @routes.post("/h3lv/rules/reset")
     @endpoint
     async def reset_rules(request):
-        return web.json_response(director_rules.reset_rules(rules_path()))
+        payload = await request.json()
+        return web.json_response(director_rules.reset_rules(
+            rules_path(), payload.get("mode")))
 
     @routes.get("/h3lv/projects")
     @endpoint
@@ -309,8 +299,6 @@ def register_routes():
     async def final(request):
         plan = read_plan(data_root(), request.match_info["project_id"])
         file = inside(storage_root()/"final_videos", plan["final_video"])
-        # This compatibility endpoint is stable while the selected final file can
-        # change after reassembly. Never let clients reuse byte ranges from an older MP4.
         return web.FileResponse(file, headers={"Cache-Control": "no-store"})
 
     @routes.post("/h3lv/project/{project_id}/reveal-final")
