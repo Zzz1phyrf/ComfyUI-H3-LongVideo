@@ -1,6 +1,8 @@
-# ComfyUI H3 Long Video（公开测试候选版）
+# ComfyUI H3 Long Video
 
-这是 ComfyUI 自定义节点插件，不需要用户运行外部分析脚本。目前是开发预览版；自动测试、真实 H3 试生成与人工审美验收分别记录在 `VERIFICATION.md`，不将局部测试等同于发行验收。
+这是一个用于 MiniMax H3 长音视频生成的 ComfyUI 自定义节点插件。它把长音频识别并切成可审核的片段，使用唱歌或口播本地规则生成每段镜头简报；用户确认后，同一工作流按顺序逐段生成并自动合并成片，不需要另外运行分析脚本。
+
+插件本身不接参考图、不识图，也不配置 AI 导演或大模型 API。参考图直接连接官方 MiniMax H3 节点；提示词小助手只负责把已确认的镜头简报和可选素材说明扩写为 H3 提示词。自动测试、真实 H3 试生成与人工验收范围记录在 `VERIFICATION.md`。
 
 ## 操作
 
@@ -25,17 +27,17 @@
 
 唱歌模式每段只安排一种主要运镜，按低/中/高相对能量在轻微构图调整、小角度环绕、短距离横移和克制推拉之间选择。选择结果由音频内容和规则版本产生可复现种子，不使用所有歌曲相同的固定顺序；相邻片段不重复同一运镜类别，横移再次出现时优先换方向。口播模式始终使用正面中近景固定机位。人物中心和眼线使用统一构图锚点。参考图关系只存在于提示词小助手的用户素材说明与官方 H3 节点中。
 
-## GitHub 测试安装
+## 安装
 
 1. 关闭 ComfyUI。
 2. 将仓库克隆或解压到 `ComfyUI/custom_nodes/ComfyUI-H3-LongVideo`。
 3. 将 `examples/04_H3长视频_单节点一体化.json` 复制到自己的 ComfyUI 工作流目录并打开。
-4. 安装示例工作流标出的外部节点：`comfyui-vrgamedevgirl`、`ComfyUI-Prompt-Assistant`、`ComfyUI-VideoHelperSuite` 和 `ComfyUI-KJNodes`。示例候选已移除只负责显示/分组的可选节点。
+4. 安装示例工作流标出的外部节点：`comfyui-vrgamedevgirl`、`ComfyUI-Prompt-Assistant`、`ComfyUI-VideoHelperSuite` 和 `ComfyUI-KJNodes`。公开示例已移除只负责显示或分组的可选节点。
 5. 准备相应 MiniMax H3 模型、VAE、CLIP 和 LoRA。模型不随本仓库分发，具体文件名可在工作流加载器中自行选择。
-6. 确认当前 ComfyUI Python 已安装 `faster-whisper`。首次识别会把 `large-v3-turbo` 下载到 `ComfyUI/models/faster-whisper`；已有完整快照会直接复用，不要求填写开发机路径。
+6. 通过 ComfyUI Manager 安装插件依赖，或在当前 ComfyUI Python 中执行 `pip install -r requirements.txt`。本插件额外声明的依赖只有 `faster-whisper`；首次识别会把 `large-v3-turbo` 下载到 `ComfyUI/models/faster-whisper`，已有完整快照会直接复用。
 7. 确认 `ffmpeg` 与 `ffprobe` 位于 PATH，然后启动 ComfyUI。
 
-本仓库没有安装脚本，不会自动执行 `pip install`、升级 torch 或下载模型。ComfyUI 端复用现有 numpy、Pillow、torch、torchaudio、soundfile 和 aiohttp。不同整合包是否已包含这些库需要在朋友机器上实际验证。
+本仓库不会升级 torch，也不下载 MiniMax H3 模型。ComfyUI 端复用现有 numpy、Pillow、torch、torchaudio、soundfile 和 aiohttp；不同整合包是否已包含这些基础库，需要在实际安装环境中确认。
 
 ## 数据与隐私
 
@@ -44,7 +46,7 @@
 - 合并成功后删除对应的 `work/assembly_*` 临时目录；分段 take 与 cache 不自动删除，因为重新生成、恢复上一版和快速重新合成都依赖它们。
 - 本插件的分段和运镜规划完全离线，不包含导演模型连接或 API Key 设置。
 - 提示词小助手属于独立插件；其模型服务和凭据不由本插件读取、保存或发送。
-- GitHub 候选不包含模型、测试素材、输出、日志、缓存、API Key 或开发者机器路径。
+- GitHub 仓库不包含模型、测试素材、输出、日志、缓存、API Key 或开发者机器路径。
 
 ComfyUI 端使用已有 numpy、Pillow、torch、torchaudio、soundfile、aiohttp 和 faster-whisper。合并使用 PATH 中的 FFmpeg/ffprobe。H3 模型只读引用，不复制；首次语音识别可能联网下载 Faster-Whisper 模型。
 
@@ -52,14 +54,15 @@ ComfyUI 端使用已有 numpy、Pillow、torch、torchaudio、soundfile、aiohtt
 
 - 中文识别首版；唱歌错字、拖音和时间戳冲突会保留警告，需要检查。无文本不能作为无人声证明。
 - 本地运镜方案是基于声学结构的可编辑草案，不声称理解歌词语义或完整曲式。规则通过也不能保证 H3 严格执行景别、运镜或人物连续性，必须检查真实生成结果。
+- 唱歌模式的低能量片段可能采用“轻微呼吸式构图调整”，视觉上会接近固定机位；需要明显运镜时，应在审核面板修改该段镜头方案，或调整 singing 规则后重新分析。
 - V1 只支持单歌手。双人演唱需要逐段/逐句的演唱者标注与额外身份、口型验收，当前不以全局下拉框伪装支持。
 - 人物图自带的背景可能与场景图竞争；即使连线和提示词正确，生成仍可能回到人物图背景。需要检查每段最后一个实际保留帧，不能只看开头。夜间对照试验另存了人物/舞台统一参考工作流，不自动替换用户原图。
 - 上半身参考不能唯一决定下装；拉远可能暴露模型自行补全的服装。真实运镜幅度也可能大于提示词要求，歌词段之间采用剪辑切换而非保证无缝长镜头。
 - 每段预算先限制在 5–15 秒，短尾段可补齐生成后剪掉；这是首版策略，不是宣称 H3 的硬限制。
 - 顺序生成只支持一个 `H3LVUnified`、一个 PromptExpand 提示词小助手及一个 VHS Video Combine 输出。旧双节点工作流会显示缺失节点，需要改用仓库示例工作流。
 - 最终 MP4 使用原曲作为音源并编码为 AAC；保存的 source.wav 不被改动，不能声称 MP4 音频与 WAV 字节相同。
-- 当前为朋友协作测试候选；跨机器首次启动、依赖缺失提示和不同显卡效果仍需实机反馈。
-- 仓库许可证尚需仓库所有者在公开发布前选择；代码可见不自动等于获得开源再分发许可。
+- 跨机器首次启动、依赖缺失提示和不同显卡上的 H3 执行效果仍需以实机结果为准。
+- 当前仓库未附开源许可证；代码公开可见不等于自动授权再分发或商用。
 
 ## 测试
 
