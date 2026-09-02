@@ -90,7 +90,7 @@ function editPromptDialog(index, value) {
     panel.setAttribute("aria-modal", "true");
     const title = element("div", undefined, panel, "h3lv-title-row");
     element("h2", `编辑第 ${index + 1} 段镜头简报`, title);
-    element("p", "这是交给提示词小助手的运镜输入，不是最终 H3 提示词。新项目只需调整镜头方案和表演节奏，生成时长由节点自动控制。旧项目保持原格式可继续生成。", panel, "h3lv-help");
+    element("p", "这是本段输出的运镜文本，可直接连接下游文本输入，也可交给提示词小助手扩写。新项目只需调整镜头方案和表演节奏，生成时长由节点自动控制。旧项目保持原格式可继续生成。", panel, "h3lv-help");
     const editor = element("textarea", undefined, panel, "h3lv-prompt-editor");
     editor.value = value;
     editor.spellcheck = false;
@@ -117,13 +117,8 @@ async function buildGenerationPayload() {
   const loaders = Object.entries(snapshot.output).filter(([, node]) =>
     node.class_type === "H3LVUnified");
   const videos = Object.entries(snapshot.output).filter(([, node]) => node.class_type === "VHS_VideoCombine");
-  const formatters = Object.entries(snapshot.output).filter(([, node]) => node.class_type === "PromptExpand");
-  if (loaders.length !== 1 || videos.length !== 1 || formatters.length !== 1) {
-    throw new Error("当前工作流需要且只能有一个 H3 长视频节点、一个提示词小助手和一个 VHS 输出节点。");
-  }
-  const source = formatters[0][1].inputs?.source_text;
-  if (!Array.isArray(source) || String(source[0]) !== String(loaders[0][0]) || Number(source[1]) !== 2) {
-    throw new Error("请把长视频节点的 segment_brief 输出连接到提示词小助手的 source_text。");
+  if (loaders.length !== 1 || videos.length !== 1) {
+    throw new Error("当前工作流需要且只能有一个 H3 长视频节点和一个 VHS 输出节点。");
   }
   return {prompt: snapshot.output, workflow: snapshot.workflow,
     loader_id: loaders[0][0], video_id: videos[0][0], client_id: api.clientId || ""};
@@ -843,6 +838,18 @@ app.registerExtension({
       api.addEventListener("h3lv-segment", event => {
         const data = event.detail || {};
         showFinalOnVideoNode(data.preview, data.project_id);
+      });
+      api.addEventListener("h3lv-model-download", event => {
+        const data = event.detail || {};
+        const totalMiB = Math.round((Number(data.total) || 0) / 1024 / 1024);
+        if (data.state === "started") {
+          toast("正在下载人声分离模型", `首次使用约需下载 ${totalMiB} MiB，完成后会自动继续分析。`);
+        } else if (data.state === "resuming") {
+          const doneMiB = Math.round((Number(data.downloaded) || 0) / 1024 / 1024);
+          toast("正在续传人声分离模型", `已下载 ${doneMiB}/${totalMiB} MiB，完成后会自动继续分析。`);
+        } else if (data.state === "completed") {
+          toast("人声分离模型已就绪", "正在继续音频分析。", "success");
+        }
       });
     }
     if (app.__h3lvQueueGuardInstalled) return;

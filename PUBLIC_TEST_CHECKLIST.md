@@ -15,6 +15,9 @@
 - [ ] ComfyUI 能启动并识别 `H3 长视频 · 音频分析与顺序生成`
 - [ ] 示例工作流没有未知节点
 - [ ] 首次识别能安装依赖并在 ComfyUI 模型目录发现或下载 Faster-Whisper 模型
+- [ ] singing 未接 `vocals` 时能显示进度并下载约 319 MiB 的 HDEMUCS 模型，完成后自动继续分析
+- [ ] HDEMUCS 下载中断后保留 `.part`，再次运行可续传；模型通过大小与 SHA-256 校验后才生效
+- [ ] 已接 `vocals` 或选择 speaking 时不触发 HDEMUCS 下载
 - [ ] 节点中没有导演模型、API Key 或参考图输入
 
 ## 最小测试

@@ -2,14 +2,25 @@ import json
 import hashlib
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import threading
 import time
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 import uuid
 
 from . import director_rules
 from .core import (audio_file, decorate, fingerprint, project_path, read_plan, segmentation,
                    validate_segment_brief, write_plan)
+
+
+HDEMUCS_MODEL_URL = "https://download.pytorch.org/torchaudio/models/hdemucs_high_trained.pt"
+HDEMUCS_MODEL_SIZE = 334_697_255
+HDEMUCS_MODEL_SHA256 = "a004b2790d73ffeaa535db458a1a79b539dfdbafbccc31f275d07e632ebd7816"
+HDEMUCS_DOWNLOAD_LOCK = threading.Lock()
+HDEMUCS_VERIFIED_SIGNATURE = None
 
 
 def storage_root():
@@ -42,6 +53,134 @@ def asr_model_root():
     return root/"faster-whisper"
 
 
+def hdemucs_model_path():
+    import folder_paths
+    root = Path(getattr(folder_paths, "models_dir", Path(folder_paths.base_path)/"models"))
+    return root/"H3LongVideo"/"hdemucs_high_trained.pt"
+
+
+def legacy_hdemucs_model_path():
+    import torch
+    return Path(torch.hub.get_dir())/"torchaudio/models/hdemucs_high_trained.pt"
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _valid_hdemucs_model(path):
+    global HDEMUCS_VERIFIED_SIGNATURE
+    path = Path(path)
+    if not path.is_file():
+        return False
+    stat = path.stat()
+    if stat.st_size != HDEMUCS_MODEL_SIZE:
+        return False
+    signature = (str(path.resolve()), stat.st_size, stat.st_mtime_ns, HDEMUCS_MODEL_SHA256)
+    if signature == HDEMUCS_VERIFIED_SIGNATURE:
+        return True
+    if _sha256(path) != HDEMUCS_MODEL_SHA256:
+        return False
+    HDEMUCS_VERIFIED_SIGNATURE = signature
+    return True
+
+
+def _download_notice(state, downloaded=0):
+    try:
+        server_module = sys.modules.get("server")
+        if server_module is None:
+            return
+        PromptServer = server_module.PromptServer
+        server = PromptServer.instance
+        if callable(getattr(server, "send_sync", None)):
+            server.send_sync("h3lv-model-download", {
+                "state": state, "downloaded": int(downloaded),
+                "total": HDEMUCS_MODEL_SIZE,
+            })
+    except (ImportError, AttributeError, RuntimeError):
+        pass
+
+
+def _copy_legacy_hdemucs(source, target, partial):
+    if not _valid_hdemucs_model(source):
+        return False
+    shutil.copyfile(source, partial)
+    os.replace(partial, target)
+    _download_notice("completed", HDEMUCS_MODEL_SIZE)
+    return True
+
+
+def _download_hdemucs(target, partial):
+    import comfy.model_management as mm
+    try:
+        from comfy.utils import ProgressBar
+        progress = ProgressBar(HDEMUCS_MODEL_SIZE)
+    except ImportError:
+        progress = None
+
+    downloaded = partial.stat().st_size if partial.is_file() else 0
+    if downloaded >= HDEMUCS_MODEL_SIZE:
+        partial.unlink(missing_ok=True)
+        downloaded = 0
+    headers = {"User-Agent": "ComfyUI-H3-LongVideo/1.0"}
+    if downloaded:
+        headers["Range"] = f"bytes={downloaded}-"
+    request = Request(HDEMUCS_MODEL_URL, headers=headers)
+    _download_notice("resuming" if downloaded else "started", downloaded)
+    try:
+        with urlopen(request, timeout=30) as response:
+            status = int(getattr(response, "status", 200))
+            if downloaded and status != 206:
+                downloaded = 0
+            mode = "ab" if downloaded and status == 206 else "wb"
+            if progress:
+                progress.update_absolute(downloaded)
+            with partial.open(mode) as handle:
+                while True:
+                    mm.throw_exception_if_processing_interrupted()
+                    block = response.read(1024 * 1024)
+                    if not block:
+                        break
+                    handle.write(block)
+                    downloaded += len(block)
+                    if progress:
+                        progress.update_absolute(downloaded)
+    except (URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError(
+            "人声分离模型下载失败，已保留临时文件供下次续传。"
+            f"请检查网络和磁盘空间后重试。临时文件：{partial}；原因：{exc}") from exc
+
+    actual_size = partial.stat().st_size if partial.is_file() else 0
+    if actual_size != HDEMUCS_MODEL_SIZE:
+        raise RuntimeError(
+            f"人声分离模型下载不完整（{actual_size}/{HDEMUCS_MODEL_SIZE} 字节），"
+            "已保留临时文件，下次运行会自动续传。")
+    if _sha256(partial) != HDEMUCS_MODEL_SHA256:
+        partial.unlink(missing_ok=True)
+        raise RuntimeError("人声分离模型校验失败，损坏的临时文件已删除，请重新运行。")
+    os.replace(partial, target)
+    _download_notice("completed", HDEMUCS_MODEL_SIZE)
+
+
+def ensure_hdemucs_model():
+    target = hdemucs_model_path()
+    with HDEMUCS_DOWNLOAD_LOCK:
+        if _valid_hdemucs_model(target):
+            return target
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            target.unlink()
+        partial = target.with_name(target.name + ".part")
+        if _copy_legacy_hdemucs(legacy_hdemucs_model_path(), target, partial):
+            return target
+        _download_hdemucs(target, partial)
+        return target
+
+
 def audio_array(audio):
     import numpy as np
     x = audio["waveform"].detach().cpu().float()
@@ -59,9 +198,7 @@ def separate(audio, sr):
     from torchaudio.models import hdemucs_high
     from torchaudio.functional import resample
     import comfy.model_management as mm
-    checkpoint = Path(torch.hub.get_dir())/"torchaudio/models/hdemucs_high_trained.pt"
-    if not checkpoint.is_file():
-        raise ValueError("没有找到缓存人声分离模型。请把已有分离节点的人声输出接到 vocals；插件不会自动下载模型。")
+    checkpoint = ensure_hdemucs_model()
     device = mm.get_torch_device()
     x = torch.from_numpy(audio.T.copy())
     if x.shape[0] == 1:

@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import io
 import importlib
 import json
 from pathlib import Path
@@ -123,6 +124,10 @@ class CoreTests(unittest.TestCase):
         self.assertIn('const selectedMode = nodeMode === "speaking"', script)
         self.assertIn('fullConfig[selectedMode] = JSON.parse(config.value)', script)
         self.assertIn('{mode: selectedMode}', script)
+        self.assertNotIn("formatters.length", script)
+        self.assertNotIn("segment_brief 输出连接到提示词小助手", script)
+        self.assertIn('api.addEventListener("h3lv-model-download"', script)
+        self.assertIn("正在下载人声分离模型", script)
 
     def test_final_output_has_vhs_preview_descriptor(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -182,6 +187,96 @@ class CoreTests(unittest.TestCase):
         self.assertIn('parser.add_argument("--download-root", required=True)', worker_source)
         self.assertIn("retrying on CPU", worker_source)
         self.assertNotIn("resolve_asr_settings", source)
+
+    def test_hdemucs_download_uses_managed_model_path_and_verified_atomic_file(self):
+        payload = b"verified model payload"
+
+        class Response(io.BytesIO):
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                self.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)/"models"/"H3LongVideo"/"hdemucs_high_trained.pt"
+            legacy = Path(directory)/"legacy-missing.pt"
+            comfy = types.ModuleType("comfy")
+            comfy.__path__ = []
+            management = types.ModuleType("comfy.model_management")
+            management.throw_exception_if_processing_interrupted = lambda: None
+            utils = types.ModuleType("comfy.utils")
+            utils.ProgressBar = lambda _total: types.SimpleNamespace(
+                update_absolute=lambda _value: None)
+            comfy.model_management = management
+            comfy.utils = utils
+            with patch.object(nodes, "HDEMUCS_MODEL_SIZE", len(payload)), \
+                 patch.object(nodes, "HDEMUCS_MODEL_SHA256", nodes.hashlib.sha256(payload).hexdigest()), \
+                 patch.object(nodes, "hdemucs_model_path", return_value=target), \
+                 patch.object(nodes, "legacy_hdemucs_model_path", return_value=legacy), \
+                 patch.object(nodes, "urlopen", return_value=Response(payload)) as open_url, \
+                 patch.object(nodes, "_download_notice"), \
+                 patch.dict(sys.modules, {"comfy": comfy,
+                                          "comfy.model_management": management,
+                                          "comfy.utils": utils}):
+                self.assertEqual(nodes.ensure_hdemucs_model(), target)
+                self.assertEqual(target.read_bytes(), payload)
+                self.assertFalse(target.with_name(target.name + ".part").exists())
+                self.assertEqual(nodes.ensure_hdemucs_model(), target)
+            open_url.assert_called_once()
+
+    def test_hdemucs_reuses_verified_legacy_cache_without_network(self):
+        payload = b"legacy verified model"
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)/"models"/"H3LongVideo"/"hdemucs_high_trained.pt"
+            legacy = Path(directory)/"torch-cache"/"hdemucs_high_trained.pt"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_bytes(payload)
+            with patch.object(nodes, "HDEMUCS_MODEL_SIZE", len(payload)), \
+                 patch.object(nodes, "HDEMUCS_MODEL_SHA256", nodes.hashlib.sha256(payload).hexdigest()), \
+                 patch.object(nodes, "hdemucs_model_path", return_value=target), \
+                 patch.object(nodes, "legacy_hdemucs_model_path", return_value=legacy), \
+                 patch.object(nodes, "urlopen") as open_url, \
+                 patch.object(nodes, "_download_notice"):
+                self.assertEqual(nodes.ensure_hdemucs_model(), target)
+            self.assertEqual(target.read_bytes(), payload)
+            open_url.assert_not_called()
+
+    def test_hdemucs_download_resumes_a_partial_file(self):
+        payload = b"0123456789abcdef"
+
+        class Response(io.BytesIO):
+            status = 206
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                self.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)/"hdemucs_high_trained.pt"
+            partial = target.with_name(target.name + ".part")
+            partial.write_bytes(payload[:6])
+            comfy = types.ModuleType("comfy")
+            comfy.__path__ = []
+            management = types.ModuleType("comfy.model_management")
+            management.throw_exception_if_processing_interrupted = lambda: None
+            utils = types.ModuleType("comfy.utils")
+            utils.ProgressBar = lambda _total: types.SimpleNamespace(
+                update_absolute=lambda _value: None)
+            comfy.model_management = management
+            comfy.utils = utils
+            with patch.object(nodes, "HDEMUCS_MODEL_SIZE", len(payload)), \
+                 patch.object(nodes, "HDEMUCS_MODEL_SHA256", nodes.hashlib.sha256(payload).hexdigest()), \
+                 patch.object(nodes, "_download_notice"), \
+                 patch.object(nodes, "urlopen", return_value=Response(payload[6:])) as open_url, \
+                 patch.dict(sys.modules, {"comfy": comfy,
+                                          "comfy.model_management": management,
+                                          "comfy.utils": utils}):
+                nodes._download_hdemucs(target, partial)
+            request = open_url.call_args.args[0]
+            self.assertEqual(request.get_header("Range"), "bytes=6-")
+            self.assertEqual(target.read_bytes(), payload)
+            self.assertFalse(partial.exists())
 
     def test_director_rules_are_external_editable_and_validated(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -427,21 +522,30 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(all("h3_prompt" not in row and "h3_prompt_mode" not in row
                             for row in p["segments"]))
 
-    def test_prompt_pipeline_allows_empty_material_description_but_requires_brief_link(self):
-        prompt = {"231": {"class_type": "H3LVUnified", "inputs": {}},
-                  "204": {"class_type": "PromptExpand", "inputs": {
-                      "source_text": ["231", 2], "user_prompt": ""}}}
-        self.assertIs(controller.validate_prompt_pipeline(prompt, "231"), prompt)
-        prompt["204"]["inputs"]["source_text"] = ["9", 2]
-        with self.assertRaisesRegex(ValueError, "segment_brief"):
-            controller.validate_prompt_pipeline(prompt, "231")
-
-    def test_prompt_pipeline_accepts_explicit_material_description(self):
-        prompt = {"231": {"class_type": "H3LVUnified", "inputs": {}},
-                  "204": {"class_type": "PromptExpand", "inputs": {
-                      "source_text": ["231", 2],
-                      "user_prompt": "素材说明：<Picture 1> 是人物 <Subject 1>；<Audio 1> 指导口型。"}}}
-        self.assertIs(controller.validate_prompt_pipeline(prompt, "231"), prompt)
+    def test_generation_snapshot_accepts_direct_segment_brief_without_prompt_expand(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plan = sample_plan()
+            plan["approved"] = True
+            plan["approved_fingerprint"] = core.fingerprint(plan)
+            core.write_plan(directory, plan)
+            payload = {"loader_id": "231", "video_id": "122", "prompt": {
+                "231": {"class_type": "H3LVUnified", "inputs": {}},
+                "136": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
+                    "positive": ["231", 2]}},
+                "122": {"class_type": "VHS_VideoCombine", "inputs": {}},
+            }}
+            task = MagicMock()
+            def capture_task(coroutine):
+                coroutine.close()
+                return task
+            with patch.object(controller.asyncio, "create_task", side_effect=capture_task):
+                controller.start(directory, plan["id"], payload, MagicMock())
+            snapshot = json.loads(core.state_file(
+                core.project_path(directory, plan["id"]), "queue_snapshot.json"
+            ).read_text(encoding="utf-8"))
+            self.assertNotIn("204", snapshot["prompt"])
+            self.assertEqual(snapshot["prompt"]["136"]["inputs"]["positive"], ["231", 2])
+            controller.TASKS.pop(plan["id"], None)
 
     def test_segment_brief_is_material_agnostic(self):
         prompt = sample_plan()["segments"][0]["prompt"]
