@@ -17,16 +17,28 @@ TASKS = {}
 SEGMENT_NODE_TYPES = {"H3LVUnified"}
 
 
-def apply_bundled_prompt_rule(prompt):
-    """Keep saved workflows on the plugin's current Ref2VA formatter rule."""
-    rule = (Path(__file__).resolve().parent/"ref2va_performance_rule.txt").read_text(encoding="utf-8")
-    for node in prompt.values():
-        if node.get("class_type") != "PromptExpand":
-            continue
-        inputs = node.setdefault("inputs", {})
-        inputs["custom_rule"] = True
-        inputs["custom_rule_content"] = rule
-    return prompt
+def restore_legacy_prompt_rules(snapshot, current_prompt):
+    """Undo the old forced rule once, preserving the rest of the saved graph."""
+    if snapshot.get("prompt_rule_source") == "workflow":
+        return
+    saved = {key: node for key, node in snapshot.get("prompt", {}).items()
+             if node.get("class_type") == "PromptExpand"}
+    current = {key: node for key, node in current_prompt.items()
+               if node.get("class_type") == "PromptExpand"}
+    if saved.keys() != current.keys():
+        raise ValueError("旧项目的提示词小助手节点与当前画布不一致。请使用“重新生成本段”更新工作流快照，或重新分析创建项目。")
+    fields = ("rule", "custom_rule", "custom_rule_content")
+    for key in saved:
+        source = current[key].get("inputs", {})
+        if any(isinstance(source.get(field), list) for field in fields):
+            raise ValueError("旧项目的扩写规则已改为连线输入。请使用“重新生成本段”更新完整工作流快照，或重新分析创建项目。")
+        inputs = saved[key].setdefault("inputs", {})
+        for field in fields:
+            if field in source:
+                inputs[field] = copy.deepcopy(source[field])
+            else:
+                inputs.pop(field, None)
+    snapshot["prompt_rule_source"] = "workflow"
 
 
 def normalize_output_contract(snapshot):
@@ -220,7 +232,7 @@ def start(root, project_id, payload, server):
         snapshot_file = directory/"state"/"queue_snapshot.json"
         replace_snapshot = bool(payload.get("replace_snapshot"))
         if not any(row.get("job") for row in plan["segments"]) or replace_snapshot:
-            prompt = apply_bundled_prompt_rule(copy.deepcopy(payload.get("prompt", {})))
+            prompt = copy.deepcopy(payload.get("prompt", {}))
             loader, video = str(payload.get("loader_id", "")), str(payload.get("video_id", ""))
             if prompt.get(loader, {}).get("class_type") not in SEGMENT_NODE_TYPES:
                 raise ValueError("请打开含 H3 分段读取节点或一体化节点的视频工作流。")
@@ -228,16 +240,18 @@ def start(root, project_id, payload, server):
                 raise ValueError("请选择此工作流的 VHS Video Combine 输出节点。")
             snapshot = normalize_output_contract({"prompt": prompt, "loader_id": loader,
                                                   "video_id": video, "workflow": payload.get("workflow", {}),
-                                                  "client_id": str(payload.get("client_id") or "").strip()})
+                                                  "client_id": str(payload.get("client_id") or "").strip(),
+                                                  "prompt_rule_source": "workflow"})
             snapshot_file.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
         elif not snapshot_file.is_file():
             raise ValueError("缺少原工作流快照，无法安全继续。")
         else:
             snapshot = json.loads(snapshot_file.read_text(encoding="utf-8"))
+            restore_legacy_prompt_rules(snapshot, payload.get("prompt", {}))
             client_id = str(payload.get("client_id") or "").strip()
             if client_id and snapshot.get("client_id") != client_id:
                 snapshot["client_id"] = client_id
-                snapshot_file.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
+            snapshot_file.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
         only_segment = payload.get("only_segment_index")
         if only_segment is None:
             plan.pop("run_only_segment", None)

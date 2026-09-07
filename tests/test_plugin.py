@@ -314,15 +314,8 @@ class CoreTests(unittest.TestCase):
         self.assertIn("energy_movements", normalized["singing"])
         self.assertNotIn("movement_pattern", normalized["singing"])
 
-    def test_snapshot_uses_current_bundled_ref2va_rule(self):
-        prompt = {"204": {"class_type": "PromptExpand", "inputs": {
-            "custom_rule": False, "custom_rule_content": "old embedded rule"}},
-            "7": {"class_type": "Other", "inputs": {}}}
-        updated = controller.apply_bundled_prompt_rule(prompt)
+    def test_optional_ref2va_template_contract(self):
         expected = (ROOT/"ref2va_performance_rule.txt").read_text(encoding="utf-8")
-        self.assertTrue(updated["204"]["inputs"]["custom_rule"])
-        self.assertEqual(updated["204"]["inputs"]["custom_rule_content"], expected)
-        self.assertEqual(updated["7"]["inputs"], {})
         self.assertIn("模式 (口播/speaking or 唱歌/singing)", expected)
         self.assertIn("镜头方案 and 表演节奏", expected)
         self.assertIn("user-written material description", expected)
@@ -330,6 +323,109 @@ class CoreTests(unittest.TestCase):
         self.assertIn("Omit undeclared details", expected)
         for forbidden in ("partially_copy", "fully_copy", "audio reuse", "final assembly", "FFmpeg"):
             self.assertNotIn(forbidden, expected)
+
+    def test_generation_preserves_prompt_assistant_rules_in_both_modes(self):
+        for mode in ("singing", "speaking"):
+            for custom in (False, True):
+                with self.subTest(mode=mode, custom=custom), tempfile.TemporaryDirectory() as root:
+                    plan = sample_plan()
+                    plan["mode"] = mode
+                    plan["approved"] = True
+                    plan["approved_fingerprint"] = core.fingerprint(plan)
+                    core.write_plan(root, plan)
+                    prompt = {
+                        "231": {"class_type": "H3LVUnified", "inputs": {}},
+                        "122": {"class_type": "VHS_VideoCombine", "inputs": {}},
+                        "204": {"class_type": "PromptExpand", "inputs": {
+                            "rule": "User preset", "custom_rule": custom,
+                            "custom_rule_content": "User rule: no subtitles",
+                            "user_prompt": "User material", "llm_service": "User model",
+                            "source_text": ["231", 2]}},
+                    }
+                    before = copy.deepcopy(prompt)
+                    def capture_task(coroutine):
+                        coroutine.close()
+                        return MagicMock()
+                    try:
+                        with patch.object(controller.asyncio, "create_task", side_effect=capture_task):
+                            controller.start(root, plan["id"], {
+                                "loader_id": "231", "video_id": "122", "prompt": prompt}, MagicMock())
+                        snapshot = json.loads(core.state_file(core.project_path(root, plan["id"]),
+                            "queue_snapshot.json").read_text(encoding="utf-8"))
+                        self.assertEqual(snapshot["prompt"]["204"], before["204"])
+                        self.assertEqual(prompt, before)
+                        self.assertEqual(snapshot["prompt_rule_source"], "workflow")
+                    finally:
+                        controller.TASKS.pop(plan["id"], None)
+
+    def test_legacy_resume_restores_only_rule_settings_once(self):
+        for custom in (False, True):
+            with self.subTest(custom=custom), tempfile.TemporaryDirectory() as root:
+                plan = sample_plan()
+                plan["approved"] = True
+                plan["approved_fingerprint"] = core.fingerprint(plan)
+                plan["segments"][0]["job"] = {"status": "completed", "prompt_id": "done"}
+                core.write_plan(root, plan)
+                old_prompt = {
+                    "204": {"class_type": "PromptExpand", "inputs": {
+                        "rule": "old", "custom_rule": True, "custom_rule_content": "forced bundled rule",
+                        "user_prompt": "saved material", "llm_service": "saved model",
+                        "source_text": ["231", 2]}},
+                    "136": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {"seed": 42}},
+                }
+                snapshot_path = core.state_file(core.project_path(root, plan["id"]), "queue_snapshot.json")
+                snapshot_path.write_text(json.dumps({"loader_id": "231", "video_id": "122",
+                    "prompt": old_prompt}), encoding="utf-8")
+                current = copy.deepcopy(old_prompt)
+                rules = {"rule": "chosen preset", "custom_rule": custom,
+                         "custom_rule_content": "chosen custom rule"}
+                current["204"]["inputs"].update(rules, user_prompt="changed material", llm_service="changed model")
+                current["136"]["inputs"]["seed"] = 99
+                expected = copy.deepcopy(old_prompt)
+                expected["204"]["inputs"].update(rules)
+                def capture_task(coroutine):
+                    coroutine.close()
+                    return MagicMock()
+                try:
+                    for attempt in range(2):
+                        with patch.object(controller.asyncio, "create_task", side_effect=capture_task):
+                            controller.start(root, plan["id"], {"prompt": current}, MagicMock())
+                        saved = json.loads(snapshot_path.read_text(encoding="utf-8"))
+                        self.assertEqual(saved["prompt"], expected)
+                        self.assertEqual(saved["prompt_rule_source"], "workflow")
+                        self.assertEqual(core.read_plan(root, plan["id"])["segments"][0]["job"]["prompt_id"], "done")
+                        controller.TASKS.pop(plan["id"], None)
+                        current["204"]["inputs"]["custom_rule_content"] = "later unrelated edit"
+                finally:
+                    controller.TASKS.pop(plan["id"], None)
+
+    def test_legacy_resume_with_changed_rule_wiring_preserves_saved_state(self):
+        for current in ({}, {"204": {"class_type": "Other", "inputs": {}}},
+                        {"204": {"class_type": "PromptExpand", "inputs": {
+                            "custom_rule_content": ["999", 0]}}}):
+            with self.subTest(current=current), tempfile.TemporaryDirectory() as root:
+                plan = sample_plan()
+                plan["approved"] = True
+                plan["approved_fingerprint"] = core.fingerprint(plan)
+                plan["segments"][0]["job"] = {"status": "completed"}
+                core.write_plan(root, plan)
+                path = core.state_file(core.project_path(root, plan["id"]), "queue_snapshot.json")
+                original = json.dumps({"prompt": {"204": {"class_type": "PromptExpand", "inputs": {
+                    "custom_rule": True, "custom_rule_content": "old forced rule"}}}})
+                path.write_text(original, encoding="utf-8")
+                with patch.object(controller.asyncio, "create_task") as create_task:
+                    with self.assertRaisesRegex(ValueError, "重新生成本段"):
+                        controller.start(root, plan["id"], {"prompt": current}, MagicMock())
+                create_task.assert_not_called()
+                self.assertEqual(path.read_text(encoding="utf-8"), original)
+                self.assertEqual(core.read_plan(root, plan["id"])["run_status"], plan["run_status"])
+
+    def test_legacy_rule_restore_keeps_absent_fields_absent(self):
+        snapshot = {"prompt": {"204": {"class_type": "PromptExpand", "inputs": {
+            "custom_rule": True, "custom_rule_content": "old forced rule"}}}}
+        controller.restore_legacy_prompt_rules(snapshot, {
+            "204": {"class_type": "PromptExpand", "inputs": {"rule": "chosen preset"}}})
+        self.assertEqual(snapshot["prompt"]["204"]["inputs"], {"rule": "chosen preset"})
 
     def test_legacy_project_reconstructs_missing_transcript(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -858,14 +954,18 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             plan["approved_fingerprint"] = core.fingerprint(plan)
             core.write_plan(d, plan)
             directory = core.project_path(d, plan["id"])
+            assistant_inputs = {"rule": "My preset", "custom_rule": True,
+                                "custom_rule_content": "My rule: no subtitles", "source_text": ["1", 2]}
             snapshot = {"loader_id": "1", "video_id": "7", "client_id": "browser-123",
-                        "prompt": {"1": {"class_type": "H3LVUnified", "inputs": {}}}}
-            core.state_file(directory, "queue_snapshot.json").write_text(json.dumps(snapshot), encoding="utf-8")
-            indices, histories, client_ids, create_times, events = [], {}, [], [], []
+                        "prompt": {"1": {"class_type": "H3LVUnified", "inputs": {}},
+                                   "7": {"class_type": "VHS_VideoCombine", "inputs": {}},
+                                   "204": {"class_type": "PromptExpand", "inputs": assistant_inputs}}}
+            indices, histories, client_ids, create_times, events, submitted_rules = [], {}, [], [], [], []
             class Queue:
                 def put(self, item):
                     index = item[2]["1"]["inputs"]["segment_index"]
                     indices.append(index)
+                    submitted_rules.append(copy.deepcopy(item[2]["204"]["inputs"]))
                     client_ids.append(item[3].get("client_id"))
                     create_times.append(item[3].get("create_time"))
                     path = directory/f"{index}.mp4"; path.write_bytes(b"test")
@@ -879,9 +979,11 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             execution = types.SimpleNamespace(validate_prompt=validate)
             folders = types.SimpleNamespace(get_output_directory=lambda: d)
             with patch.dict(sys.modules, {"execution": execution, "folder_paths": folders}), patch.object(controller, "assemble", return_value=str(directory/"final.mp4")):
-                await controller.execute_project(d, plan["id"], server)
+                controller.start(d, plan["id"], snapshot, server)
+                await controller.TASKS[plan["id"]]
             result = core.read_plan(d, plan["id"])
             self.assertEqual(indices, [0, 1, 2])
+            self.assertEqual(submitted_rules, [assistant_inputs] * 3)
             self.assertEqual(client_ids, ["browser-123"] * 3)
             self.assertTrue(all(isinstance(value, int) and value > 0
                                 for value in create_times))
