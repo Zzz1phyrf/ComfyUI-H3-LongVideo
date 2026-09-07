@@ -6,6 +6,39 @@ from pathlib import Path
 import site
 
 
+def missing_model_files(directory):
+    """Check required local assets, including the tokenizer to avoid a hidden download."""
+    root = Path(directory)
+    def present(name):
+        path = root / name
+        return path.is_file() and path.stat().st_size > 0
+    missing = [name for name in ("model.bin", "config.json", "tokenizer.json")
+               if not present(name)]
+    if not any(present(name) for name in ("vocabulary.json", "vocabulary.txt")):
+        missing.append("vocabulary.json or vocabulary.txt")
+    return missing
+
+
+def resolve_model_path(model, download_root):
+    """Resolve a complete cached snapshot offline; download only absent assets."""
+    if Path(model).is_dir():
+        path = model
+    else:
+        from faster_whisper.utils import download_model
+        from huggingface_hub.utils import LocalEntryNotFoundError
+        try:
+            path = download_model(model, cache_dir=str(download_root), local_files_only=True)
+        except LocalEntryNotFoundError:
+            path = None
+        if path is None or missing_model_files(path):
+            print("Faster-Whisper cache missing or incomplete; downloading model assets.", flush=True)
+            path = download_model(model, cache_dir=str(download_root), local_files_only=False)
+    missing = missing_model_files(path)
+    if missing:
+        raise FileNotFoundError("Incomplete Faster-Whisper model: " + ", ".join(missing))
+    return str(path)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
@@ -26,9 +59,9 @@ def main():
     from faster_whisper import WhisperModel
 
     def transcribe(device):
-        model = WhisperModel(args.model, device=device,
+        model = WhisperModel(model_path, device=device,
             compute_type="float16" if device == "cuda" else "int8",
-            download_root=str(download_root))
+            download_root=str(download_root), local_files_only=True)
         try:
             iterator, info = model.transcribe(args.audio, language="zh", beam_size=5,
                 temperature=0.0, word_timestamps=True, vad_filter=False,
@@ -46,6 +79,7 @@ def main():
             del model
 
     try:
+        model_path = resolve_model_path(args.model, download_root)
         if args.device == "cpu":
             result = transcribe("cpu")
         elif args.device == "cuda":
