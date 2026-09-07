@@ -323,7 +323,7 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(updated["204"]["inputs"]["custom_rule"])
         self.assertEqual(updated["204"]["inputs"]["custom_rule_content"], expected)
         self.assertEqual(updated["7"]["inputs"], {})
-        self.assertIn("New camera briefs contain exactly two labeled fields", expected)
+        self.assertIn("模式 (口播/speaking or 唱歌/singing)", expected)
         self.assertIn("镜头方案 and 表演节奏", expected)
         self.assertIn("user-written material description", expected)
         self.assertIn("legacy seven-field format", expected)
@@ -376,9 +376,12 @@ class CoreTests(unittest.TestCase):
         for row in p["segments"]:
             self.assertNotIn("协议：", row["prompt"])
             self.assertNotIn("片段：", row["prompt"])
-            self.assertNotIn("模式：", row["prompt"])
-            self.assertIn("镜头方案：中近景（胸部以上）正面固定机位", row["prompt"])
-            self.assertIn("表演节奏：自然口型和克制的小幅动作", row["prompt"])
+            self.assertTrue(row["prompt"].startswith("模式：口播\n"))
+            self.assertIn("沿用参考画面的原有构图", row["prompt"])
+            self.assertIn("固定机位单一连续镜头", row["prompt"])
+            self.assertIn("表演节奏：自然口播，口型跟随音频", row["prompt"])
+            for reframing in ("胸部以上", "人物居中", "上三分之一", "正面"):
+                self.assertNotIn(reframing, row["prompt"])
             self.assertNotIn("生成时长：", row["prompt"])
             self.assertNotIn("主唱", row["prompt"])
             self.assertNotIn("音乐表演", row["prompt"])
@@ -398,7 +401,7 @@ class CoreTests(unittest.TestCase):
         self.assertNotEqual(old, core.fingerprint(p))
         self.assertEqual(p["segments"][1]["start"], 9)
         self.assertNotEqual(old_frames, p["segments"][0]["generation_frames"])
-        self.assertEqual(p["segments"][0]["prompt"].count("\n"), 2)
+        self.assertEqual(p["segments"][0]["prompt"].count("\n"), 3)
 
     def test_prompt_edit_invalidates_only_changed_segment(self):
         p = sample_plan()
@@ -462,10 +465,10 @@ class CoreTests(unittest.TestCase):
         for row in p["segments"]:
             self.assertNotIn("协议：", row["prompt"])
             self.assertNotIn("片段：", row["prompt"])
-            self.assertNotIn("模式：", row["prompt"])
+            self.assertTrue(row["prompt"].startswith("模式：唱歌\n"))
             self.assertIn("镜头方案：", row["prompt"])
             self.assertIn("表演节奏：", row["prompt"])
-            self.assertEqual(row["prompt"].count("\n"), 2)
+            self.assertEqual(row["prompt"].count("\n"), 3)
             self.assertNotIn("<Picture", row["prompt"])
             self.assertNotIn("<Subject", row["prompt"])
             self.assertNotIn("<Audio", row["prompt"])
@@ -549,12 +552,17 @@ class CoreTests(unittest.TestCase):
 
     def test_segment_brief_is_material_agnostic(self):
         prompt = sample_plan()["segments"][0]["prompt"]
-        for metadata in ("协议：", "片段：", "模式："):
+        for metadata in ("协议：", "片段："):
             self.assertNotIn(metadata, prompt)
         for token in ("<Picture", "<Subject", "<Audio", "参考角色", "手持道具", "穿戴配饰"):
             self.assertNotIn(token, prompt)
         labels = [line.split("：", 1)[0] for line in prompt.splitlines()]
-        self.assertEqual(labels, ["镜头方案", "表演节奏"])
+        self.assertEqual(labels, ["模式", "镜头方案", "表演节奏"])
+        self.assertEqual(core.validate_segment_brief(prompt), prompt.strip())
+
+    def test_existing_two_field_camera_brief_remains_valid(self):
+        prompt = "镜头方案：向右环绕人物\n表演节奏：克制的音乐表演\n"
+        self.assertEqual(core.validate_segment_brief(prompt), prompt.strip())
 
     def test_camera_brief_rejects_material_tokens(self):
         prompt = sample_plan()["segments"][0]["prompt"] + "素材：<Picture 1>\n"
@@ -674,7 +682,10 @@ class CoreTests(unittest.TestCase):
     def test_ref2va_rule_maps_the_versioned_brief_without_redirection(self):
         rule = (ROOT/"ref2va_performance_rule.txt").read_text(encoding="utf-8")
         self.assertNotIn("H3LV_CAMERA_V1", rule)
-        self.assertIn("New camera briefs contain exactly two labeled fields", rule)
+        self.assertIn("模式 (口播/speaking or 唱歌/singing)", rule)
+        self.assertIn("Speaking mode only:", rule)
+        self.assertIn("Singing mode only:", rule)
+        self.assertIn("not a pixel-exact first-frame guarantee", rule)
         self.assertIn("镜头方案 and 表演节奏", rule)
         self.assertIn("legacy seven-field format", rule)
         self.assertIn("user-written material description", rule)

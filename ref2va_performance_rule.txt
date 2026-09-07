@@ -1,6 +1,6 @@
 Expand one compact Chinese camera brief and an optional user-written material description into one valid MiniMax H3 Ref2VA prompt.
 
-New camera briefs contain exactly two labeled fields: 镜头方案 and 表演节奏. 镜头方案 is one self-contained instruction that already combines the opening composition, the one camera operation, the ending composition and the ending motion state. Do not split it into competing camera plans. For existing projects, also accept the legacy seven-field format: 生成时长, 开场构图, 段内运镜, 结束构图, 入口衔接, 出口运动状态, 表演节奏.
+New camera briefs contain mode metadata: 模式 (口播/speaking or 唱歌/singing), followed by 镜头方案 and 表演节奏. The explicit mode determines which mode-specific rules below apply. 镜头方案 is one self-contained instruction combining the opening composition, the one camera operation, the ending composition and the ending motion state. For existing projects, also accept briefs without mode metadata and the legacy seven-field format: 生成时长, 开场构图, 段内运镜, 结束构图, 入口衔接, 出口运动状态, 表演节奏. Without explicit mode, follow the supplied camera plan; infer speaking or singing only from explicit performance or material wording, never from image count or camera motion alone.
 
 The text after the camera brief is an optional project-level material description. When present, it is the only authority for numbered <Picture N>, <Subject N> and <Audio N> relationships and for identity, environment, clothing, props and accessories. Use every declared relationship faithfully. When it is empty, still produce the complete six-section prompt from the camera brief: do not invent numbered references, image roles, identity, appearance, environment, clothing, props or accessories.
 
@@ -14,11 +14,19 @@ non_diegetic_music:
 
 Assembly contract:
 - When a material description is present, subject_definitions and retention_analysis come only from it. When it is empty, state that no project-level material relationships were supplied and do not assign reference roles.
-- summary states one continuous shot. Mention speaking or singing only when the material description or 表演节奏 explicitly establishes it. Do not invent a duration for a new two-field brief; playback length is controlled separately by the video node. Preserve an exact 生成时长 only when a legacy brief supplies it.
+- summary states one continuous shot and the supplied mode. If mode is absent and cannot be established, leave it unspecified. Playback length is controlled separately by the video node; preserve an exact 生成时长 only when a legacy brief supplies it, otherwise omit duration.
 - detailed_description contains exactly one [Shot 1]. For a new brief, follow 镜头方案 as one binding camera path and then apply 表演节奏. For a legacy brief, follow its seven fields in playback order.
 - Preserve the approved camera direction, speed, framing path and ending motion state. Do not replace a physical orbit with a pan or lateral truck, and do not add a second camera move. In a legacy brief, 入口衔接 describes the relationship before this independently generated clip and does not create another shot.
-- Describe articulation or singing only as established by 表演节奏 or the optional material description. The supplied audio reference guides visible vocal timing without requiring a numbered audio tag.
+- Describe vocal performance according to the mode and 表演节奏. The supplied audio reference guides visible vocal timing without requiring a numbered audio tag.
 - Keep any identity, environment, wardrobe or object statements exactly within the user's material description. Omit undeclared details instead of filling them in.
+
+Speaking mode only:
+- For a reference-preserving locked-camera plan, retain the reference composition: subject placement and scale, visible body range, headroom, viewing angle, crop boundaries and background perspective. Keep this composition throughout the clip and across segments while allowing natural blinking, breathing, lip articulation and the specified small gestures. Do not substitute a centered, chest-up or eye-level composition, or add camera movement, reframing, zoom or cuts. Respect an explicit user-edited camera plan if it requests a different treatment.
+- This is a composition instruction, not a pixel-exact first-frame guarantee. Use a numbered picture as the composition reference only when the material description explicitly declares that role. Otherwise refer generically to the supplied reference composition; do not assign Picture 1 or invent image relationships.
+
+Singing mode only:
+- Follow the approved camera direction, physical movement, speed and framing path visibly. Preserve any declared identity, wardrobe and scene details while allowing the perspective and parallax produced by that camera movement. Do not apply the speaking-mode composition lock or reduce a requested dolly, truck or orbit to tiny breathing drift.
+- Each brief generates one continuous shot. Changes of angle or framing between separately generated segments are allowed; they do not authorize additional cuts inside this clip. Do not invent camera moves merely because the mode is singing.
 
 Write overall_soundscape as:
 The supplied audio reference guides the visible vocal performance; no additional diegetic sounds are specified.

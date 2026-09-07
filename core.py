@@ -916,9 +916,9 @@ def _zh_motion(row, entry=True):
 def segment_brief(plan, row, framing, ending, move, previous_frame):
     mode = plan["mode"]
     if mode == "speaking":
-        camera_plan = ("中近景（胸部以上）正面固定机位，人物居中，眼线位于画面上三分之一附近；"
-                       "全程不推拉、不平移、不摇摄、不变焦，人物尺度、背景透视和构图保持稳定")
-        performance = "自然口型和克制的小幅动作"
+        camera_plan = ("沿用参考画面的原有构图，保持人物位置、人物尺度、身体可见范围、头顶留白和裁切边界；"
+                       "全程固定机位单一连续镜头，背景透视和构图跨段保持一致")
+        performance = "自然口播，口型跟随音频，保留自然眨眼、呼吸和克制的小幅动作"
     else:
         opening = f"{_zh_framing(framing)}{_zh_angle(row.get('camera_start_angle', 'front'))}开场，人物居中"
         camera = _zh_camera_operation(row, framing, ending)
@@ -928,7 +928,8 @@ def segment_brief(plan, row, framing, ending, move, previous_frame):
         camera_plan = f"{opening}；{camera}；结束于{ending_text}，{ending_state}"
         performance = _zh_performance(row.get('performance_direction', 'natural controlled performance'), mode)
     return (
-        f"镜头方案：{camera_plan}\n"
+        f"模式：{'口播' if mode == 'speaking' else '唱歌'}\n"
+        + f"镜头方案：{camera_plan}\n"
         + f"表演节奏：{performance}\n"
     )
 
