@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { createTimeline, pcmWavePeaks } from "./timeline.js";
 
 if (!document.querySelector("link[data-h3lv-style]")) {
   const link = document.createElement("link");
@@ -193,7 +194,9 @@ async function reanalyzeProject(owner, {ask = true} = {}) {
   owner.properties = {...owner.properties, h3lv_project: ""};
   const projectWidget = owner.widgets?.find(item => item.name === "project_id");
   if (projectWidget) projectWidget.value = "";
-  document.getElementById("h3lv-panel")?.remove();
+  const previous = document.getElementById("h3lv-panel");
+  previous?.querySelector("canvas")?.disposeTimeline?.();
+  previous?.remove();
   await analyzeOnly(owner);
   return true;
 }
@@ -342,160 +345,10 @@ function statusText(plan) {
     `${stale ? ` · ${stale}段待重生成` : ""}${plan.final_stale ? " · 当前成片为旧版" : ""}${plan.error ? ` · ${plan.error}` : ""}`;
 }
 
-function createTimeline(canvas, getState, onSelect, onMove, onCommit) {
-  let dragIndex = -1;
-  const geometry = () => ({left: 50, right: 18, top: 25, height: 178});
-  const xFor = (time, width, duration) => {
-    const g = geometry();
-    return g.left + (Math.max(0, Math.min(duration, time))/duration) * (width-g.left-g.right);
-  };
-  const timeFor = (clientX) => {
-    const {plan} = getState();
-    const rect = canvas.getBoundingClientRect();
-    const g = geometry();
-    const x = Math.max(g.left, Math.min(rect.width-g.right, clientX-rect.left));
-    return (x-g.left)/(rect.width-g.left-g.right)*plan.duration;
-  };
-  function drawWave(ctx, peaks, center, amplitude, width, duration, color) {
-    if (!peaks?.length) return;
-    ctx.beginPath();
-    peaks.forEach((peak, index) => {
-      const time = index/Math.max(1, peaks.length-1)*duration;
-      const x = xFor(time, width, duration);
-      ctx.moveTo(x, center-peak*amplitude);
-      ctx.lineTo(x, center+peak*amplitude);
-    });
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = .82;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-  function draw() {
-    const {plan, analysis, rows, selected} = getState();
-    if (!plan || !rows.length) return;
-    const rect = canvas.getBoundingClientRect();
-    const ratio = window.devicePixelRatio || 1;
-    const width = Math.max(640, Math.round(rect.width));
-    const height = 220;
-    canvas.width = Math.round(width*ratio);
-    canvas.height = Math.round(height*ratio);
-    const ctx = canvas.getContext("2d");
-    ctx.scale(ratio, ratio);
-    ctx.clearRect(0, 0, width, height);
-    const g = geometry();
-    const plotWidth = width-g.left-g.right;
-    ctx.fillStyle = "#11151c";
-    ctx.fillRect(g.left, g.top, plotWidth, g.height);
-
-    const ends = rows.map(row => Number(row.end.value));
-    const starts = [0, ...ends.slice(0, -1)];
-    starts.forEach((start, index) => {
-      const x1 = xFor(start, width, plan.duration);
-      const x2 = xFor(ends[index], width, plan.duration);
-      ctx.fillStyle = index === selected ? "rgba(77, 163, 255, .23)" :
-        (index%2 ? "rgba(255,255,255,.025)" : "rgba(255,255,255,.055)");
-      ctx.fillRect(x1, g.top, Math.max(1, x2-x1), g.height);
-    });
-    for (const section of analysis?.sections || []) {
-      const x1 = xFor(section.start, width, plan.duration);
-      const x2 = xFor(section.end, width, plan.duration);
-      ctx.fillStyle = "rgba(178, 125, 255, .13)";
-      ctx.fillRect(x1, g.top, x2-x1, g.height);
-      ctx.fillStyle = "#c6a5ff";
-      ctx.font = "11px sans-serif";
-      ctx.fillText(section.kind, x1+4, g.top+14);
-    }
-    ctx.strokeStyle = "rgba(255,255,255,.09)";
-    ctx.beginPath();
-    [70, 145].forEach(y => { ctx.moveTo(g.left, y); ctx.lineTo(width-g.right, y); });
-    ctx.stroke();
-    ctx.fillStyle = "#9ea8b7";
-    ctx.font = "12px sans-serif";
-    ctx.fillText("原曲", 12, 74);
-    ctx.fillText("人声", 12, 149);
-    drawWave(ctx, analysis?.waveform?.original, 70, 34, width, plan.duration, "#6fb8ff");
-    drawWave(ctx, analysis?.waveform?.vocals, 145, 34, width, plan.duration, "#7ee0b1");
-    starts.forEach((start, index) => {
-      const middle = (start+ends[index])/2;
-      const x = xFor(middle, width, plan.duration);
-      const label = `第${index+1}段`;
-      ctx.font = "bold 12px sans-serif";
-      const labelWidth = ctx.measureText(label).width+12;
-      ctx.fillStyle = "rgba(12, 16, 22, .72)";
-      ctx.fillRect(x-labelWidth/2, g.top+5, labelWidth, 20);
-      ctx.fillStyle = "#edf2f8";
-      ctx.fillText(label, x-labelWidth/2+6, g.top+19);
-    });
-
-    ctx.strokeStyle = "rgba(255, 208, 111, .16)";
-    ctx.lineWidth = 1;
-    for (const beat of analysis?.rhythm?.bars || []) {
-      const x = xFor(beat, width, plan.duration);
-      ctx.beginPath(); ctx.moveTo(x, g.top); ctx.lineTo(x, g.top+g.height); ctx.stroke();
-    }
-    ends.slice(0, -1).forEach((end, index) => {
-      const row = plan.segments[index];
-      const x = xFor(end, width, plan.duration);
-      const cls = confidenceClass(row.boundary_confidence, row.boundary_kind);
-      ctx.strokeStyle = cls === "safe" ? "#50d890" : cls === "review" ? "#f1c45c" : "#ff7d7d";
-      ctx.lineWidth = dragIndex === index ? 4 : 2;
-      ctx.beginPath(); ctx.moveTo(x, g.top); ctx.lineTo(x, g.top+g.height); ctx.stroke();
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.beginPath(); ctx.arc(x, g.top, 6, 0, Math.PI*2); ctx.fill();
-    });
-    ctx.fillStyle = "#9ea8b7";
-    ctx.font = "11px sans-serif";
-    const ticks = Math.max(2, Math.ceil(plan.duration/15));
-    for (let i=0; i<=ticks; i++) {
-      const time = plan.duration*i/ticks;
-      const x = xFor(time, width, plan.duration);
-      ctx.fillText(`${time.toFixed(time < 10 ? 1 : 0)}s`, x-8, 218);
-    }
-  }
-  function nearestBoundary(clientX) {
-    const {plan, rows} = getState();
-    const rect = canvas.getBoundingClientRect();
-    let result = -1, distance = 13;
-    rows.slice(0, -1).forEach((row, index) => {
-      const x = xFor(Number(row.end.value), rect.width, plan.duration)+rect.left;
-      const d = Math.abs(clientX-x);
-      if (d < distance) { result = index; distance = d; }
-    });
-    return result;
-  }
-  canvas.onpointerdown = event => {
-    dragIndex = nearestBoundary(event.clientX);
-    if (dragIndex >= 0) {
-      canvas.setPointerCapture(event.pointerId);
-      onSelect(dragIndex);
-    } else {
-      const {rows} = getState();
-      const time = timeFor(event.clientX);
-      const index = rows.findIndex(row => time <= Number(row.end.value));
-      onSelect(index < 0 ? rows.length-1 : index);
-    }
-    draw();
-  };
-  canvas.onpointermove = event => {
-    if (dragIndex < 0) return;
-    onMove(dragIndex, timeFor(event.clientX));
-    draw();
-  };
-  const stop = event => {
-    const committed = dragIndex;
-    if (dragIndex >= 0 && canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-    dragIndex = -1;
-    if (committed >= 0) onCommit(committed);
-    draw();
-  };
-  canvas.onpointerup = stop;
-  canvas.onpointercancel = stop;
-  canvas.drawTimeline = draw;
-  return canvas;
-}
-
 async function openReview(owner) {
-  document.getElementById("h3lv-panel")?.remove();
+  const previous = document.getElementById("h3lv-panel");
+  previous?.querySelector("canvas")?.disposeTimeline?.();
+  previous?.remove();
   const shade = element("div", undefined, document.body, "h3lv-shade");
   shade.id = "h3lv-panel";
   shade.setAttribute("role", "dialog");
@@ -560,17 +413,13 @@ async function openReview(owner) {
     if (selected === index || selected === index+1) selectedAudio.src = previewUrl(selected);
     if (rows[index].cut) rows[index].cut.src = previewUrl(index, true);
   }
-  function updateSelected(index, openCard = false, refreshAudio = true) {
+  function updateSelected(index, refreshAudio = true) {
     if (!plan?.segments.length) return;
     selected = Math.max(0, Math.min(plan.segments.length-1, index));
     const start = selected === 0 ? 0 : Number(rows[selected-1].end.value);
     const end = Number(rows[selected].end.value);
     selectedText.textContent = `当前试听：第 ${selected+1} 段 · ${start.toFixed(3)}—${end.toFixed(3)}s`;
     if (refreshAudio) selectedAudio.src = previewUrl(selected);
-    if (openCard && details[selected]) {
-      details.forEach((item, i) => { item.open = i === selected; });
-      details[selected].scrollIntoView({behavior: "smooth", block: "nearest"});
-    }
     canvas.drawTimeline?.();
   }
   function refreshDraftDisplays() {
@@ -594,10 +443,19 @@ async function openReview(owner) {
     rows[index].end.value = Math.max(lower, Math.min(upper, proposed)).toFixed(3);
     refreshDraftDisplays();
     markDirty();
-    updateSelected(index, false, false);
+    updateSelected(index, false);
   }
-  createTimeline(canvas, state, index => updateSelected(index, true), moveBoundary,
-    index => { refreshPreviewAudio(index); updateSelected(selected); });
+  createTimeline(canvas, state, index => updateSelected(index), moveBoundary,
+    index => { refreshPreviewAudio(index); updateSelected(selected); },
+    async (start, end, signal) => {
+      const path = endpoint(`/audio?index=0&start=${start.toFixed(6)}&end=${end.toFixed(6)}`);
+      const waves = await Promise.all([false, true].map(async vocals => {
+        const response = await api.fetchApi(path+(vocals ? "&vocals=1" : ""), {signal});
+        if (!response.ok) throw new Error("局部波形读取失败");
+        return pcmWavePeaks(await response.arrayBuffer());
+      }));
+      return {original: waves[0], vocals: waves[1]};
+    });
 
   function renderCards() {
     segmentsBody.replaceChildren(); rows = []; details = [];
@@ -637,7 +495,7 @@ async function openReview(owner) {
       end.min = row.start+3; end.max = row.start+plan.max_seconds;
       end.oninput = () => {
         if (!Number.isFinite(Number(end.value))) return;
-        refreshDraftDisplays(); markDirty(); updateSelected(selected, false, false); canvas.drawTimeline?.();
+        refreshDraftDisplays(); markDirty(); updateSelected(selected, false); canvas.drawTimeline?.();
       };
       end.onchange = () => { refreshPreviewAudio(row.index); updateSelected(selected); };
       let cut = null;
@@ -808,10 +666,9 @@ async function openReview(owner) {
     selected = 0;
     load().catch(error => messageDialog({title: "项目加载失败", message: error.message, tone: "error"}));
   };
-  window.addEventListener("resize", () => canvas.drawTimeline?.(), {passive: true});
   await load();
   const timer = setInterval(async () => {
-    if (!shade.isConnected) { clearInterval(timer); return; }
+    if (!shade.isConnected) { clearInterval(timer); canvas.disposeTimeline?.(); return; }
     if (dirty || !plan || !["running", "pausing", "stopping", "merging"].includes(plan.run_status)) return;
     try {
       const latest = await request(endpoint());

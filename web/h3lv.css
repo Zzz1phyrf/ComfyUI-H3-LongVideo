@@ -143,3 +143,8 @@
   .h3lv-card-body.has-preview { min-height: 0; padding-right: 14px; }
   .h3lv-segment-preview { position: static; width: 100%; margin: 0 0 12px; }
 }
+
+.h3lv-timeline-tools { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-bottom:8px; }
+.h3lv-timeline-readout { color:#b8c5d5; font-size:12px; font-variant-numeric:tabular-nums; }
+.h3lv-timeline-navigation { display:block; width:100%; margin:8px 0; accent-color:#4da3ff; }
+.h3lv-timeline { height:228px; }
