@@ -211,7 +211,7 @@ async function openDirectorRules(owner) {
   actionButton(title, "关闭", () => shade.remove(), "h3lv-close");
   const explanation = selectedMode === "speaking"
     ? "当前节点选择了 speaking。这里只编辑口播规则：连续固定机位和跨段一致构图。"
-    : "当前节点选择了 singing。这里只编辑唱歌规则：按音频能量安排运镜，并避免相邻片段重复同类运动。";
+    : "唱歌景别由节点的“最远允许景别”直接控制；旧 allowed_framings 字段不再限制景别。dynamic 使用可见横移、环绕或推拉，不选择轻微构图调整。这里编辑能量对应的运镜候选及相邻运动关系。";
   element("p", `${explanation} 规则不判断图片内容，也不决定音频被切成几段；保存后只用于重新分析的新项目。`, panel, "h3lv-help");
   const rules = await request("/h3lv/rules");
   let fullConfig = JSON.parse(rules.config_text);

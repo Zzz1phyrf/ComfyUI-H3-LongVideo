@@ -291,7 +291,7 @@ class Analyze:
             "asr_python": ("STRING", {"default": ""}), "asr_model": ("STRING", {"default": ""}),
             "asr_device": (["auto", "cuda", "cpu"],),
             "camera_activity": (["auto", "moderate", "dynamic"],),
-            "widest_framing": (["medium close-up", "medium shot"],),
+            "widest_framing": (["medium close-up", "medium shot", "full shot", "close-up"],),
             # Hidden and ignored compatibility slot. Keeping its position prevents
             # older workflow widget values from shifting project_id/segment_index.
             "director_mode": ("STRING", {"default": "本地规则"}),

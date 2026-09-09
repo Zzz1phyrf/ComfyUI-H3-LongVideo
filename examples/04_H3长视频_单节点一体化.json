@@ -326,11 +326,11 @@
         }
       },
       "widgets_values": [
-        "MiniMax\\minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "MiniMax\\minimax_h3_ref2va_pruned_int8_convrot.safetensors",
         "default"
       ],
       "widgets_values_named": {
-        "unet_name": "MiniMax\\minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "unet_name": "MiniMax\\minimax_h3_ref2va_pruned_int8_convrot.safetensors",
         "weight_dtype": "default"
       },
       "color": "#43c3ff",
@@ -875,78 +875,6 @@
       "textcolor": "#FFFFFF"
     },
     {
-      "id": 201,
-      "type": "LoraLoaderModelOnly",
-      "pos": [
-        -570.2381879989532,
-        4784.704165035065
-      ],
-      "size": [
-        252.94934802497983,
-        82
-      ],
-      "flags": {},
-      "order": 16,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "模型",
-          "name": "model",
-          "type": "MODEL",
-          "link": 460
-        },
-        {
-          "localized_name": "LoRA名称",
-          "name": "lora_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "lora_name"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "模型强度",
-          "name": "strength_model",
-          "type": "FLOAT",
-          "widget": {
-            "name": "strength_model"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "模型",
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            484
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.33.1",
-        "Node name for S&R": "LoraLoaderModelOnly",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.8"
-        }
-      },
-      "widgets_values": [
-        "MiniMax\\minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors",
-        1
-      ],
-      "widgets_values_named": {
-        "lora_name": "MiniMax\\minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors",
-        "strength_model": 1
-      },
-      "color": "#43c3ff",
-      "bgcolor": "#003f5c",
-      "textcolor": "#000000"
-    },
-    {
       "id": 136,
       "type": "MiniMaxH3ReferenceToVideo",
       "pos": [
@@ -1116,15 +1044,15 @@
       },
       "widgets_values": [
         "",
-        1344,
-        768,
+        960,
+        544,
         124,
         "match"
       ],
       "widgets_values_named": {
         "prompt": "",
-        "width": 1344,
-        "height": 768,
+        "width": 960,
+        "height": 544,
         "length": 124,
         "ref_image_size": "match"
       },
@@ -1572,20 +1500,20 @@
         }
       },
       "widgets_values": [
-        "H3数字人",
+        "扩写-自然语言",
         true,
-        "Expand one compact Chinese camera brief and an optional user-written material description into one valid MiniMax H3 Ref2VA prompt.\n\nNew camera briefs contain exactly two labeled fields: 镜头方案 and 表演节奏. 镜头方案 is one self-contained instruction that already combines the opening composition, the one camera operation, the ending composition and the ending motion state. Do not split it into competing camera plans. For existing projects, also accept the legacy seven-field format: 生成时长, 开场构图, 段内运镜, 结束构图, 入口衔接, 出口运动状态, 表演节奏.\n\nThe text after the camera brief is an optional project-level material description. When present, it is the only authority for numbered <Picture N>, <Subject N> and <Audio N> relationships and for identity, environment, clothing, props and accessories. Use every declared relationship faithfully. When it is empty, still produce the complete six-section prompt from the camera brief: do not invent numbered references, image roles, identity, appearance, environment, clothing, props or accessories.\n\nReturn plain English with exactly these headings in this order:\nsubject_definitions:\nsummary:\nretention_analysis:\ndetailed_description:\noverall_soundscape:\nnon_diegetic_music:\n\nAssembly contract:\n- When a material description is present, subject_definitions and retention_analysis come only from it. When it is empty, state that no project-level material relationships were supplied and do not assign reference roles.\n- summary states one continuous shot. Mention speaking or singing only when the material description or 表演节奏 explicitly establishes it. Do not invent a duration for a new two-field brief; playback length is controlled separately by the video node. Preserve an exact 生成时长 only when a legacy brief supplies it.\n- detailed_description contains exactly one [Shot 1]. For a new brief, follow 镜头方案 as one binding camera path and then apply 表演节奏. For a legacy brief, follow its seven fields in playback order.\n- Preserve the approved camera direction, speed, framing path and ending motion state. Do not replace a physical orbit with a pan or lateral truck, and do not add a second camera move. In a legacy brief, 入口衔接 describes the relationship before this independently generated clip and does not create another shot.\n- Describe articulation or singing only as established by 表演节奏 or the optional material description. The supplied audio reference guides visible vocal timing without requiring a numbered audio tag.\n- Keep any identity, environment, wardrobe or object statements exactly within the user's material description. Omit undeclared details instead of filling them in.\n\nWrite overall_soundscape as:\nThe supplied audio reference guides the visible vocal performance; no additional diegetic sounds are specified.\n\nWrite non_diegetic_music as:\nN/A\n\nKeep the complete prompt concise and under 2200 characters. Output only the six-section prompt.\n",
-        "",
+        "Write one MiniMax H3 Ref2VA video prompt from the user's material description and this segment's Chinese camera brief. This is a text-only formatter; you do not see image pixels. Output only the six English sections below, in this order, without Markdown fences:\nsubject_definitions:\nsummary:\nretention_analysis:\ndetailed_description:\noverall_soundscape:\nnon_diegetic_music:\n\nInput:\n- New briefs contain 模式 (口播/speaking or 唱歌/singing), 镜头方案 and 表演节奏. Also accept the legacy seven-field format: 生成时长, 开场构图, 段内运镜, 结束构图, 入口衔接, 出口运动状态, 表演节奏. The approved camera path and ending motion state are binding. Each output is one independently generated clip, with exactly one [Shot 1].\n- The user-written material description is the authority for reference roles and relationships and actual picture numbering. Use every declared role. A person and environment may come from one image or separate images. Do not infer roles from filenames or invent a missing reference. Omit undeclared details rather than guessing colors, furniture, accessories, sitting/standing posture or actions. This never means removing details visible in an assigned reference.\n\nCRITICAL TAG SYNTAX:\nEvery subject mention MUST use the literal angle-bracket token <Subject N>, where N is its assigned integer. Every source-image mention MUST use <Picture N>. Bare \"Subject 1\" or \"Picture 1\" is invalid. Before responding, fix any missing angle brackets.\nDefine visible content as Subjects, and cite its source Picture inside its definition. Use the defined SUBJECT tags throughout summary and [Shot 1]; do not refer to a whole source picture as the performer.\nConditional example of syntax only, when the user declares picture 1 as person and picture 2 as environment:\nsubject_definitions:\n<Subject 1> (S1) is the single performer whose facial identity, hair and clothing come from <Picture 1>.\n<Subject 2> is the environment from <Picture 2>.\nThis example is not a fixed picture-role mapping. Adapt IDs to the user's actual declared sources. If one picture supplies person AND environment, define those as two Subjects sourced from that same picture. Several views of the same person still define ONE person Subject.\nUse a standalone <Picture N> definition only when the picture is explicitly a composition, first-frame or keyframe anchor. Person sheets and environment references are content sources, not automatically composition anchors.\n\nCOMBINE REFERENCES IN EVERY SEGMENT:\n- When person and environment are declared, summary and the FIRST sentence after [Shot 1] must show the ONE person Subject physically present within the environment Subject. The scene reference supplies the whole setting, ground and background throughout the clip. The person source supplies identity and appearance only when a separate setting is assigned; its incidental backdrop is not the video setting.\n- A multi-view/three-view character sheet is appearance evidence, not a target image layout. Resolve all its views into ONE complete living performer wearing ONE consistent outfit in ONE continuous scene. Use its facial-detail view for facial identity and complementary clothing views for the outfit. The generated frame contains only that single performer and the assigned environment: no reference-sheet panels, duplicate bodies, floating portrait, layout partitions, masks or placeholders. In [Shot 1], explicitly state the single resolved performer in the scene, not merely that a sheet exists.\n- Preserve the environment Subject's recognizable spatial structure, surfaces, light sources and background from beginning to end and in every segment. Camera movement changes perspective/parallax within that environment, not its identity. Do not replace it with the person's source backdrop. Each clip must define its own reference relationship; never rely on \"same as the previous clip\".\n\nIDENTITY AND CLOTHING — BOTH MODES:\nIn retention_analysis and [Shot 1], explicitly preserve the person's facial identity, hairstyle, garment design, EACH garment's original base color, fabric, patterns and existing worn/held items from its assigned source throughout the clip. Natural lighting may shade fabric but does not recolor or replace the outfit. Repeat this reference-relative requirement in every segment. Only name an exact color/material if the user supplies it; do not guess from the role description.\n\nMODE AND CAMERA:\nSpeaking mode only: preserve the reference composition specified by the brief: person placement/scale, body range, headroom, angle, crop boundaries and background perspective. One locked camera throughout; natural lip articulation, blinking, breathing and restrained gestures. Do not invent a different pose or tighter crop. A separate declared scene still supplies the background. An image is not a pixel-exact first-frame guarantee.\nSinging mode only: visibly execute the brief's physical truck, orbit or dolly, its direction and opening-to-ending shot sizes. Do not turn movement into a fixed shot or tiny breathing drift. Allow natural off-center placement and space in the direction of performance; do not add a compulsory centered position or fixed eye height. Full-body means one complete performer from head to feet, standing on the scene ground when that pose is specified. Close-ups and medium shots retain the same person and environment. Execute only the one approved camera operation, allowing it to remain active to the ending when requested.\n\nSECTION DETAILS:\n- subject_definitions: one line per defined person/environment/content Subject, with its correctly numbered source. The vocal performer has (S1). Use the reference-relative appearance contract without inventing visual details.\n- summary: begin [reference generation], then state mode, one continuous shot, the single person/environment combination and the approved camera path. Omit duration unless explicitly provided in a legacy brief.\n- retention_analysis: use official markers such as fully_preserved or attribute_transfer for each defined Subject WITHIN its assigned role. For a character sheet, identity and wardrobe are preserved, while the sheet layout and incidental backdrop are excluded. Do not mark the entire sheet or picture layout as fully_preserved.\n- detailed_description: exactly one [Shot 1]. Start with the single performer Subject in the environment Subject and the opening framing, then the actual movement, performance and ending. Reaffirm scene continuity and original garment colors. Do not add cuts, extra camera operations, plot or undeclared objects. Keep <Subject N> tags in this body.\n- Audio drives vocal timing, never printed words. Preserve explicitly supplied spoken/sung words in their original language inside <d>[Language] ...</d>, but do not invent or transcribe words. Only declare a numbered <Audio N> when the user establishes its role/number.\n- Inside [Shot 1], include: \"Keep the entire shot free of added subtitles, captions, lyric text, titles, labels, watermarks and graphic overlays.\" Do not add a subtitles/negative_prompt heading or an instruction to preserve scene writing.\n- overall_soundscape: The supplied audio reference guides the visible vocal performance; no additional diegetic sounds are specified.\n- non_diegetic_music: N/A\n\nFinal silent check: six headings in order; every Picture/Subject tag has angle brackets and a defined role; [Shot 1] uses SUBJECT tags for visible entities; one performer in the assigned scene; no sheet layout reproduced; original clothing colors preserved; speaking fixed versus singing moving; no added text overlays. Correct omissions before returning. Keep the complete output under 5000 characters, shortening repeated prose before any of these requirements.\n",
+        "图1是人物，图2是场景。",
         "阿里云/qwen3.8-max",
         true,
         724884049401813,
         "randomize"
       ],
       "widgets_values_named": {
-        "rule": "H3数字人",
+        "rule": "扩写-自然语言",
         "custom_rule": true,
-        "custom_rule_content": "Expand one compact Chinese camera brief and an optional user-written material description into one valid MiniMax H3 Ref2VA prompt.\n\nNew camera briefs contain exactly two labeled fields: 镜头方案 and 表演节奏. 镜头方案 is one self-contained instruction that already combines the opening composition, the one camera operation, the ending composition and the ending motion state. Do not split it into competing camera plans. For existing projects, also accept the legacy seven-field format: 生成时长, 开场构图, 段内运镜, 结束构图, 入口衔接, 出口运动状态, 表演节奏.\n\nThe text after the camera brief is an optional project-level material description. When present, it is the only authority for numbered <Picture N>, <Subject N> and <Audio N> relationships and for identity, environment, clothing, props and accessories. Use every declared relationship faithfully. When it is empty, still produce the complete six-section prompt from the camera brief: do not invent numbered references, image roles, identity, appearance, environment, clothing, props or accessories.\n\nReturn plain English with exactly these headings in this order:\nsubject_definitions:\nsummary:\nretention_analysis:\ndetailed_description:\noverall_soundscape:\nnon_diegetic_music:\n\nAssembly contract:\n- When a material description is present, subject_definitions and retention_analysis come only from it. When it is empty, state that no project-level material relationships were supplied and do not assign reference roles.\n- summary states one continuous shot. Mention speaking or singing only when the material description or 表演节奏 explicitly establishes it. Do not invent a duration for a new two-field brief; playback length is controlled separately by the video node. Preserve an exact 生成时长 only when a legacy brief supplies it.\n- detailed_description contains exactly one [Shot 1]. For a new brief, follow 镜头方案 as one binding camera path and then apply 表演节奏. For a legacy brief, follow its seven fields in playback order.\n- Preserve the approved camera direction, speed, framing path and ending motion state. Do not replace a physical orbit with a pan or lateral truck, and do not add a second camera move. In a legacy brief, 入口衔接 describes the relationship before this independently generated clip and does not create another shot.\n- Describe articulation or singing only as established by 表演节奏 or the optional material description. The supplied audio reference guides visible vocal timing without requiring a numbered audio tag.\n- Keep any identity, environment, wardrobe or object statements exactly within the user's material description. Omit undeclared details instead of filling them in.\n\nWrite overall_soundscape as:\nThe supplied audio reference guides the visible vocal performance; no additional diegetic sounds are specified.\n\nWrite non_diegetic_music as:\nN/A\n\nKeep the complete prompt concise and under 2200 characters. Output only the six-section prompt.\n",
-        "user_prompt": "",
+        "custom_rule_content": "Write one MiniMax H3 Ref2VA video prompt from the user's material description and this segment's Chinese camera brief. This is a text-only formatter; you do not see image pixels. Output only the six English sections below, in this order, without Markdown fences:\nsubject_definitions:\nsummary:\nretention_analysis:\ndetailed_description:\noverall_soundscape:\nnon_diegetic_music:\n\nInput:\n- New briefs contain 模式 (口播/speaking or 唱歌/singing), 镜头方案 and 表演节奏. Also accept the legacy seven-field format: 生成时长, 开场构图, 段内运镜, 结束构图, 入口衔接, 出口运动状态, 表演节奏. The approved camera path and ending motion state are binding. Each output is one independently generated clip, with exactly one [Shot 1].\n- The user-written material description is the authority for reference roles and relationships and actual picture numbering. Use every declared role. A person and environment may come from one image or separate images. Do not infer roles from filenames or invent a missing reference. Omit undeclared details rather than guessing colors, furniture, accessories, sitting/standing posture or actions. This never means removing details visible in an assigned reference.\n\nCRITICAL TAG SYNTAX:\nEvery subject mention MUST use the literal angle-bracket token <Subject N>, where N is its assigned integer. Every source-image mention MUST use <Picture N>. Bare \"Subject 1\" or \"Picture 1\" is invalid. Before responding, fix any missing angle brackets.\nDefine visible content as Subjects, and cite its source Picture inside its definition. Use the defined SUBJECT tags throughout summary and [Shot 1]; do not refer to a whole source picture as the performer.\nConditional example of syntax only, when the user declares picture 1 as person and picture 2 as environment:\nsubject_definitions:\n<Subject 1> (S1) is the single performer whose facial identity, hair and clothing come from <Picture 1>.\n<Subject 2> is the environment from <Picture 2>.\nThis example is not a fixed picture-role mapping. Adapt IDs to the user's actual declared sources. If one picture supplies person AND environment, define those as two Subjects sourced from that same picture. Several views of the same person still define ONE person Subject.\nUse a standalone <Picture N> definition only when the picture is explicitly a composition, first-frame or keyframe anchor. Person sheets and environment references are content sources, not automatically composition anchors.\n\nCOMBINE REFERENCES IN EVERY SEGMENT:\n- When person and environment are declared, summary and the FIRST sentence after [Shot 1] must show the ONE person Subject physically present within the environment Subject. The scene reference supplies the whole setting, ground and background throughout the clip. The person source supplies identity and appearance only when a separate setting is assigned; its incidental backdrop is not the video setting.\n- A multi-view/three-view character sheet is appearance evidence, not a target image layout. Resolve all its views into ONE complete living performer wearing ONE consistent outfit in ONE continuous scene. Use its facial-detail view for facial identity and complementary clothing views for the outfit. The generated frame contains only that single performer and the assigned environment: no reference-sheet panels, duplicate bodies, floating portrait, layout partitions, masks or placeholders. In [Shot 1], explicitly state the single resolved performer in the scene, not merely that a sheet exists.\n- Preserve the environment Subject's recognizable spatial structure, surfaces, light sources and background from beginning to end and in every segment. Camera movement changes perspective/parallax within that environment, not its identity. Do not replace it with the person's source backdrop. Each clip must define its own reference relationship; never rely on \"same as the previous clip\".\n\nIDENTITY AND CLOTHING — BOTH MODES:\nIn retention_analysis and [Shot 1], explicitly preserve the person's facial identity, hairstyle, garment design, EACH garment's original base color, fabric, patterns and existing worn/held items from its assigned source throughout the clip. Natural lighting may shade fabric but does not recolor or replace the outfit. Repeat this reference-relative requirement in every segment. Only name an exact color/material if the user supplies it; do not guess from the role description.\n\nMODE AND CAMERA:\nSpeaking mode only: preserve the reference composition specified by the brief: person placement/scale, body range, headroom, angle, crop boundaries and background perspective. One locked camera throughout; natural lip articulation, blinking, breathing and restrained gestures. Do not invent a different pose or tighter crop. A separate declared scene still supplies the background. An image is not a pixel-exact first-frame guarantee.\nSinging mode only: visibly execute the brief's physical truck, orbit or dolly, its direction and opening-to-ending shot sizes. Do not turn movement into a fixed shot or tiny breathing drift. Allow natural off-center placement and space in the direction of performance; do not add a compulsory centered position or fixed eye height. Full-body means one complete performer from head to feet, standing on the scene ground when that pose is specified. Close-ups and medium shots retain the same person and environment. Execute only the one approved camera operation, allowing it to remain active to the ending when requested.\n\nSECTION DETAILS:\n- subject_definitions: one line per defined person/environment/content Subject, with its correctly numbered source. The vocal performer has (S1). Use the reference-relative appearance contract without inventing visual details.\n- summary: begin [reference generation], then state mode, one continuous shot, the single person/environment combination and the approved camera path. Omit duration unless explicitly provided in a legacy brief.\n- retention_analysis: use official markers such as fully_preserved or attribute_transfer for each defined Subject WITHIN its assigned role. For a character sheet, identity and wardrobe are preserved, while the sheet layout and incidental backdrop are excluded. Do not mark the entire sheet or picture layout as fully_preserved.\n- detailed_description: exactly one [Shot 1]. Start with the single performer Subject in the environment Subject and the opening framing, then the actual movement, performance and ending. Reaffirm scene continuity and original garment colors. Do not add cuts, extra camera operations, plot or undeclared objects. Keep <Subject N> tags in this body.\n- Audio drives vocal timing, never printed words. Preserve explicitly supplied spoken/sung words in their original language inside <d>[Language] ...</d>, but do not invent or transcribe words. Only declare a numbered <Audio N> when the user establishes its role/number.\n- Inside [Shot 1], include: \"Keep the entire shot free of added subtitles, captions, lyric text, titles, labels, watermarks and graphic overlays.\" Do not add a subtitles/negative_prompt heading or an instruction to preserve scene writing.\n- overall_soundscape: The supplied audio reference guides the visible vocal performance; no additional diegetic sounds are specified.\n- non_diegetic_music: N/A\n\nFinal silent check: six headings in order; every Picture/Subject tag has angle brackets and a defined role; [Shot 1] uses SUBJECT tags for visible entities; one performer in the assigned scene; no sheet layout reproduced; original clothing colors preserved; speaking fixed versus singing moving; no added text overlays. Correct omissions before returning. Keep the complete output under 5000 characters, shortening repeated prose before any of these requirements.\n",
+        "user_prompt": "图1是人物，图2是场景。",
         "llm_service": "阿里云/qwen3.8-max",
         "ollama_auto_unload": true,
         "seed": 724884049401813,
@@ -2220,8 +2148,8 @@
         "",
         "",
         "auto",
-        "auto",
-        "medium shot",
+        "dynamic",
+        "full shot",
         "本地规则",
         "",
         0
@@ -2233,8 +2161,8 @@
         "asr_python": "",
         "asr_model": "",
         "asr_device": "auto",
-        "camera_activity": "auto",
-        "widest_framing": "medium shot",
+        "camera_activity": "dynamic",
+        "widest_framing": "full shot",
         "director_mode": "本地规则",
         "project_id": "",
         "segment_index": 0
@@ -2283,6 +2211,78 @@
       },
       "widgets_values": [],
       "widgets_values_named": {}
+    },
+    {
+      "id": 201,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        -570.2381879989532,
+        4784.704165035065
+      ],
+      "size": [
+        252.94934802497983,
+        82
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "link": 460
+        },
+        {
+          "localized_name": "LoRA名称",
+          "name": "lora_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "模型强度",
+          "name": "strength_model",
+          "type": "FLOAT",
+          "widget": {
+            "name": "strength_model"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "模型",
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            484
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.1",
+        "Node name for S&R": "LoraLoaderModelOnly",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "MiniMax\\minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
+        1
+      ],
+      "widgets_values_named": {
+        "lora_name": "MiniMax\\minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
+        "strength_model": 1
+      },
+      "color": "#43c3ff",
+      "bgcolor": "#003f5c",
+      "textcolor": "#000000"
     }
   ],
   "links": [
@@ -2679,8 +2679,7 @@
     "VHS_KeepIntermediate": true,
     "ue_links": [],
     "links_added_by_ue": [],
-    "h3lv_note": "Single-node two-stage workflow: native Run analyzes audio only; approve in the review panel, then use the same node's green sequential-generation control.",
-    "h3lv_reference_composite": "BiRefNet mask composites Picture 1 performer onto Picture 2 environment before H3 and AI directing."
+    "h3lv_note": "Single-node two-stage workflow: native Run analyzes audio only; approve in the review panel, then use the same node's green sequential-generation control."
   },
   "version": 0.4
 }

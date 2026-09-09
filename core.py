@@ -433,7 +433,7 @@ def director_preferences(plan):
         camera = "auto"
     if plan.get("mode") == "singing" and camera == "steady":
         camera = "moderate"
-    if widest not in {"medium close-up", "medium shot"}:
+    if widest not in {"close-up", "medium close-up", "medium shot", "full shot"}:
         widest = "medium close-up"
     rules = (validate_config(supplied["rule_config"])
              if isinstance(supplied.get("rule_config"), dict) else default_config())
@@ -605,21 +605,12 @@ def performance_direction(preference, band):
 
 def _start_composition(index, band, rows, sizes, previous_end, states, angles=None,
                        seed_key="", avoid_axis_cross=True):
+    target_size = sizes[0] if band == "high" else sizes[-1] if band == "low" else sizes[len(sizes)//2]
     if index == 0:
-        has_vocal = bool(str(rows[index].get("text", "")).strip()) or "含识别人声" in str(rows[index].get("vocal_state", ""))
-        if "medium shot" in sizes and band == "high":
-            return "medium shot", "front"
-        if "medium shot" in sizes and band == "low" and not has_vocal:
-            return "medium shot", "front"
-        return "medium close-up", "front"
-
-    target_size = "medium close-up" if band == "high" else (
-        "medium shot" if band == "low" and "medium shot" in sizes else previous_end["framing"])
-    if states and states[-1].get("camera_move_family") == "dolly in":
-        target_size = "medium close-up"
-    if (len(sizes) > 1 and len(states) >= 2
-            and states[-1]["camera_start"] == states[-2]["camera_start"] == target_size):
-        target_size = "medium shot" if target_size == "medium close-up" else "medium close-up"
+        return target_size, "front"
+    if len(sizes) > 1 and states and states[-1]["camera_start"] == target_size:
+        target_size = min((size for size in sizes if size != target_size),
+                          key=lambda size: sum(state["camera_start"] == size for state in states))
     angles = list(angles or ["front", "front three-quarter right", "front three-quarter left"])
     candidates = []
     previous_angle = previous_end["angle"]
@@ -694,34 +685,35 @@ def _movement_for(framing, angle, band, activity, sizes, states, rules=None, see
         "low": "moderate", "medium": "moderate", "high": "dynamic"}[band]
     if resolved == "steady":
         resolved = "moderate"
+    rules = copy.deepcopy(rules)
+    if resolved == "dynamic":
+        pool = [move for move in rules["energy_movements"][band] if move != "micro_reframe"]
+        if len({_movement_type_family(move) for move in pool}) < 2:
+            pool = list(dict.fromkeys(pool + ["truck_left", "truck_right", "dolly_in", "dolly_out"]))
+        rules["energy_movements"][band] = pool
     planned = _select_movement(rules, band, states, seed_key)
-    if planned == "dolly_in":
-        pace = "very slow controlled" if band == "low" else (
-            "controlled" if resolved == "moderate" else "deliberate but restrained")
-        return (framing, "dolly in", "forward",
-                f"a {pace} short physical dolly in within the established {framing}; "
-                "the performer becomes only slightly larger and remains chest-up, with subtle readable background parallax",
-                "short dolly-in motion is already gently readable at the cut",
-                "short dolly-in motion remains active at the cut", planned)
-    if planned == "dolly_out":
-        pace = "very slow controlled" if band == "low" else "controlled"
-        return (framing, "dolly out", "backward",
-                f"a {pace} short physical dolly out within the established {framing}; "
-                "the performer becomes only slightly smaller while the frame remains above the waist, with subtle readable background parallax",
-                "short dolly-out motion is already gently readable at the cut",
-                "short dolly-out motion remains active at the cut", planned)
+    if planned in {"dolly_in", "dolly_out"}:
+        inward = planned == "dolly_in"
+        position = sizes.index(framing)
+        end = sizes[max(0, position-1) if inward else min(len(sizes)-1, position+1)]
+        direction = "forward" if inward else "backward"
+        family = "dolly in" if inward else "dolly out"
+        return (end, family, direction,
+                f"a smooth physical {family} from {framing} to {end}, with readable subject-scale change and coherent scene parallax",
+                f"{family} motion is already readable at the cut",
+                f"{family} motion remains active at the cut", planned)
     if planned == "micro_reframe":
         pace = "barely perceptible" if band == "low" else "restrained"
         return (framing, "micro reframe", "", (
                 f"a {pace} tripod-based breathing reframe around the established composition; "
-                "the performer, eye line and background landmarks remain spatially anchored"),
+                "the performer stays readable within the same environment"),
                 "micro-reframing is already gently readable at the cut",
                 "micro-reframing remains active at the cut", planned)
     if planned in {"arc_left", "arc_right"}:
         direction = "left" if planned == "arc_left" else "right"
         return (framing, "arc", direction, (
                 f"a short shallow arc move a few degrees to the {direction} around the performer; "
-                f"{framing} scale and centered eye line stay stable while local background parallax remains subtle"),
+                f"{framing} scale remains readable while the camera reveals coherent background parallax"),
                 f"shallow arc motion to the {direction} is already gently readable at the cut",
                 f"shallow arc motion to the {direction} remains active at the cut", planned)
     direction = "left" if planned == "truck_left" else "right"
@@ -730,6 +722,10 @@ def _movement_for(framing, angle, band, activity, sizes, states, rules=None, see
     move = (f"a {speed} lateral camera truck to the {direction} at a constant viewing angle; "
             f"background landmarks shift briefly {background} relative to the singer while {framing} framing is maintained; "
             "the move stays short and does not become continuous background travel")
+    if resolved == "dynamic":
+        move = (f"a continuous smooth physical camera truck to the {direction} over about one performer body-width; "
+                f"background landmarks show clear sustained lateral parallax relative to the performer while {framing} is maintained; "
+                "the composition visibly changes from opening to ending and the camera remains in motion")
     return (framing, "lateral", direction, move,
             f"lateral motion to the {direction} is already gently readable at the cut",
             f"lateral motion to the {direction} remains active at the cut", planned)
@@ -792,12 +788,16 @@ def camera_sequence(mode, rows, director=None):
             "camera_move_family": "steady", "camera_move_direction": "", "camera_move_type": "steady",
             "relative_energy": "medium",
             "performance_direction": "restrained fixed-camera spoken delivery with direct gaze and compact natural gestures",
-            "composition_anchor": "speaker centered with a stable upper-third eye line, direct reference-consistent gaze, shoulder line, hand position and visible tabletop props",
+            "composition_anchor": "reference-consistent subject placement, gaze and body framing",
         } for index in range(len(rows))]
     singing = rules["singing"]
-    sizes = list(singing["allowed_framings"])
-    if prefs["widest_framing"] == "medium close-up":
-        sizes = [item for item in sizes if item == "medium close-up"] or ["medium close-up"]
+    # The visible node control is the sole singing shot-size authority.
+    # Legacy allowed_framings remains readable but cannot silently narrow it.
+    size_order = ["close-up", "medium close-up", "medium shot", "full shot"]
+    widest = prefs.get("widest_framing", "medium close-up")
+    sizes = size_order[:size_order.index(widest)+1]
+    if widest == "medium close-up":
+        sizes = ["medium close-up"]
     angles = list(singing["allowed_angles"])
     seed_key = f"{prefs.get('schedule_seed', 'h3lv')}|{prefs.get('rule_revision', 'legacy')}"
     bands = energy_bands(rows)
@@ -828,9 +828,10 @@ def camera_sequence(mode, rows, director=None):
             "previous_end_angle": previous_end["angle"],
             "camera_move_family": family, "camera_move_direction": direction,
             "camera_move_type": movement_type,
+            "camera_activity": prefs["camera_activity"],
             "relative_energy": band,
             "performance_direction": performance_direction(prefs["performance_intensity"], band),
-            "composition_anchor": "performer centered with the eye line near the upper third; reference-consistent gaze and microphone screen side",
+            "composition_anchor": "performer remains readable, with room in the direction of movement and a consistent environment",
         })
         previous_end = {"framing": ending, "angle": ending_angle, "motion": exit_motion}
     for index, state in enumerate(states):
@@ -847,7 +848,7 @@ def framing_crop(framing):
 
 
 def _zh_framing(value):
-    return {"medium close-up": "中近景（胸部以上）", "medium shot": "中景（腰部以上）"}.get(value, value)
+    return {"close-up": "近景（头部与肩部）", "medium close-up": "中近景（胸部以上）", "medium shot": "中景（腰部以上）", "full shot": "全身景（头顶至双脚完整入画）"}.get(value, value)
 
 
 def _zh_angle(value):
@@ -881,18 +882,22 @@ def _zh_camera_operation(row, framing, ending):
     if family == "steady":
         return "固定机位，人物与背景构图保持稳定"
     if family == "dolly in":
-        return f"摄影机短距离缓慢前移，人物仅轻微变大并保持{_zh_framing(framing)}，背景产生轻微视差"
+        return f"摄影机平稳前移，从{_zh_framing(framing)}推进至{_zh_framing(ending)}，人物逐渐变大，背景产生自然视差"
     if family == "dolly out":
-        return f"摄影机短距离缓慢后移，人物仅轻微变小并保持{_zh_framing(framing)}，背景产生轻微视差"
+        return f"摄影机平稳后移，从{_zh_framing(framing)}拉远至{_zh_framing(ending)}，人物逐渐变小，展示更多原有场景"
     if family == "micro reframe":
-        return "摄影机仅做轻微呼吸式构图调整，人物、眼线和背景保持稳定"
+        return "摄影机做小幅构图调整，人物保持清晰可读，场景空间关系连贯"
     if family == "arc":
         side = "左侧" if direction == "left" else "右侧"
-        return (f"摄影机实体向{side}环绕人物约20度，人物保持居中，"
+        return (f"摄影机实体向{side}环绕人物约20度，人物可随运镜自然偏离中心，保持完整的当前景别裁切，"
                 "背景产生清晰但克制的局部视差；不是原地摇镜")
     side = "左侧" if direction == "left" else "右侧"
     background = "右移" if direction == "left" else "左移"
-    return f"摄影机向{side}短距离平稳横移，人物保持居中，背景短暂向画面{background}产生视差"
+    if (row.get("camera_activity") == "dynamic"
+            or row.get("camera_activity") == "auto" and row.get("relative_energy") == "high"):
+        return (f"摄影机沿水平轨道向{side}持续平稳横移约一个人物身宽的距离，人物可随运镜自然偏离中心，"
+                "保持完整的当前景别裁切，背景地标与人物产生清晰、持续的横向视差，开场到结尾的构图明显改变")
+    return f"摄影机向{side}短距离平稳横移，人物可随运镜自然偏离中心，保持完整的当前景别裁切，背景短暂向画面{background}产生视差"
 
 
 def _zh_motion(row, entry=True):
@@ -920,7 +925,7 @@ def segment_brief(plan, row, framing, ending, move, previous_frame):
                        "全程固定机位单一连续镜头，背景透视和构图跨段保持一致")
         performance = "自然口播，口型跟随音频，保留自然眨眼、呼吸和克制的小幅动作"
     else:
-        opening = f"{_zh_framing(framing)}{_zh_angle(row.get('camera_start_angle', 'front'))}开场，人物居中"
+        opening = f"{_zh_framing(framing)}{_zh_angle(row.get('camera_start_angle', 'front'))}开场，依表演朝向留出空间"
         camera = _zh_camera_operation(row, framing, ending)
         ending_text = f"{_zh_framing(ending)}{_zh_angle(row.get('camera_end_angle', 'front'))}"
         exit_motion = _zh_motion(row, entry=False)
@@ -1049,7 +1054,7 @@ def compose_h3_prompt(plan, row):
     angle = _english_angle(row.get("camera_start_angle"))
     ending_angle = _english_angle(row.get("camera_end_angle"))
     camera = str(row.get("camera_move") or "a steady locked-off camera")
-    anchor = str(row.get("composition_anchor") or "performer centered with a stable upper-third eye line")
+    anchor = str(row.get("composition_anchor") or "reference-consistent subject placement")
     performance = str(row.get("performance_direction") or (
         "restrained fixed-camera spoken delivery with compact natural gestures"
         if plan.get("mode") == "speaking" else

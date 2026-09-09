@@ -12,7 +12,7 @@ MOVEMENTS = {
     "steady", "dolly_in", "dolly_out", "truck_left", "truck_right",
     "micro_reframe", "arc_left", "arc_right",
 }
-FRAMINGS = {"medium close-up", "medium shot"}
+FRAMINGS = {"close-up", "medium close-up", "medium shot", "full shot"}
 ANGLES = {"front", "front three-quarter left", "front three-quarter right"}
 
 

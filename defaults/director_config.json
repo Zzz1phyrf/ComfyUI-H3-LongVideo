@@ -2,7 +2,10 @@
   "schema": 2,
   "singing": {
     "allowed_framings": [
-      "medium close-up"
+      "close-up",
+      "medium close-up",
+      "medium shot",
+      "full shot"
     ],
     "allowed_angles": [
       "front",

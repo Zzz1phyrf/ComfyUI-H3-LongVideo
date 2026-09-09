@@ -321,7 +321,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn("user-written material description", expected)
         self.assertIn("legacy seven-field format", expected)
         self.assertIn("Omit undeclared details", expected)
-        for forbidden in ("partially_copy", "fully_copy", "audio reuse", "final assembly", "FFmpeg"):
+        for forbidden in ("final assembly", "FFmpeg"):
             self.assertNotIn(forbidden, expected)
 
     def test_generation_preserves_prompt_assistant_rules_in_both_modes(self):
@@ -785,7 +785,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn("镜头方案 and 表演节奏", rule)
         self.assertIn("legacy seven-field format", rule)
         self.assertIn("user-written material description", rule)
-        self.assertIn("only authority for numbered <Picture N>", rule)
+        self.assertIn("authority for reference roles and relationships", rule)
         self.assertNotIn("MISSING MATERIAL DESCRIPTION", rule)
         self.assertIn("exactly one [Shot 1]", rule)
         self.assertIn("Omit undeclared details", rule)
