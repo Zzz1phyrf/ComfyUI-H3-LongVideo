@@ -41,3 +41,27 @@ class CameraControlsTests(unittest.TestCase):
         self.assertTrue(all(r['camera_move_type'] == 'steady' and '全程固定机位' in r['prompt'] for r in p['segments']))
 
 
+
+    def test_dolly_brief_has_bounded_final_framing(self):
+        for family, start, end in [('dolly out', 'close-up', 'medium close-up'),
+                                   ('dolly in', 'medium shot', 'medium close-up')]:
+            row = {'camera_move_family': family}
+            brief = core.segment_brief({'mode': 'singing'}, row, start, end, '', '')
+            self.assertNotIn('人物逐渐变小', brief)
+            self.assertNotIn('人物逐渐变大', brief)
+            self.assertNotIn('运镜保持进行', brief)
+            self.assertIn('最后一帧恰好到达中近景（胸部以上）', brief)
+            self.assertIn('取景范围始终处于开场与终点景别之间', brief)
+
+    def test_dolly_never_moves_beyond_available_framings(self):
+        for sizes in [['close-up'], ['close-up', 'medium close-up', 'medium shot', 'full shot']]:
+            for framing in sizes:
+                for movement in ['dolly_in', 'dolly_out']:
+                    rules = director_rules.default_config()['singing']
+                    rules['energy_movements']['medium'] = [movement]
+                    result = core._movement_for(framing, 'front', 'medium', 'moderate', sizes, [], rules)
+                    if result[1] in ['dolly in', 'dolly out']:
+                        delta = sizes.index(result[0])-sizes.index(framing)
+                        self.assertEqual(delta, -1 if result[1] == 'dolly in' else 1)
+                    else:
+                        self.assertEqual(result[0], framing)

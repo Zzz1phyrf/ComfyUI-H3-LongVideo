@@ -691,6 +691,12 @@ def _movement_for(framing, angle, band, activity, sizes, states, rules=None, see
         if len({_movement_type_family(move) for move in pool}) < 2:
             pool = list(dict.fromkeys(pool + ["truck_left", "truck_right", "dolly_in", "dolly_out"]))
         rules["energy_movements"][band] = pool
+    position = sizes.index(framing)
+    feasible = [move for move in rules["energy_movements"][band]
+                if not (move == "dolly_in" and position == 0)
+                and not (move == "dolly_out" and position == len(sizes)-1)]
+    # At a framing limit, use motion that does not require a wider/tighter crop.
+    rules["energy_movements"][band] = feasible or ["truck_left", "truck_right", "arc_left", "arc_right"]
     planned = _select_movement(rules, band, states, seed_key)
     if planned in {"dolly_in", "dolly_out"}:
         inward = planned == "dolly_in"
@@ -882,9 +888,9 @@ def _zh_camera_operation(row, framing, ending):
     if family == "steady":
         return "固定机位，人物与背景构图保持稳定"
     if family == "dolly in":
-        return f"摄影机平稳前移，从{_zh_framing(framing)}推进至{_zh_framing(ending)}，人物逐渐变大，背景产生自然视差"
+        return f"摄影机平稳前移，从{_zh_framing(framing)}推进至{_zh_framing(ending)}，取景范围逐步收紧，人物身体比例与服装保持一致，背景产生自然视差"
     if family == "dolly out":
-        return f"摄影机平稳后移，从{_zh_framing(framing)}拉远至{_zh_framing(ending)}，人物逐渐变小，展示更多原有场景"
+        return f"摄影机平稳后移，从{_zh_framing(framing)}拉远至{_zh_framing(ending)}，取景范围逐步扩大，人物身体比例与服装保持一致，逐步露出原有场景"
     if family == "micro reframe":
         return "摄影机做小幅构图调整，人物保持清晰可读，场景空间关系连贯"
     if family == "arc":
@@ -930,7 +936,11 @@ def segment_brief(plan, row, framing, ending, move, previous_frame):
         ending_text = f"{_zh_framing(ending)}{_zh_angle(row.get('camera_end_angle', 'front'))}"
         exit_motion = _zh_motion(row, entry=False)
         ending_state = "静止结束" if exit_motion == "静止" else f"{exit_motion}至片段结束"
-        camera_plan = f"{opening}；{camera}；结束于{ending_text}，{ending_state}"
+        if row.get("camera_move_family") in {"dolly in", "dolly out"}:
+            camera_plan = (f"{opening}；{camera}；整个片段只完成上述景别变化，"
+                           f"最后一帧恰好到达{ending_text}，取景范围始终处于开场与终点景别之间")
+        else:
+            camera_plan = f"{opening}；{camera}；结束于{ending_text}，{ending_state}"
         performance = _zh_performance(row.get('performance_direction', 'natural controlled performance'), mode)
     return (
         f"模式：{'口播' if mode == 'speaking' else '唱歌'}\n"
