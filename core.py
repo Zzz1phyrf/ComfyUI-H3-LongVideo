@@ -1158,6 +1158,9 @@ def archive_take(row, job):
 
 def request_regeneration(row, reason):
     """Mark only this segment stale while retaining its currently usable take."""
+    # Invalidate ComfyUI's cache for every explicit regeneration, including
+    # repeated requests for the same segment with unchanged workflow inputs.
+    row["regeneration_nonce"] = uuid.uuid4().hex
     job = row.get("job")
     if job and job.get("status") == "completed" and job.get("video"):
         row["needs_regeneration"] = True
