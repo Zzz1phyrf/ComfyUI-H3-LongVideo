@@ -3,6 +3,7 @@ import copy
 import io
 import importlib
 import json
+import math
 from pathlib import Path
 import sys
 import tempfile
@@ -514,6 +515,45 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(p["segments"][2].get("needs_regeneration", False))
         self.assertTrue(all(row.get("job", {}).get("status") == "completed" for row in p["segments"]))
         self.assertTrue(p["final_stale"])
+
+    def test_regeneration_gets_unique_nonce(self):
+        p = sample_plan()
+        row = p["segments"][1]
+        row["job"] = {"status": "completed", "video": "old.mp4"}
+        core.request_regeneration(row, "first replacement")
+        first = row["regeneration_nonce"]
+        core.request_regeneration(row, "second replacement")
+        self.assertTrue(first)
+        self.assertNotEqual(first, row["regeneration_nonce"])
+
+    def test_unified_cache_key_changes_for_regeneration_nonce_and_segment(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan = sample_plan()
+            plan["approved"] = True
+            core.write_plan(d, plan)
+            project_id = plan["id"]
+            with patch.object(nodes, "data_root", return_value=Path(d)):
+                first_segment = nodes.Unified.IS_CHANGED(project_id=project_id, segment_index=0)
+                second_segment = nodes.Unified.IS_CHANGED(project_id=project_id, segment_index=1)
+                self.assertNotEqual(first_segment, second_segment)
+                plan = core.read_plan(d, project_id)
+                plan["segments"][1]["regeneration_nonce"] = "nonce-a"
+                core.write_plan(d, plan)
+                nonce_a = nodes.Unified.IS_CHANGED(project_id=project_id, segment_index=1)
+                self.assertNotEqual(second_segment, nonce_a)
+                self.assertEqual(nonce_a, nodes.Unified.IS_CHANGED(project_id=project_id, segment_index=1))
+                plan = core.read_plan(d, project_id)
+                plan["segments"][1]["regeneration_nonce"] = "nonce-b"
+                core.write_plan(d, plan)
+                self.assertNotEqual(nonce_a, nodes.Unified.IS_CHANGED(project_id=project_id, segment_index=1))
+
+    def test_unified_cache_key_is_nan_without_approved_project(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan = sample_plan()
+            core.write_plan(d, plan)
+            with patch.object(nodes, "data_root", return_value=Path(d)):
+                value = nodes.Unified.IS_CHANGED(project_id=plan["id"], segment_index=0)
+            self.assertTrue(math.isnan(value))
 
     def test_boundary_edit_invalidates_only_two_adjacent_segments(self):
         p = sample_plan()

@@ -420,12 +420,15 @@ class Unified:
     OUTPUT_NODE = True
 
     @classmethod
-    def IS_CHANGED(cls, project_id="", **kwargs):
+    def IS_CHANGED(cls, project_id="", segment_index=0, **kwargs):
         if str(project_id).strip():
             try:
                 plan = read_plan(data_root(), project_id)
                 if plan.get("approved"):
-                    return fingerprint(plan)
+                    index = int(segment_index)
+                    rows = plan.get("segments", [])
+                    nonce = rows[index].get("regeneration_nonce", "") if 0 <= index < len(rows) else ""
+                    return f"{fingerprint(plan)}:{index}:{nonce}"
             except (ValueError, FileNotFoundError):
                 pass
         return float("nan")
