@@ -2,13 +2,42 @@ import asyncio
 import copy
 import io
 import json
+import re
 
 from . import controller
 from . import director_rules
-from .core import (LOCK, archive_take, audio_file, edit_plan, fingerprint, inside, preview_bounds,
-                   output_preview, project_path, read_plan, read_project_transcript, request_regeneration,
-                   segmentation, state_file, write_plan)
+from .core import (LOCK, UNSET, archive_take, audio_file, edit_plan, fingerprint, inside, preview_bounds,
+                   output_preview, project_path, read_plan, read_project_transcript,
+                   reference_directory, remove_reference, request_regeneration, segmentation,
+                   state_file, store_reference, write_plan)
 from .nodes import data_root, rules_path, storage_root
+
+RANGE_HEADER = re.compile(r"\s*bytes=(\d*)-(\d*)\s*")
+
+
+def byte_range(header, total):
+    """Parse an HTTP Range header into an inclusive (start, end) pair.
+
+    Returns None when the header is absent, malformed or unsatisfiable, so the
+    caller serves the whole resource. Without this, browsers treat the audio as
+    non-seekable and the player's progress bar cannot be dragged.
+    """
+    if total <= 0:
+        return None
+    match = RANGE_HEADER.fullmatch(str(header or ""))
+    if not match or (not match.group(1) and not match.group(2)):
+        return None
+    if match.group(1):
+        start = int(match.group(1))
+        end = int(match.group(2)) if match.group(2) else total - 1
+    else:
+        length = int(match.group(2))
+        if length <= 0:
+            return None
+        start, end = max(0, total - length), total - 1
+    if start >= total or start > end:
+        return None
+    return start, min(end, total - 1)
 
 
 def register_routes():
@@ -120,7 +149,8 @@ def register_routes():
             if int(payload.get("revision", -1)) != plan["revision"]:
                 raise ValueError("方案已被另一个窗口修改，请刷新。")
             transcript, _ = read_project_transcript(project_path(root, pid), plan)
-            plan = edit_plan(plan, payload["segments"])
+            plan = edit_plan(plan, payload["segments"], project_path(root, pid),
+                             payload.get("reference_default_count", UNSET))
             for row in plan["segments"]:
                 row["text"] = " / ".join(s["text"] for s in transcript["segments"] if row["start"] <= (s["start"]+s["end"])/2 < row["end"])
             write_plan(root, plan)
@@ -141,6 +171,59 @@ def register_routes():
             write_plan(root, plan)
         return web.json_response(plan)
 
+    @routes.post("/h3lv/project/{project_id}/refs")
+    @endpoint
+    async def upload_reference(request):
+        root, pid = data_root(), request.match_info["project_id"]
+        directory = project_path(root, pid)
+        reader = await request.multipart()
+        index, filename, content = 0, "", b""
+        while (part := await reader.next()) is not None:
+            if part.name == "index":
+                index = int((await part.text()).strip() or 0)
+            elif part.name == "image":
+                filename = part.filename or ""
+                content = await part.read(decode=False)
+        if not filename:
+            raise ValueError("没有收到参考图文件。")
+        with LOCK:
+            plan = read_plan(root, pid)
+            if plan.get("run_status") in {"running", "pausing", "stopping", "merging"}:
+                raise ValueError("生成任务正在运行，请先停止再修改参考图。")
+            if not 0 <= index < len(plan["segments"]):
+                raise ValueError("分段编号超出范围。")
+            name = store_reference(directory, index, filename, content)
+        return web.json_response({"name": name, "index": index})
+
+    @routes.get("/h3lv/project/{project_id}/refs/{name}")
+    @endpoint
+    async def reference_file(request):
+        root, pid = data_root(), request.match_info["project_id"]
+        directory = project_path(root, pid)
+        folder = reference_directory(directory)
+        path = inside(folder, folder/request.match_info["name"])
+        if not path.is_file():
+            raise FileNotFoundError(str(path))
+        return web.FileResponse(path, headers={"Cache-Control": "no-store"})
+
+    @routes.post("/h3lv/project/{project_id}/refs/remove")
+    @endpoint
+    async def delete_reference(request):
+        payload = await request.json()
+        root, pid = data_root(), request.match_info["project_id"]
+        directory = project_path(root, pid)
+        with LOCK:
+            plan = read_plan(root, pid)
+            if plan.get("run_status") in {"running", "pausing", "stopping", "merging"}:
+                raise ValueError("生成任务正在运行，请先停止再修改参考图。")
+            name = str(payload.get("name") or "").strip()
+            if not name:
+                raise ValueError("缺少要删除的参考图。")
+            if any(name in (row.get("refs") or []) for row in plan["segments"]):
+                raise ValueError("该参考图仍被某个分段使用，请先在分段卡片中移除。")
+            remove_reference(directory, name)
+        return web.json_response({"removed": name})
+
     @routes.get("/h3lv/project/{project_id}/audio")
     @endpoint
     async def audio(request):
@@ -155,7 +238,15 @@ def register_routes():
             data = io.BytesIO()
             sf.write(data, samples, sr, format="WAV", subtype="PCM_16")
             return data.getvalue()
-        return web.Response(body=await asyncio.to_thread(render), content_type="audio/wav", headers={"Cache-Control": "no-store"})
+        body = await asyncio.to_thread(render)
+        headers = {"Cache-Control": "no-store", "Accept-Ranges": "bytes"}
+        span = byte_range(request.headers.get("Range"), len(body))
+        if span is None:
+            return web.Response(body=body, content_type="audio/wav", headers=headers)
+        start, end = span
+        headers["Content-Range"] = f"bytes {start}-{end}/{len(body)}"
+        return web.Response(body=body[start:end+1], status=206,
+                            content_type="audio/wav", headers=headers)
 
     @routes.post("/h3lv/project/{project_id}/run")
     @endpoint

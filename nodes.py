@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 import uuid
 
 from . import director_rules
-from .core import (audio_file, decorate, fingerprint, project_path, read_plan, segmentation,
+from .core import (audio_file, brief_text, decorate, fingerprint, project_path, read_plan, segmentation,
                    validate_segment_brief, write_plan)
 
 
@@ -399,7 +399,7 @@ class LoadSegment:
             target = math_ceil_samples(row["generation_frames"], sr)
             audio = np.pad(audio, ((0, max(0, target-len(audio))), (0, 0)))
             outputs.append({"waveform": torch.from_numpy(audio.T.copy()).unsqueeze(0), "sample_rate": sr})
-        return (*outputs, row["prompt"], row["generation_frames"],
+        return (*outputs, brief_text(row), row["generation_frames"],
                 f"H3LongVideo/projects/{project_id}/takes/seg_{segment_index:04d}")
 
 

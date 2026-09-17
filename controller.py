@@ -4,14 +4,16 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 import time
 import uuid
 
-from .core import (LOCK, archive_take, audio_file, fingerprint, inside, output_preview, project_path,
-                   read_plan, segment_fingerprint, write_plan)
+from .core import (LOCK, REFERENCE_MIRROR_ROOT, archive_take, audio_file, fingerprint, inside,
+                   output_preview, project_path, read_plan, reference_directory,
+                   segment_fingerprint, write_plan)
 
 TASKS = {}
 SEGMENT_NODE_TYPES = {"H3LVUnified"}
@@ -96,6 +98,125 @@ def queued_ids(server):
     return {item[1] for item in running+waiting}
 
 
+REFERENCE_SLOT = re.compile(r"^ref_images\.ref_image_(\d+)$")
+
+
+def reference_node(prompt):
+    """Locate the MiniMax H3 reference node inside a frozen prompt graph."""
+    for node_id, node in prompt.items():
+        if node.get("class_type") == "MiniMaxH3ReferenceToVideo":
+            return str(node_id), node
+    return None, None
+
+
+def reference_slots(prompt):
+    """Return connected ref_image slots as (index, input key, source node id)."""
+    _node_id, node = reference_node(prompt)
+    if node is None:
+        return []
+    slots = []
+    for key, link in (node.get("inputs") or {}).items():
+        match = REFERENCE_SLOT.match(str(key))
+        if match and isinstance(link, (list, tuple)) and link:
+            slots.append((int(match.group(1)), str(key), str(link[0])))
+    return sorted(slots)
+
+
+def mirror_reference_images(directory, project_id, names):
+    """Copy the project's canonical pictures into ComfyUI's input directory."""
+    import folder_paths
+    source_root = reference_directory(directory)
+    target_root = Path(folder_paths.get_input_directory())/REFERENCE_MIRROR_ROOT/project_id
+    target_root.mkdir(parents=True, exist_ok=True)
+    relative = []
+    for name in names:
+        source = inside(source_root, source_root/name)
+        if not source.is_file():
+            raise ValueError(f"参考图文件已丢失：{name}。请在分段审核界面重新上传。")
+        target = target_root/source.name
+        if not target.is_file() or target.stat().st_size != source.stat().st_size:
+            temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+            shutil.copyfile(source, temporary)
+            os.replace(temporary, target)
+        relative.append(f"{REFERENCE_MIRROR_ROOT}/{project_id}/{source.name}")
+    return relative
+
+
+def drop_orphan_loaders(prompt, candidates):
+    """Remove detached LoadImage nodes that no remaining input consumes."""
+    for source_id in candidates:
+        node = prompt.get(source_id)
+        if not node or node.get("class_type") != "LoadImage":
+            continue
+        still_used = any(
+            isinstance(value, (list, tuple)) and value and str(value[0]) == source_id
+            for other in prompt.values() for value in (other.get("inputs") or {}).values())
+        if not still_used:
+            prompt.pop(source_id, None)
+
+
+def detach_reference_slots(prompt, node, slots):
+    """Drop reference slots from this submission and clean the freed loaders."""
+    for key, _source_id in slots:
+        (node.get("inputs") or {}).pop(key, None)
+    drop_orphan_loaders(prompt, [source_id for _key, source_id in slots])
+
+
+def apply_segment_references(prompt, plan, row, directory):
+    """Rewrite one segment's reference pictures into the frozen workflow graph.
+
+    Only the slots the user connected on the canvas exist in the graph, so a
+    segment may never use more pictures than that. The slots a segment does not
+    use are removed from this submission instead of receiving a placeholder image.
+
+    A segment without its own list follows the project default: the first
+    ``reference_default_count`` canvas references, where 0 feeds no picture at
+    all. Without that setting the canvas wiring is submitted untouched.
+    """
+    names = list(row.get("refs") or [])
+    limit = plan.get("reference_default_count")
+    if not names and limit is None:
+        return
+    _node_id, node = reference_node(prompt)
+    if node is None:
+        if not names:
+            return
+        raise ValueError("当前工作流没有 MiniMax H3 视频参考节点，无法使用分段参考图。")
+    slots = reference_slots(prompt)
+    position_label = int(row.get("index", 0))+1
+    if not names:
+        if len(slots) <= limit:
+            return
+        if not limit:
+            detach_reference_slots(prompt, node, [(key, source_id)
+                                                 for _index, key, source_id in slots])
+            return
+        detach_reference_slots(prompt, node, [(key, source_id)
+                                              for _index, key, source_id in slots[limit:]])
+        return
+    if not slots:
+        raise ValueError(
+            "MiniMax H3 视频参考节点还没有接出 ref_image 槽位。请先在画布上用“加载图像”节点"
+            "依次接到 ref_image_0、ref_image_1……再开始生成。")
+    if len(names) > len(slots):
+        raise ValueError(
+            f"第 {position_label} 段配置了 {len(names)} 张参考图，但工作流只接出了 {len(slots)} 个 "
+            "ref_image 槽位。请在画布上继续接“加载图像”节点补足后重试。")
+    paths = mirror_reference_images(directory, plan["id"], names)
+    detached = []
+    for position, (_index, key, source_id) in enumerate(slots):
+        if position < len(paths):
+            source = prompt.get(source_id)
+            if not source or source.get("class_type") != "LoadImage":
+                raise ValueError(
+                    f"第 {position_label} 段有一个 ref_image 槽位没有连接到“加载图像”节点，"
+                    "请把该槽位改接到加载图像节点。")
+            source.setdefault("inputs", {})["image"] = paths[position]
+        else:
+            detached.append((key, source_id))
+    detach_reference_slots(prompt, node, detached)
+
+
 async def execute_project(root, project_id, server):
     import execution
     import folder_paths
@@ -133,6 +254,7 @@ async def execute_project(root, project_id, server):
                 prompt_id = str(uuid.uuid4())
                 prompt = copy.deepcopy(snapshot["prompt"])
                 prompt[snapshot["loader_id"]]["inputs"].update(project_id=project_id, segment_index=index)
+                apply_segment_references(prompt, plan, row, directory)
                 valid = await execution.validate_prompt(prompt_id, prompt, [snapshot["video_id"]])
                 if not valid[0]:
                     raise ValueError("视频工作流校验失败："+str(valid[1]))

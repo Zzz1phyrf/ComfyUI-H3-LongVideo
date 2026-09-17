@@ -87,6 +87,15 @@
 .h3lv-timeline:focus-visible { outline: 2px solid #61aef8; outline-offset: 2px; }
 .h3lv-selected-bar { justify-content: space-between; margin-top: 10px; }
 .h3lv-selected-bar audio { width: min(680px, 65vw); height: 34px; }
+.h3lv-selected-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.h3lv-track-switch { display: inline-flex; border: 1px solid #566274; border-radius: 6px; overflow: hidden; }
+.h3lv-track-button {
+  padding: 5px 13px; border: 0; background: #222831; color: #b9c4d2; cursor: pointer;
+  font: 13px/1.4 Inter, "Microsoft YaHei", sans-serif;
+}
+.h3lv-track-button + .h3lv-track-button { border-left: 1px solid #566274; }
+.h3lv-track-button:hover { background: #2c333f; color: #eef2f8; }
+.h3lv-track-button.is-active { background: #1769aa; color: #ffffff; font-weight: 600; }
 .h3lv-segments { margin-top: 14px; }
 .h3lv-card { margin: 8px 0; border: 1px solid #404956; border-radius: 8px; background: #20252d; }
 .h3lv-card > summary {
@@ -117,7 +126,7 @@
 .h3lv-warnings { margin: 6px 0 10px; padding-left: 22px; color: #ffbf7a; }
 .h3lv-metrics { margin: 9px 0; color: #aeb8c6; }
 .h3lv-audio-label { margin: 10px 0 5px; color: #aeb8c6; font-size: 12px; }
-.h3lv-cut-audio { display: block; width: 100%; height: 34px; }
+.h3lv-segment-audio { display: block; width: 100%; height: 34px; }
 .h3lv-prompt-actions { margin: 12px 0 0; }
 .h3lv-button.prompt-edit { border-color: #4f9fe8; color: #d8ecff; background: #203b55; }
 .h3lv-prompt-editor-panel { width: min(1180px, 94vw); height: min(820px, 92vh); display: flex; flex-direction: column; }
@@ -148,3 +157,42 @@
 .h3lv-timeline-readout { color:#b8c5d5; font-size:12px; font-variant-numeric:tabular-nums; }
 .h3lv-timeline-navigation { display:block; width:100%; margin:8px 0; accent-color:#4da3ff; }
 .h3lv-timeline { height:228px; }
+
+.h3lv-material-note {
+  width: 100%; min-height: 62px; box-sizing: border-box; margin: 0 0 4px; padding: 9px 10px;
+  border: 1px solid #566274; border-radius: 6px; resize: vertical;
+  background: #11151c; color: #edf1f7; font: 13px/1.55 Inter, "Microsoft YaHei", sans-serif;
+}
+.h3lv-references { margin: 12px 0 0; }
+.h3lv-reference-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.h3lv-reference-header .h3lv-audio-label { margin: 0; }
+.h3lv-button.reference-add { border-color: #4f9fe8; color: #d8ecff; background: #203b55; }
+.h3lv-button.reference-add:hover { border-color: #75bbfa; background: #294b6c; }
+.h3lv-reference-list { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 0; }
+.h3lv-reference-item {
+  width: 132px; margin: 0; padding: 6px; border: 1px solid #414c5b; border-radius: 7px;
+  background: #141920; text-align: center;
+}
+.h3lv-reference-item img {
+  display: block; width: 100%; height: 98px; object-fit: contain;
+  border-radius: 4px; background: #080a0e;
+}
+.h3lv-reference-item figcaption { margin-top: 5px; color: #aeb8c6; font-size: 12px; }
+.h3lv-reference-tools { display: flex; justify-content: center; gap: 4px; margin-top: 5px; }
+.h3lv-reference-tool {
+  padding: 2px 7px; border: 1px solid #5a6575; border-radius: 5px;
+  background: #2a303a; color: #eef2f8; font-size: 12px; cursor: pointer;
+}
+.h3lv-reference-tool:disabled { opacity: .4; cursor: default; }
+.h3lv-reference-tool:hover:not(:disabled) { border-color: #7e8b9f; background: #333b47; }
+.h3lv-reference-empty { margin: 9px 0 0; color: #9aa5b4; font-size: 12px; }
+.h3lv-project-row .h3lv-default-references select { min-width: 150px; margin-left: 8px; }
+.h3lv-button.reference-copy { border-color: #7e8b9f; color: #e6ecf5; background: #2f3641; }
+.h3lv-button.reference-copy:hover { border-color: #9aa8bc; background: #39414e; }
+.h3lv-export-panel { display: flex; flex-direction: column; gap: 10px; width: min(560px, 94vw); }
+.h3lv-export-text {
+  width: 100%; min-height: 250px; box-sizing: border-box; padding: 10px 12px;
+  border: 1px solid #566274; border-radius: 6px; resize: vertical;
+  background: #0f1319; color: #edf1f7;
+  font: 13px/1.6 Consolas, "Microsoft YaHei", monospace; white-space: pre;
+}

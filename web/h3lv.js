@@ -90,8 +90,8 @@ function editPromptDialog(index, value) {
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-modal", "true");
     const title = element("div", undefined, panel, "h3lv-title-row");
-    element("h2", `编辑第 ${index + 1} 段镜头简报`, title);
-    element("p", "这是本段输出的运镜文本，可直接连接下游文本输入，也可交给提示词小助手扩写。新项目只需调整镜头方案和表演节奏，生成时长由节点自动控制。旧项目保持原格式可继续生成。", panel, "h3lv-help");
+    element("h2", `编辑第 ${index + 1} 段镜头简报（提示词）`, title);
+    element("p", "这是本段输出的文本，可直接连接下游文本输入，也可交给提示词小助手扩写。既可以只写镜头方案和表演节奏，也可以直接粘贴完整提示词（含参考图和主体标签）。生成时长由节点自动控制。", panel, "h3lv-help");
     const editor = element("textarea", undefined, panel, "h3lv-prompt-editor");
     editor.value = value;
     editor.spellcheck = false;
@@ -108,6 +108,56 @@ function editPromptDialog(index, value) {
     actionButton(buttons, "应用到当前草稿", () => finish(editor.value), "primary");
     const onKeyDown = event => { if (event.key === "Escape") finish(null); };
     window.addEventListener("keydown", onKeyDown);
+    shade.onclick = event => { if (event.target === shade) finish(null); };
+    queueMicrotask(() => editor.focus());
+  });
+}
+
+function downloadTextFile(name, text) {
+  const url = URL.createObjectURL(new Blob([text], {type: "text/markdown;charset=utf-8"}));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportDialog({title, note, text, fileName}) {
+  return new Promise(resolve => {
+    const shade = element("div", undefined, document.body,
+      "h3lv-shade h3lv-settings-shade h3lv-confirm-shade");
+    const panel = element("div", undefined, shade, "h3lv-settings-panel h3lv-export-panel");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-label", title);
+    element("h2", title, panel);
+    element("p", note, panel, "h3lv-help");
+    const editor = element("textarea", undefined, panel, "h3lv-export-text");
+    editor.value = text;
+    editor.readOnly = true;
+    editor.spellcheck = false;
+    const buttons = element("div", undefined, panel, "h3lv-actions h3lv-confirm-actions");
+    let finished = false;
+    const finish = value => {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener("keydown", onKeyDown);
+      shade.remove();
+      resolve(value);
+    };
+    const onKeyDown = event => { if (event.key === "Escape") finish(null); };
+    window.addEventListener("keydown", onKeyDown);
+    actionButton(buttons, "关闭", () => finish(null));
+    actionButton(buttons, "复制", async () => {
+      await navigator.clipboard.writeText(text);
+      toast("已复制到剪贴板");
+    });
+    actionButton(buttons, "下载 MD", () => {
+      downloadTextFile(fileName, text);
+      finish(true);
+    }, "primary");
     shade.onclick = event => { if (event.target === shade) finish(null); };
     queueMicrotask(() => editor.focus());
   });
@@ -288,6 +338,37 @@ function outputPreviewUrl(preview) {
   return api.apiURL(`/view?${query.toString()}`);
 }
 
+function referenceSlotLimit() {
+  let limit = 0;
+  for (const node of app.graph?._nodes || []) {
+    if (node.comfyClass !== "MiniMaxH3ReferenceToVideo") continue;
+    limit = Math.max(limit, (node.inputs || []).filter(input =>
+      /^ref_images\.ref_image_\d+$/.test(String(input.name || "")) && input.link != null).length);
+  }
+  return limit;
+}
+
+function referencePreviewUrl(projectId, name) {
+  return api.apiURL(`/h3lv/project/${encodeURIComponent(projectId)}/refs/${encodeURIComponent(name)}`);
+}
+
+async function uploadReferenceImage(projectId, index, file) {
+  const form = new FormData();
+  form.append("index", String(index));
+  form.append("image", file, file.name);
+  const response = await api.fetchApi(
+    `/h3lv/project/${encodeURIComponent(projectId)}/refs`, {method: "POST", body: form});
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || "参考图上传失败。");
+  return result.name;
+}
+
+async function removeReferenceImage(projectId, name) {
+  try {
+    await request(`/h3lv/project/${encodeURIComponent(projectId)}/refs/remove`, {name});
+  } catch {}
+}
+
 function showFinalOnVideoNode(preview, projectId) {
   if (!preview?.filename) return false;
   const nodes = app.graph?._nodes || [];
@@ -371,6 +452,32 @@ async function openReview(owner) {
   const widget = owner.widgets?.find(item => item.name === "project_id");
   const preferred = owner.properties?.h3lv_project || widget?.value;
   if (projects.some(project => project.id === preferred)) select.value = preferred;
+  const defaultRow = element("label", "默认参考图张数", projectRow, "h3lv-default-references");
+  const defaultSelect = element("select", undefined, defaultRow);
+  defaultSelect.onchange = () => { if (plan) markDirty(); };
+
+  function syncDefaultReferenceControl() {
+    const available = referenceSlotLimit();
+    const current = plan?.reference_default_count;
+    const highest = Math.max(available, Number.isInteger(current) ? current : 0);
+    defaultSelect.replaceChildren();
+    const fallback = element("option", "全部（沿用画布）", defaultSelect);
+    fallback.value = "all";
+    for (let count = 0; count <= highest; count += 1) {
+      const item = element("option", String(count), defaultSelect);
+      item.value = String(count);
+    }
+    defaultSelect.value = current === null || current === undefined ? "all" : String(current);
+    defaultRow.hidden = available === 0;
+  }
+
+  function defaultReferenceText() {
+    const value = plan?.reference_default_count;
+    if (value === null || value === undefined) return "画布上全部已接出的图片";
+    if (!value) return "不使用参考图";
+    return `画布上的前 ${value} 张`;
+  }
+
   const status = element("div", "", header, "h3lv-status");
   const controls = element("div", undefined, header, "h3lv-actions");
   const content = element("main", undefined, panel, "h3lv-content");
@@ -381,8 +488,18 @@ async function openReview(owner) {
   canvas.tabIndex = 0;
   canvas.setAttribute("role", "img");
   canvas.setAttribute("aria-label", "整首歌原曲和人声波形；内部切点可用鼠标或触控拖动，键盘用户可使用下方结束时间输入框");
+  let selectedTrack = "original";
   const selectedBar = element("div", undefined, overview, "h3lv-selected-bar");
-  const selectedText = element("strong", "", selectedBar);
+  const selectedInfo = element("div", undefined, selectedBar, "h3lv-selected-info");
+  const trackSwitch = element("div", undefined, selectedInfo, "h3lv-track-switch");
+  const trackButtons = {};
+  for (const [value, label] of [["original", "原曲"], ["vocals", "人声"]]) {
+    const button = element("button", label, trackSwitch, "h3lv-track-button");
+    button.type = "button";
+    button.onclick = () => selectTrack(value);
+    trackButtons[value] = button;
+  }
+  const selectedText = element("strong", "", selectedInfo);
   const selectedAudio = element("audio", undefined, selectedBar);
   selectedAudio.controls = true;
   selectedAudio.preload = "metadata";
@@ -402,24 +519,42 @@ async function openReview(owner) {
     status.textContent = `状态：draft · 修改未保存，尚不可生成 · ${completed}/${plan.segments.length} 段完成`;
     status.classList.add("is-dirty");
   }
-  function previewUrl(index, boundary = false) {
+  function previewUrl(index, vocals = false) {
     const start = index === 0 ? 0 : Number(rows[index-1].end.value);
     const end = Number(rows[index].end.value);
     return api.apiURL(endpoint(`/audio?index=${index}&start=${start.toFixed(6)}&end=${end.toFixed(6)}`+
-      `${boundary ? "&boundary=1&vocals=1" : ""}&revision=${plan.revision}`));
+      `${vocals ? "&vocals=1" : ""}&revision=${plan.revision}`));
   }
+  function selectedPreviewUrl(index) {
+    return previewUrl(index, selectedTrack === "vocals");
+  }
+  function syncTrackSwitch() {
+    for (const [value, button] of Object.entries(trackButtons)) {
+      button.classList.toggle("is-active", value === selectedTrack);
+      button.setAttribute("aria-pressed", String(value === selectedTrack));
+    }
+  }
+  function selectTrack(value) {
+    if (selectedTrack === value) return;
+    selectedTrack = value;
+    syncTrackSwitch();
+    if (rows.length) selectedAudio.src = selectedPreviewUrl(selected);
+    updateSelected(selected, false);
+  }
+  syncTrackSwitch();
   function refreshPreviewAudio(index) {
     if (!rows[index]) return;
-    if (selected === index || selected === index+1) selectedAudio.src = previewUrl(selected);
-    if (rows[index].cut) rows[index].cut.src = previewUrl(index, true);
+    if (selected === index || selected === index+1) selectedAudio.src = selectedPreviewUrl(selected);
+    if (rows[index].vocals) rows[index].vocals.src = previewUrl(index, true);
   }
   function updateSelected(index, refreshAudio = true) {
     if (!plan?.segments.length) return;
     selected = Math.max(0, Math.min(plan.segments.length-1, index));
     const start = selected === 0 ? 0 : Number(rows[selected-1].end.value);
     const end = Number(rows[selected].end.value);
-    selectedText.textContent = `当前试听：第 ${selected+1} 段 · ${start.toFixed(3)}—${end.toFixed(3)}s`;
-    if (refreshAudio) selectedAudio.src = previewUrl(selected);
+    selectedText.textContent = `当前试听（${selectedTrack === "vocals" ? "人声" : "原曲"}）：`+
+      `第 ${selected+1} 段 · ${start.toFixed(3)}—${end.toFixed(3)}s`;
+    if (refreshAudio) selectedAudio.src = selectedPreviewUrl(selected);
     canvas.drawTimeline?.();
   }
   function refreshDraftDisplays() {
@@ -434,6 +569,20 @@ async function openReview(owner) {
       item.editFrames.textContent = `${editFrames} 剪辑帧`;
       item.generationFrames.textContent = `${generationFrames} 生成帧`;
     });
+  }
+  function segmentTimingMarkdown() {
+    const lines = ["# H3 长视频 · 分段时长", "",
+      "| 分段 | 开始(s) | 结束(s) | 时长(s) |",
+      "| --- | --- | --- | --- |"];
+    let total = 0;
+    rows.forEach((item, index) => {
+      const start = index === 0 ? 0 : Number(rows[index-1].end.value);
+      const end = Number(item.end.value);
+      total += end-start;
+      lines.push(`| 第${index+1}段 | ${start.toFixed(3)} | ${end.toFixed(3)} | ${(end-start).toFixed(3)} |`);
+    });
+    lines.push("", `共 ${rows.length} 段 · 合计 ${total.toFixed(3)}s`);
+    return {text: lines.join("\n"), total};
   }
   function moveBoundary(index, proposed) {
     const start = index === 0 ? 0 : Number(rows[index-1].end.value);
@@ -498,24 +647,123 @@ async function openReview(owner) {
         refreshDraftDisplays(); markDirty(); updateSelected(selected, false); canvas.drawTimeline?.();
       };
       end.onchange = () => { refreshPreviewAudio(row.index); updateSelected(selected); };
-      let cut = null;
-      if (row.index < plan.segments.length-1) {
-        element("p", "切点前后分离人声试听（播放器约第 2 秒是切点）", inner, "h3lv-audio-label");
-        cut = element("audio", undefined, inner, "h3lv-cut-audio");
-        cut.controls = true; cut.preload = "metadata";
-        cut.src = api.apiURL(endpoint(`/audio?index=${row.index}&boundary=1&vocals=1&revision=${plan.revision}`));
+      element("p", "本段分离人声试听（该段完整人声，可拖动进度条）", inner, "h3lv-audio-label");
+      const vocalsAudio = element("audio", undefined, inner, "h3lv-segment-audio");
+      vocalsAudio.controls = true;
+      vocalsAudio.preload = "metadata";
+      vocalsAudio.src = api.apiURL(endpoint(`/audio?index=${row.index}&vocals=1&revision=${plan.revision}`));
+      const note = element("textarea", undefined, inner, "h3lv-material-note");
+      note.value = row.material_note || "";
+      note.placeholder = "本段素材说明，例如：图1是人物，图2是场景。编号要和下面的参考图顺序一致。";
+      note.oninput = markDirty;
+      const referenceBlock = element("div", undefined, inner, "h3lv-references");
+      const referenceHeader = element("div", undefined, referenceBlock, "h3lv-reference-header");
+      element("span", "本段参考图", referenceHeader, "h3lv-audio-label");
+      const referenceLimit = referenceSlotLimit();
+      const referenceList = element("div", undefined, referenceBlock, "h3lv-reference-list");
+      const rowRefs = Array.isArray(row.refs) ? [...row.refs] : [];
+      if (!referenceLimit) {
+        element("p", "当前工作流还没有接出 ref_image 槽位：请先在画布上用“加载图像”节点依次接到 "
+          + "MiniMax H3 视频参考节点的 ref_image_0、ref_image_1……每接一个槽位，可用的参考图就多一张。",
+          referenceBlock, "h3lv-reference-empty");
       }
+      const renderReferences = () => {
+        referenceList.replaceChildren();
+        if (!rowRefs.length) {
+          element("p", `本段未配置参考图，将使用默认参考图（${defaultReferenceText()}）。`,
+            referenceList, "h3lv-reference-empty");
+          return;
+        }
+        rowRefs.forEach((name, position) => {
+          const item = element("figure", undefined, referenceList, "h3lv-reference-item");
+          const image = document.createElement("img");
+          image.src = referencePreviewUrl(plan.id, name);
+          image.alt = `第 ${position + 1} 张参考图`;
+          image.loading = "lazy";
+          item.append(image);
+          element("figcaption", `图${position + 1}`, item);
+          const tools = element("div", undefined, item, "h3lv-reference-tools");
+          const move = step => {
+            if (position + step < 0 || position + step >= rowRefs.length) return;
+            [rowRefs[position], rowRefs[position + step]] = [rowRefs[position + step], rowRefs[position]];
+            markDirty();
+            renderReferences();
+          };
+          const earlier = element("button", "←", tools, "h3lv-reference-tool");
+          earlier.type = "button";
+          earlier.title = "前移";
+          earlier.disabled = position === 0;
+          earlier.onclick = () => move(-1);
+          const later = element("button", "→", tools, "h3lv-reference-tool");
+          later.type = "button";
+          later.title = "后移";
+          later.disabled = position === rowRefs.length - 1;
+          later.onclick = () => move(1);
+          const drop = element("button", "移除", tools, "h3lv-reference-tool");
+          drop.type = "button";
+          drop.onclick = async () => {
+            rowRefs.splice(position, 1);
+            markDirty();
+            renderReferences();
+            await removeReferenceImage(plan.id, name);
+          };
+        });
+      };
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = "image/*";
+      fileInput.hidden = true;
+      fileInput.onchange = async () => {
+        const file = fileInput.files?.[0];
+        fileInput.value = "";
+        if (!file) return;
+        addButton.disabled = true;
+        try {
+          rowRefs.push(await uploadReferenceImage(plan.id, row.index, file));
+          markDirty();
+          renderReferences();
+        } catch (error) {
+          await messageDialog({title: "参考图上传失败", message: error.message || String(error), tone: "error"});
+        } finally {
+          addButton.disabled = false;
+        }
+      };
+      referenceHeader.append(fileInput);
+      const addButton = actionButton(referenceHeader,
+        referenceLimit ? `＋ 上传参考图（上限 ${referenceLimit} 张）` : "＋ 上传参考图", async () => {
+          if (!referenceLimit) {
+            throw new Error("当前工作流还没有接出 ref_image 槽位。请先在画布上用“加载图像”节点接到 "
+              + "MiniMax H3 视频参考节点的 ref_image_0、ref_image_1……");
+          }
+          if (rowRefs.length >= referenceLimit) throw new Error(`本段最多 ${referenceLimit} 张参考图。`);
+          fileInput.click();
+        }, "reference-add");
+      actionButton(referenceHeader, "套用到所有分段", async () => {
+        if (!await confirmDialog({
+          title: "把本段的参考图套用到所有分段？",
+          message: "所有分段的参考图列表与素材说明都会被本段的内容覆盖，其他分段已有的参考图会被替换。",
+          confirmText: "套用到所有分段",
+        })) return;
+        rows.forEach(item => {
+          item.refs.splice(0, item.refs.length, ...rowRefs);
+          item.note.value = note.value;
+          item.renderRefs();
+        });
+        markDirty();
+      }, "reference-copy");
+      renderReferences();
       const promptActions = element("div", undefined, inner, "h3lv-actions h3lv-prompt-actions");
       const prompt = document.createElement("textarea");
       prompt.value = row.prompt;
       prompt.oninput = markDirty;
-      actionButton(promptActions, "编辑本段镜头简报", async () => {
+      actionButton(promptActions, "编辑本段镜头简报（提示词）", async () => {
         const updated = await editPromptDialog(row.index, prompt.value);
         if (updated === null || updated === prompt.value) return;
         prompt.value = updated;
         prompt.dispatchEvent(new Event("input"));
       }, "prompt-edit");
-      rows.push({end, prompt, duration, time, generationFrames, editFrames, cut});
+      rows.push({end, prompt, note, refs: rowRefs, renderRefs: renderReferences,
+        duration, time, generationFrames, editFrames, vocals: vocalsAudio});
       details.push(card);
       if (row.job || needsReplacement(row)) {
         element("p", `生成状态：${row.job?.status || "待生成"}${needsReplacement(row) ? ` · ${row.regeneration_reason || "需要重新生成"}` : ""}`+
@@ -556,6 +804,7 @@ async function openReview(owner) {
       return;
     }
     plan = await request(endpoint());
+    syncDefaultReferenceControl();
     analysis = await request(endpoint("/analysis"));
     if (widget) widget.value = plan.id;
     owner.properties = {...owner.properties, h3lv_project: plan.id};
@@ -601,7 +850,9 @@ async function openReview(owner) {
     let revision = plan.revision;
     if (dirty) {
       const saved = await request(endpoint("/edit"), {revision,
-        segments: rows.map(row => ({end: Number(row.end.value), prompt: row.prompt.value}))});
+        reference_default_count: defaultSelect.value === "all" ? null : Number(defaultSelect.value),
+        segments: rows.map(row => ({end: Number(row.end.value), prompt: row.prompt.value,
+          material_note: row.note.value, refs: row.refs}))});
       revision = saved.revision;
     }
     await request(endpoint("/approve"), {revision});
@@ -662,6 +913,23 @@ async function openReview(owner) {
     }
   });
   actionButton(controls, "刷新状态", load);
+  actionButton(controls, "导出分段时长", async () => {
+    if (!rows.length) throw new Error("还没有可导出的分段。");
+    const {text, total} = segmentTimingMarkdown();
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    } catch {}
+    await exportDialog({
+      title: copied ? "分段时长已复制" : "分段时长",
+      note: `共 ${rows.length} 段 · 合计 ${total.toFixed(3)}s · ${copied
+        ? "已复制到剪贴板，也可以下载为 Markdown 文件。"
+        : "浏览器拦截了自动复制，可手动选取下方文本，或直接下载 Markdown 文件。"}`,
+      text,
+      fileName: `H3LongVideo_分段时长_${String(select.value).slice(0, 8)}.md`,
+    });
+  });
   select.onchange = () => {
     selected = 0;
     load().catch(error => messageDialog({title: "项目加载失败", message: error.message, tone: "error"}));

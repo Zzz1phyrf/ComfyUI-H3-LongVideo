@@ -22,6 +22,7 @@ core = importlib.import_module("h3lv_test.core")
 controller = importlib.import_module("h3lv_test.controller")
 nodes = importlib.import_module("h3lv_test.nodes")
 director_rules = importlib.import_module("h3lv_test.director_rules")
+routes = importlib.import_module("h3lv_test.routes")
 
 
 def wide_rule_config():
@@ -79,7 +80,7 @@ class CoreTests(unittest.TestCase):
         script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
         styles = (ROOT/"web"/"h3lv.css").read_text(encoding="utf-8")
         routes_source = (ROOT/"routes.py").read_text(encoding="utf-8")
-        self.assertIn('actionButton(promptActions, "编辑本段镜头简报"', script)
+        self.assertIn('actionButton(promptActions, "编辑本段镜头简报（提示词）"', script)
         self.assertNotIn('element("label", "结束时间（秒）", metrics)', script)
         self.assertIn("width: min(1440px, 100%)", styles)
         self.assertIn(
@@ -660,10 +661,26 @@ class CoreTests(unittest.TestCase):
         prompt = "镜头方案：向右环绕人物\n表演节奏：克制的音乐表演\n"
         self.assertEqual(core.validate_segment_brief(prompt), prompt.strip())
 
-    def test_camera_brief_rejects_material_tokens(self):
+    def test_camera_brief_accepts_material_tokens(self):
         prompt = sample_plan()["segments"][0]["prompt"] + "素材：<Picture 1>\n"
-        with self.assertRaisesRegex(ValueError, "不能声明参考图"):
-            core.validate_segment_brief(prompt)
+        self.assertEqual(core.validate_segment_brief(prompt), prompt.strip())
+
+    def test_camera_brief_accepts_a_complete_ref2va_prompt(self):
+        full = ("subject_definitions:\n<Subject 1> is the performer from <Picture 1>.\n"
+                "summary:\n[reference generation]\nretention_analysis:\nfully_preserved\n"
+                "detailed_description:\n[Shot 1] <Subject 1> sings.\noverall_soundscape:\nN/A\n"
+                "non_diegetic_music:\nN/A\n")
+        self.assertEqual(core.validate_segment_brief(full), full.strip())
+
+    def test_brief_text_prefixes_the_per_segment_material_note(self):
+        row = {"prompt": "模式：唱歌\n镜头方案：固定\n表演节奏：自然", "material_note": "图1是人物。"}
+        self.assertEqual(core.brief_text(row),
+                         "素材说明：图1是人物。\n模式：唱歌\n镜头方案：固定\n表演节奏：自然")
+        row["material_note"] = ""
+        self.assertEqual(core.brief_text(row), row["prompt"])
+        row["material_note"] = "图1是人物。"
+        row["prompt"] = "素材说明：已在文本里。\n镜头方案：固定"
+        self.assertEqual(core.brief_text(row), row["prompt"])
 
     def test_legacy_seven_field_camera_brief_remains_valid(self):
         prompt = ("生成时长：10.125 秒\n开场构图：中近景正面\n段内运镜：固定机位\n"
@@ -947,6 +964,268 @@ class CoreTests(unittest.TestCase):
             self.assertAlmostEqual(float(audio["streams"][0]["duration"]), 30, delta=.05)
 
 
+class PlaybackTests(unittest.TestCase):
+    def test_byte_range_parsing(self):
+        self.assertEqual(routes.byte_range("bytes=0-99", 1000), (0, 99))
+        self.assertEqual(routes.byte_range("bytes=100-", 1000), (100, 999))
+        self.assertEqual(routes.byte_range("bytes=-100", 1000), (900, 999))
+        self.assertEqual(routes.byte_range(" bytes=0-5000 ", 1000), (0, 999))
+        self.assertEqual(routes.byte_range("bytes=0-", 1), (0, 0))
+        self.assertIsNone(routes.byte_range(None, 1000))
+        self.assertIsNone(routes.byte_range("", 1000))
+        self.assertIsNone(routes.byte_range("items=0-10", 1000))
+        self.assertIsNone(routes.byte_range("bytes=1000-", 1000))
+        self.assertIsNone(routes.byte_range("bytes=500-400", 1000))
+        self.assertIsNone(routes.byte_range("bytes=-0", 1000))
+        self.assertIsNone(routes.byte_range("bytes=0-10", 0))
+
+    def test_audio_route_advertises_seekable_ranges(self):
+        source = (ROOT/"routes.py").read_text(encoding="utf-8")
+        self.assertIn('"Accept-Ranges": "bytes"', source)
+        self.assertIn('headers["Content-Range"]', source)
+        self.assertIn("status=206", source)
+
+    def test_top_player_switches_between_original_and_vocals(self):
+        script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
+        styles = (ROOT/"web"/"h3lv.css").read_text(encoding="utf-8")
+        self.assertIn('[["original", "原曲"], ["vocals", "人声"]]', script)
+        self.assertIn("function syncTrackSwitch()", script)
+        self.assertIn("function selectTrack(value)", script)
+        self.assertIn("function selectedPreviewUrl(index)", script)
+        self.assertIn('return previewUrl(index, selectedTrack === "vocals");', script)
+        self.assertIn("selectedAudio.src = selectedPreviewUrl(selected);", script)
+        self.assertIn('当前试听（${selectedTrack === "vocals" ? "人声" : "原曲"}）', script)
+        self.assertIn(".h3lv-track-button.is-active", styles)
+        self.assertIn(".h3lv-selected-info", styles)
+
+    def test_segment_player_auditions_the_whole_vocals_track(self):
+        script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
+        styles = (ROOT/"web"/"h3lv.css").read_text(encoding="utf-8")
+        self.assertIn("本段分离人声试听（该段完整人声，可拖动进度条）", script)
+        self.assertIn('vocals ? "&vocals=1"', script)
+        self.assertIn("rows[index].vocals.src = previewUrl(index, true)", script)
+        self.assertNotIn("boundary=1", script)
+        self.assertIn(".h3lv-segment-audio", styles)
+        self.assertNotIn("h3lv-cut-audio", styles)
+
+
+class ExportTests(unittest.TestCase):
+    def test_review_exports_segment_timings_as_markdown(self):
+        script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
+        styles = (ROOT/"web"/"h3lv.css").read_text(encoding="utf-8")
+        self.assertIn('actionButton(controls, "导出分段时长"', script)
+        self.assertIn("function segmentTimingMarkdown()", script)
+        self.assertIn("| 分段 | 开始(s) | 结束(s) | 时长(s) |", script)
+        self.assertIn("function downloadTextFile(", script)
+        self.assertIn("function exportDialog(", script)
+        self.assertIn("H3LongVideo_分段时长_", script)
+        self.assertIn("link.download = name;", script)
+        self.assertIn('actionButton(buttons, "下载 MD"', script)
+        self.assertIn("text/markdown;charset=utf-8", script)
+        self.assertNotIn("下载 CSV", script)
+        self.assertIn(".h3lv-export-text", styles)
+
+
+class ReferenceImageTests(unittest.TestCase):
+    def reference_project(self, directory, names=("a.png", "b.png"), segments=3):
+        plan = sample_plan()
+        if segments != len(plan["segments"]):
+            plan["samples"] = segments*1000
+            plan["duration"] = segments*10
+            plan["segments"] = [{"start_sample": i*1000, "end_sample": (i+1)*1000,
+                                 "energy_db": -30+i*10, "text": "未校对歌词"}
+                                for i in range(segments)]
+            core.decorate(plan)
+        plan["approved"] = True
+        plan["approved_fingerprint"] = core.fingerprint(plan)
+        core.write_plan(directory, plan)
+        root = core.project_path(directory, plan["id"])
+        (root/"refs").mkdir(parents=True, exist_ok=True)
+        for name in names:
+            (root/"refs"/name).write_bytes(b"image")
+        return plan, root
+
+    def test_store_and_remove_reference_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            directory = core.project_path(d, "a"*32)
+            name = core.store_reference(directory, 2, "PIC.PNG", b"payload")
+            self.assertTrue(name.startswith("seg0002_"))
+            self.assertTrue(name.endswith(".png"))
+            self.assertTrue((core.reference_directory(directory)/name).is_file())
+            core.remove_reference(directory, name)
+            self.assertFalse((core.reference_directory(directory)/name).is_file())
+            with self.assertRaisesRegex(ValueError, "只支持"):
+                core.store_reference(directory, 0, "notes.txt", b"payload")
+
+    def test_reference_limit_and_missing_files_are_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            directory = core.project_path(d, "a"*32)
+            with self.assertRaisesRegex(ValueError, "最多 6 张"):
+                core.normalize_reference_names([f"{i}.png" for i in range(7)])
+            with self.assertRaisesRegex(ValueError, "已丢失"):
+                core.normalize_reference_names(["missing.png"], directory)
+            with self.assertRaisesRegex(ValueError, "文件名无效"):
+                core.normalize_reference_names(["../escape.png"], directory)
+
+    def test_segment_references_replace_the_load_image_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan, root = self.reference_project(d)
+            plan["segments"][0]["refs"] = ["a.png", "b.png"]
+            prompt = {
+                "136": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
+                    "ref_images.ref_image_0": ["137", 0],
+                    "ref_images.ref_image_1": ["217", 0],
+                    "ref_images.ref_image_2": ["218", 0]}},
+                "137": {"class_type": "LoadImage", "inputs": {"image": "person.png"}},
+                "217": {"class_type": "LoadImage", "inputs": {"image": "scene.png"}},
+                "218": {"class_type": "LoadImage", "inputs": {"image": "extra.png"}},
+            }
+            inputs = Path(d)/"input"
+            inputs.mkdir()
+            with patch.dict(sys.modules, {"folder_paths": types.SimpleNamespace(
+                    get_input_directory=lambda: str(inputs))}):
+                controller.apply_segment_references(prompt, plan, plan["segments"][0], root)
+            self.assertEqual(prompt["137"]["inputs"]["image"], f"H3LV/{plan['id']}/a.png")
+            self.assertEqual(prompt["217"]["inputs"]["image"], f"H3LV/{plan['id']}/b.png")
+            self.assertNotIn("ref_images.ref_image_2", prompt["136"]["inputs"])
+            self.assertNotIn("218", prompt)
+            self.assertTrue((inputs/"H3LV"/plan["id"]/"a.png").is_file())
+
+    def test_segment_references_never_exceed_the_connected_slots(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan, root = self.reference_project(d, ("a.png", "b.png", "c.png"))
+            plan["segments"][1]["refs"] = ["a.png", "b.png", "c.png"]
+            prompt = {"136": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
+                "ref_images.ref_image_0": ["137", 0]}},
+                "137": {"class_type": "LoadImage", "inputs": {"image": "person.png"}}}
+            with self.assertRaisesRegex(ValueError, "只接出了 1 个"):
+                controller.apply_segment_references(prompt, plan, plan["segments"][1], root)
+
+    def test_segment_without_references_leaves_the_graph_untouched(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan, root = self.reference_project(d)
+            prompt = {"136": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
+                "ref_images.ref_image_0": ["137", 0]}},
+                "137": {"class_type": "LoadImage", "inputs": {"image": "person.png"}}}
+            before = copy.deepcopy(prompt)
+            controller.apply_segment_references(prompt, plan, plan["segments"][0], root)
+            self.assertEqual(prompt, before)
+
+    def canvas_prompt(self):
+        return {
+            "136": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
+                "ref_images.ref_image_0": ["137", 0],
+                "ref_images.ref_image_1": ["217", 0],
+                "ref_images.ref_image_2": ["218", 0]}},
+            "137": {"class_type": "LoadImage", "inputs": {"image": "person.png"}},
+            "217": {"class_type": "LoadImage", "inputs": {"image": "scene.png"}},
+            "218": {"class_type": "LoadImage", "inputs": {"image": "extra.png"}},
+        }
+
+    def test_default_reference_count_trims_canvas_slots(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan, root = self.reference_project(d)
+            plan["reference_default_count"] = 2
+            prompt = self.canvas_prompt()
+            controller.apply_segment_references(prompt, plan, plan["segments"][0], root)
+            self.assertEqual(prompt["137"]["inputs"]["image"], "person.png")
+            self.assertEqual(prompt["217"]["inputs"]["image"], "scene.png")
+            self.assertNotIn("ref_images.ref_image_2", prompt["136"]["inputs"])
+            self.assertNotIn("218", prompt)
+
+    def test_zero_default_reference_count_feeds_no_picture(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan, root = self.reference_project(d)
+            plan["reference_default_count"] = 0
+            prompt = self.canvas_prompt()
+            controller.apply_segment_references(prompt, plan, plan["segments"][0], root)
+            self.assertEqual(prompt["136"]["inputs"], {})
+            for node_id in ("137", "217", "218"):
+                self.assertNotIn(node_id, prompt)
+
+    def test_configured_segments_ignore_the_default_count(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan, root = self.reference_project(d)
+            plan["reference_default_count"] = 0
+            plan["segments"][0]["refs"] = ["a.png"]
+            prompt = self.canvas_prompt()
+            inputs = Path(d)/"inputs"
+            inputs.mkdir()
+            with patch.dict(sys.modules, {"folder_paths": types.SimpleNamespace(
+                    get_input_directory=lambda: str(inputs))}):
+                controller.apply_segment_references(prompt, plan, plan["segments"][0], root)
+            self.assertEqual(prompt["137"]["inputs"]["image"], f"H3LV/{plan['id']}/a.png")
+            self.assertNotIn("ref_images.ref_image_1", prompt["136"]["inputs"])
+
+    def test_default_count_changes_invalidate_approval(self):
+        plan = sample_plan()
+        original = core.fingerprint(plan)
+        plan["reference_default_count"] = 2
+        self.assertNotEqual(core.fingerprint(plan), original)
+        plan["reference_default_count"] = None
+        self.assertEqual(core.fingerprint(plan), original)
+
+    def test_default_count_round_trips_through_edit_plan(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan, root = self.reference_project(d)
+            updates = [{"end": s["end"], "prompt": s["prompt"]} for s in plan["segments"]]
+            core.edit_plan(plan, updates, root, 2)
+            self.assertEqual(plan["reference_default_count"], 2)
+            with self.assertRaisesRegex(ValueError, "0 到 6"):
+                core.edit_plan(plan, updates, root, 9)
+            with self.assertRaisesRegex(ValueError, "必须是整数"):
+                core.edit_plan(plan, updates, root, "两张")
+            core.edit_plan(plan, updates, root, None)
+            self.assertIsNone(plan["reference_default_count"])
+            core.edit_plan(plan, updates, root, 1)
+            core.edit_plan(plan, updates, root)
+            self.assertEqual(plan["reference_default_count"], 1)
+
+    def test_edit_plan_saves_references_for_one_segment_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan, root = self.reference_project(d)
+            for index, row in enumerate(plan["segments"]):
+                row["job"] = {"status": "completed", "video": f"old_{index}.mp4"}
+            plan["final_video"] = "old_final.mp4"
+            updates = [{"end": s["end"], "prompt": s["prompt"]} for s in plan["segments"]]
+            updates[1]["refs"] = ["a.png"]
+            updates[1]["material_note"] = "图1是人物。"
+            core.edit_plan(plan, updates, root)
+            self.assertEqual(plan["segments"][1]["refs"], ["a.png"])
+            self.assertEqual(plan["segments"][1]["material_note"], "图1是人物。")
+            self.assertEqual(plan["segments"][0]["refs"], [])
+            self.assertTrue(plan["segments"][1]["needs_regeneration"])
+            self.assertEqual(plan["changed_segments"], [1])
+            self.assertTrue(plan["final_stale"])
+
+    def test_references_invalidate_the_approved_fingerprint(self):
+        plan = sample_plan()
+        original = core.fingerprint(plan)
+        plan["segments"][0]["refs"] = ["a.png"]
+        self.assertNotEqual(core.fingerprint(plan), original)
+        plan["segments"][0]["refs"] = []
+        self.assertEqual(core.fingerprint(plan), original)
+        plan["segments"][0]["material_note"] = "图1是人物。"
+        self.assertNotEqual(core.fingerprint(plan), original)
+
+    def test_review_exposes_per_segment_reference_uploads(self):
+        script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
+        styles = (ROOT/"web"/"h3lv.css").read_text(encoding="utf-8")
+        routes_source = (ROOT/"routes.py").read_text(encoding="utf-8")
+        self.assertIn("function referenceSlotLimit()", script)
+        self.assertIn("async function uploadReferenceImage(", script)
+        self.assertIn("material_note: row.note.value, refs: row.refs", script)
+        self.assertIn("h3lv-material-note", styles)
+        self.assertIn(".h3lv-reference-item", styles)
+        self.assertIn(".h3lv-default-references select", styles)
+        self.assertIn("reference_default_count", script)
+        self.assertIn("套用到所有分段", script)
+        self.assertIn("renderRefs: renderReferences", script)
+        self.assertIn('@routes.post("/h3lv/project/{project_id}/refs")', routes_source)
+        self.assertIn('@routes.post("/h3lv/project/{project_id}/refs/remove")', routes_source)
+        self.assertIn('@routes.get("/h3lv/project/{project_id}/refs/{name}")', routes_source)
+
+
 class ControllerTests(unittest.IsolatedAsyncioTestCase):
     async def test_serial_queue_and_completion(self):
         with tempfile.TemporaryDirectory() as d:
@@ -1145,6 +1424,51 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
                 await controller.execute_project(d, p["id"], types.SimpleNamespace(prompt_queue=q))
             self.assertEqual(calls, [])
             self.assertEqual(core.read_plan(d, p["id"])["run_status"], "failed")
+
+    async def test_queued_prompt_receives_the_segment_reference_images(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan = sample_plan()
+            plan["segments"][1]["refs"] = ["seg.png"]
+            plan["approved"] = True
+            plan["approved_fingerprint"] = core.fingerprint(plan)
+            plan["run_only_segment"] = 1
+            directory = core.project_path(d, plan["id"])
+            (directory/"refs").mkdir(parents=True)
+            (directory/"refs"/"seg.png").write_bytes(b"image")
+            core.write_plan(d, plan)
+            core.state_file(directory, "queue_snapshot.json").write_text(json.dumps({
+                "loader_id": "1", "video_id": "7",
+                "prompt": {
+                    "1": {"class_type": "H3LVUnified", "inputs": {}},
+                    "7": {"class_type": "VHS_VideoCombine", "inputs": {}},
+                    "136": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
+                        "ref_images.ref_image_0": ["137", 0],
+                        "ref_images.ref_image_1": ["217", 0]}},
+                    "137": {"class_type": "LoadImage", "inputs": {"image": "person.png"}},
+                    "217": {"class_type": "LoadImage", "inputs": {"image": "scene.png"}}}}),
+                encoding="utf-8")
+            submitted, histories = {}, {}
+            class Queue:
+                def put(self, item):
+                    submitted.update(item[2])
+                    path = directory/"new.mp4"; path.write_bytes(b"new")
+                    histories[item[1]] = {"status": {"status_str": "success"}, "outputs": {"7": {"gifs": [
+                        {"type": "output", "subfolder": plan["id"], "filename": path.name}]}}}
+                def get_history(self, prompt_id): return {prompt_id: histories[prompt_id]}
+                def get_current_queue(self): return [], []
+            async def validate(*args): return True, None, ["7"], {}
+            inputs = Path(d)/"inputs"
+            inputs.mkdir()
+            server = types.SimpleNamespace(number=0, prompt_queue=Queue())
+            folders = types.SimpleNamespace(get_output_directory=lambda: d,
+                                            get_input_directory=lambda: str(inputs))
+            with patch.dict(sys.modules, {"execution": types.SimpleNamespace(validate_prompt=validate),
+                                          "folder_paths": folders}):
+                await controller.execute_project(d, plan["id"], server)
+            self.assertEqual(submitted["137"]["inputs"]["image"], f"H3LV/{plan['id']}/seg.png")
+            self.assertNotIn("ref_images.ref_image_1", submitted["136"]["inputs"])
+            self.assertNotIn("217", submitted)
+            self.assertTrue((inputs/"H3LV"/plan["id"]/"seg.png").is_file())
 
 
 if __name__ == "__main__": unittest.main()

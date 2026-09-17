@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import threading
@@ -30,6 +31,86 @@ def inside(root, path):
     if not path.is_relative_to(root):
         raise ValueError("文件不属于当前项目。")
     return path
+
+
+REFERENCE_MIRROR_ROOT = "H3LV"
+MAX_SEGMENT_REFERENCES = 6
+REFERENCE_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
+MAX_REFERENCE_BYTES = 32 * 1024 * 1024
+
+
+def reference_directory(directory):
+    return Path(directory)/"refs"
+
+
+def normalize_reference_names(value, directory=None):
+    """Validate the ordered per-segment reference list without reordering it."""
+    if value in (None, ""):
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("分段参考图必须按顺序保存为列表。")
+    names = []
+    for item in value:
+        name = str(item or "").strip()
+        if not name:
+            raise ValueError("分段参考图存在空白项，请重新选择图片。")
+        if Path(name).name != name:
+            raise ValueError("参考图文件名无效。")
+        names.append(name)
+    if len(names) > MAX_SEGMENT_REFERENCES:
+        raise ValueError(f"每段最多 {MAX_SEGMENT_REFERENCES} 张参考图。")
+    if directory is not None:
+        root = reference_directory(directory)
+        for name in names:
+            if not (root/name).is_file():
+                raise ValueError(f"参考图已丢失：{name}。请在分段卡片中重新上传。")
+    return names
+
+
+def store_reference(directory, index, filename, content):
+    """Persist one uploaded picture inside the project and return its stored name."""
+    suffix = Path(str(filename or "")).suffix.lower()
+    if suffix not in REFERENCE_IMAGE_EXTENSIONS:
+        raise ValueError("参考图只支持 PNG、JPG、WEBP、BMP 或 GIF 格式。")
+    if not content:
+        raise ValueError("上传的参考图内容为空。")
+    if len(content) > MAX_REFERENCE_BYTES:
+        raise ValueError("单张参考图不能超过 32 MiB。")
+    root = reference_directory(directory)
+    root.mkdir(parents=True, exist_ok=True)
+    name = f"seg{int(index):04d}_{uuid.uuid4().hex[:8]}{suffix}"
+    temporary = root/f".{name}.tmp"
+    temporary.write_bytes(content)
+    os.replace(temporary, root/name)
+    return name
+
+
+def remove_reference(directory, name):
+    root = reference_directory(directory)
+    path = inside(root, root/str(name))
+    if path.is_file():
+        path.unlink()
+    return path.name
+
+
+# Distinguishes "not supplied" from an explicit value when saving a project.
+UNSET = object()
+
+
+def normalize_default_reference_count(value):
+    """Normalize the project-wide fallback count for unconfigured segments.
+
+    None keeps the legacy behaviour: every connected canvas reference is used.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        count = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("默认参考图张数必须是整数。") from exc
+    if not 0 <= count <= MAX_SEGMENT_REFERENCES:
+        raise ValueError(f"默认参考图张数必须在 0 到 {MAX_SEGMENT_REFERENCES} 之间。")
+    return count
 
 
 def output_preview(output_root, path, fps=24):
@@ -949,6 +1030,15 @@ def segment_brief(plan, row, framing, ending, move, previous_frame):
     )
 
 
+def brief_text(row):
+    """Compose the text handed to downstream prompt nodes for one segment."""
+    body = str(row.get("prompt") or "").strip()
+    note = str(row.get("material_note") or "").strip()
+    if not note or "素材说明：" in body:
+        return body
+    return f"素材说明：{note}\n{body}"
+
+
 H3LV_CAMERA_FIELDS = ("镜头方案", "表演节奏")
 H3LV_CAMERA_LEGACY_FIELDS = (
     "生成时长", "开场构图", "段内运镜", "结束构图",
@@ -957,10 +1047,14 @@ H3LV_CAMERA_LEGACY_FIELDS = (
 
 
 def validate_segment_brief(value):
-    """Validate the material-agnostic camera handoff while allowing legacy projects."""
+    """Validate one segment brief.
+
+    The brief is free-form: a structured camera brief, a hand-written material
+    description or a complete Ref2VA prompt with <Picture N>/<Subject N> tags are
+    all accepted. Structured briefs still get field checks so a half-edited brief
+    is caught before it reaches the prompt assistant.
+    """
     text = str(value or "").strip()
-    if re.search(r"<(?:Picture|Subject)\s+\d+>", text):
-        raise ValueError("分段运镜简报不能声明参考图或主体关系；请在提示词小助手的用户提示词中填写素材说明。")
     if text.startswith("协议：H3LV_SEGMENT_V1"):
         return text
     fields = {}
@@ -1114,6 +1208,8 @@ def decorate(plan, regenerate_prompts=True):
     prefs = director_preferences(plan)
     plan["director"] = prefs
     plan["shot_plan_version"] = 14
+    plan["reference_default_count"] = normalize_default_reference_count(
+        plan.get("reference_default_count"))
     plan.pop("ai_shot_plan", None)
     plan.pop("ai_motion_contract", None)
     camera_states = camera_sequence(plan["mode"], rows, prefs)
@@ -1137,12 +1233,20 @@ def decorate(plan, regenerate_prompts=True):
         row.pop("h3_prompt", None)
         row.pop("h3_prompt_mode", None)
         row.setdefault("warnings", [])
+        row["material_note"] = str(row.get("material_note") or "").strip()
+        row["refs"] = normalize_reference_names(row.get("refs"))
     return plan
 
 
 def segment_fingerprint(row):
     data = {k: row.get(k) for k in (
         "start_sample", "end_sample", "prompt", "generation_frames", "edit_frames")}
+    # Only add the new keys when they carry content, so projects saved before
+    # per-segment references existed keep their previous fingerprints and stay approved.
+    if row.get("material_note"):
+        data["material_note"] = row["material_note"]
+    if row.get("refs"):
+        data["refs"] = list(row["refs"])
     return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -1169,11 +1273,14 @@ def request_regeneration(row, reason):
     row.pop("regeneration_reason", None)
 
 
-def edit_plan(plan, submitted):
+def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET):
     if plan.get("run_status") in {"running", "pausing", "stopping", "merging"}:
         raise ValueError("请等当前任务停止后再修改分段。")
     if len(submitted) != len(plan["segments"]):
         raise ValueError("首版支持移动切点；增删段请调整参数重新分析。")
+    if reference_default_count is not UNSET:
+        plan["reference_default_count"] = normalize_default_reference_count(
+            reference_default_count)
     sr = plan["sample_rate"]
     old_signatures = [segment_fingerprint(row) for row in plan["segments"]]
     previous = 0
@@ -1184,6 +1291,10 @@ def edit_plan(plan, submitted):
         if not changed:
             validate_segment_brief(prompt)
         row.update(start_sample=previous, end_sample=end, prompt=prompt)
+        if "material_note" in update:
+            row["material_note"] = str(update.get("material_note") or "").strip()
+        if "refs" in update:
+            row["refs"] = normalize_reference_names(update.get("refs"), directory)
         if changed:
             row["reason"] = "手动调整切点"
             row["boundary_kind"] = "manual"
@@ -1205,6 +1316,16 @@ def edit_plan(plan, submitted):
 
 
 def fingerprint(plan):
-    data = [{k: row.get(k) for k in ("start_sample", "end_sample", "prompt")}
-            for row in plan["segments"]]
+    data = []
+    for row in plan["segments"]:
+        item = {k: row.get(k) for k in ("start_sample", "end_sample", "prompt")}
+        if row.get("material_note"):
+            item["material_note"] = row["material_note"]
+        if row.get("refs"):
+            item["refs"] = list(row["refs"])
+        data.append(item)
+    # Only present when the project overrides the canvas fallback, so projects
+    # saved before this setting existed keep their previous fingerprint.
+    if plan.get("reference_default_count") is not None:
+        data.append({"reference_default_count": int(plan["reference_default_count"])})
     return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode()).hexdigest()
