@@ -189,17 +189,38 @@
 .h3lv-project-row .h3lv-default-references select { min-width: 150px; margin-left: 8px; }
 .h3lv-button.reference-copy { border-color: #7e8b9f; color: #e6ecf5; background: #2f3641; }
 .h3lv-button.reference-copy:hover { border-color: #9aa8bc; background: #39414e; }
-.h3lv-export-panel { display: flex; flex-direction: column; gap: 10px; width: min(560px, 94vw); }
-.h3lv-export-text {
-  width: 100%; min-height: 250px; box-sizing: border-box; padding: 10px 12px;
-  border: 1px solid #566274; border-radius: 6px; resize: vertical;
-  background: #0f1319; color: #edf1f7;
-  font: 13px/1.6 Consolas, "Microsoft YaHei", monospace; white-space: pre;
+.h3lv-default-materials {
+  margin: 14px 0 8px; overflow: hidden;
+  border: 1px solid #414c5b; border-radius: 9px; background: #1d232b;
 }
-.h3lv-material-editor { padding: 14px; min-width: 0; }
+.h3lv-default-materials-header {
+  padding: 13px 16px 11px; border-bottom: 1px solid #3d4652; background: #252c35;
+}
+.h3lv-default-materials-header h3 { margin: 0 0 5px; font-size: 16px; }
+.h3lv-default-materials-header .h3lv-help { margin: 0; color: #aeb8c6; }
+.h3lv-material-editor {
+  min-width: 0; margin-top: 12px; padding: 12px 0 0; border-top: 1px solid #38414d;
+}
+.h3lv-default-materials .h3lv-material-editor {
+  margin: 0; padding: 14px 16px 16px; border-top: 0;
+}
+.h3lv-material-editor > .h3lv-actions { margin: 10px 0; }
+.h3lv-material-editor .h3lv-reference-list > p { margin: 0; color: #aeb8c6; }
 .h3lv-material-editor textarea { width: 100%; box-sizing: border-box; min-height: 80px; }
 .h3lv-material-editor .h3lv-reference-list { flex-wrap: wrap; }
 .h3lv-material-editor select { max-width: 100%; }
+.h3lv-shot-control {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px;
+  margin: 14px 0 0; padding: 10px 12px;
+  border: 1px solid #414c5b; border-radius: 7px; background: #181e26;
+}
+.h3lv-shot-control label { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.h3lv-shot-control select {
+  min-width: 112px; padding: 5px 8px; border: 1px solid #566274; border-radius: 5px;
+  background: #252c35; color: #edf1f7;
+}
+.h3lv-shot-control-help { color: #aeb8c6; font-size: 12px; }
+.h3lv-prompt-actions { margin-top: 10px; }
 .h3lv-expansion-panel { max-width: 900px; }
 .h3lv-expansion-panel .h3lv-content { display: flex; flex-direction: column; gap: 14px; }
 .h3lv-expansion-panel label { display: flex; flex-direction: column; gap: 8px; }

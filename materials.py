@@ -43,7 +43,7 @@ def images(material):
         with Image.open(path) as im:
             value = ImageOps.exif_transpose(im).convert('RGB')
             result.append(torch.from_numpy(np.asarray(value).astype(np.float32)/255).unsqueeze(0))
-    return tuple(result + [None]*(9-len(result)))
+    return tuple(result + [None]*(6-len(result)))
 
 
 def stamp(plan, row):

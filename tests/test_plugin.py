@@ -149,10 +149,11 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("H3LVLoadSegment", nodes.NODE_DISPLAY_NAME_MAPPINGS)
         self.assertEqual(nodes.Unified.RETURN_TYPES, nodes.LoadSegment.RETURN_TYPES)
         self.assertEqual(nodes.Unified.RETURN_NAMES, nodes.LoadSegment.RETURN_NAMES)
-        self.assertEqual(len(nodes.Unified.RETURN_NAMES), 15)
+        self.assertEqual(len(nodes.Unified.RETURN_NAMES), 12)
         self.assertEqual(nodes.LoadSegment.RETURN_NAMES[:5], (
             "original_audio_padded", "vocals_padded", "segment_brief",
             "generation_frames", "filename_prefix"))
+        self.assertEqual(nodes.LoadSegment.RETURN_NAMES[-6:], tuple(f"image_{i}" for i in range(1, 7)))
         self.assertNotIn("edit_frames", nodes.LoadSegment.RETURN_NAMES)
         self.assertNotIn("fps", nodes.LoadSegment.RETURN_NAMES)
         required = nodes.Unified.INPUT_TYPES()["required"]
@@ -998,32 +999,28 @@ class PlaybackTests(unittest.TestCase):
         self.assertIn(".h3lv-track-button.is-active", styles)
         self.assertIn(".h3lv-selected-info", styles)
 
-    def test_segment_player_auditions_the_whole_vocals_track(self):
+    def test_segment_player_auditions_the_original_mix(self):
         script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
         styles = (ROOT/"web"/"h3lv.css").read_text(encoding="utf-8")
-        self.assertIn("本段分离人声试听（该段完整人声，可拖动进度条）", script)
+        self.assertIn("本段原曲试听（包含伴奏、前奏和间奏，可拖动进度条）", script)
         self.assertIn('vocals ? "&vocals=1"', script)
-        self.assertIn("rows[index].vocals.src = previewUrl(index, true)", script)
+        self.assertIn("rows[index].audio.src = previewUrl(index)", script)
+        self.assertIn('segmentAudio.src = api.apiURL(endpoint(`/audio?index=${row.index}&revision=${plan.revision}`))', script)
         self.assertNotIn("boundary=1", script)
         self.assertIn(".h3lv-segment-audio", styles)
         self.assertNotIn("h3lv-cut-audio", styles)
 
 
 class ExportTests(unittest.TestCase):
-    def test_review_exports_segment_timings_as_markdown(self):
+    def test_redundant_review_controls_are_removed(self):
         script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
         styles = (ROOT/"web"/"h3lv.css").read_text(encoding="utf-8")
-        self.assertIn('actionButton(controls, "导出分段时长"', script)
-        self.assertIn("function segmentTimingMarkdown()", script)
-        self.assertIn("| 分段 | 开始(s) | 结束(s) | 时长(s) |", script)
-        self.assertIn("function downloadTextFile(", script)
-        self.assertIn("function exportDialog(", script)
-        self.assertIn("H3LongVideo_分段时长_", script)
-        self.assertIn("link.download = name;", script)
-        self.assertIn('actionButton(buttons, "下载 MD"', script)
-        self.assertIn("text/markdown;charset=utf-8", script)
-        self.assertNotIn("下载 CSV", script)
-        self.assertIn(".h3lv-export-text", styles)
+        routes_source = (ROOT/"routes.py").read_text(encoding="utf-8")
+        self.assertNotIn("导出分段时长", script)
+        self.assertNotIn("segmentTimingMarkdown", script)
+        self.assertNotIn("h3lv-export", styles)
+        self.assertNotIn("复制成片目录", script)
+        self.assertNotIn("/h3lv/final-folder", routes_source)
 
 
 class ReferenceImageTests(unittest.TestCase):
@@ -1063,8 +1060,8 @@ class ReferenceImageTests(unittest.TestCase):
     def test_reference_limit_and_missing_files_are_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             directory = core.project_path(d, "a"*32)
-            with self.assertRaisesRegex(ValueError, "最多 9 张"):
-                core.normalize_reference_names([f"{i}.png" for i in range(10)])
+            with self.assertRaisesRegex(ValueError, "最多 6 张"):
+                core.normalize_reference_names([f"{i}.png" for i in range(7)])
             with self.assertRaisesRegex(ValueError, "已丢失"):
                 core.normalize_reference_names(["missing.png"], directory)
             with self.assertRaisesRegex(ValueError, "文件名无效"):
@@ -1174,8 +1171,8 @@ class ReferenceImageTests(unittest.TestCase):
             updates = [{"end": s["end"], "prompt": s["prompt"]} for s in plan["segments"]]
             core.edit_plan(plan, updates, root, 2)
             self.assertEqual(plan["reference_default_count"], 2)
-            with self.assertRaisesRegex(ValueError, "0 到 9"):
-                core.edit_plan(plan, updates, root, 10)
+            with self.assertRaisesRegex(ValueError, "0 到 6"):
+                core.edit_plan(plan, updates, root, 7)
             with self.assertRaisesRegex(ValueError, "必须是整数"):
                 core.edit_plan(plan, updates, root, "两张")
             core.edit_plan(plan, updates, root, None)
@@ -1213,6 +1210,7 @@ class ReferenceImageTests(unittest.TestCase):
 
     def test_review_exposes_per_segment_reference_uploads(self):
         script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
+        materials_script = (ROOT/"web"/"materials.js").read_text(encoding="utf-8")
         styles = (ROOT/"web"/"h3lv.css").read_text(encoding="utf-8")
         routes_source = (ROOT/"routes.py").read_text(encoding="utf-8")
         self.assertIn("function referenceSlotLimit()", script)
@@ -1224,6 +1222,12 @@ class ReferenceImageTests(unittest.TestCase):
         self.assertIn("reference_default_count", script)
         self.assertIn("套用到所有分段", script)
         self.assertIn("renderRefs: renderReferences", script)
+        self.assertIn('element("label", "本段画面", shotControl)', script)
+        self.assertIn("保存草稿后会按该类型重写本段镜头简报", script)
+        self.assertNotIn("画面类型", materials_script)
+        self.assertIn("最多 6 张", materials_script)
+        self.assertIn(".h3lv-default-materials-header", styles)
+        self.assertIn(".h3lv-shot-control", styles)
         self.assertIn('@routes.post("/h3lv/project/{project_id}/refs")', routes_source)
         self.assertIn('@routes.post("/h3lv/project/{project_id}/refs/remove")', routes_source)
         self.assertIn('@routes.get("/h3lv/project/{project_id}/refs/{name}")', routes_source)

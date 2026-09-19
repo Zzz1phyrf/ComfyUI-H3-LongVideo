@@ -42,14 +42,14 @@ class MaterialTests(unittest.TestCase):
     def test_images_remain_ordered_and_individual_sizes(self):
         packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)
         images = materials.images(packet)
-        self.assertEqual(len(images),9)
+        self.assertEqual(len(images),6)
         self.assertEqual(tuple(images[0].shape),(1,8,16,3))
         self.assertEqual(tuple(images[1].shape),(1,16,8,3))
         self.assertTrue(all(value is None for value in images[2:]))
 
     def test_controller_removes_unused_slots_and_environment_audio(self):
         prompt = {'1':{'class_type':'H3LVUnified','inputs':{}},'2':{'class_type':'MiniMaxH3ReferenceToVideo','inputs':{
-            'ref_images.ref_image_0':['x',0],'ref_images.ref_image_8':['y',0],'ref_audios.ref_audio_0':['1',1],'prompt':'keep'}}}
+            'ref_images.ref_image_0':['x',0],'ref_images.ref_image_5':['y',0],'ref_audios.ref_audio_0':['1',1],'prompt':'keep'}}}
         controller.apply_segment_references(prompt,self.plan,self.plan['segments'][1],self.directory)
         self.assertEqual(prompt['2']['inputs'],{'ref_images.ref_image_0':['1',6],'prompt':'keep'})
         core.validate_segment_brief(self.plan['segments'][1]['prompt'])

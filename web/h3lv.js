@@ -114,56 +114,6 @@ function editPromptDialog(index, value) {
   });
 }
 
-function downloadTextFile(name, text) {
-  const url = URL.createObjectURL(new Blob([text], {type: "text/markdown;charset=utf-8"}));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = name;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function exportDialog({title, note, text, fileName}) {
-  return new Promise(resolve => {
-    const shade = element("div", undefined, document.body,
-      "h3lv-shade h3lv-settings-shade h3lv-confirm-shade");
-    const panel = element("div", undefined, shade, "h3lv-settings-panel h3lv-export-panel");
-    panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-modal", "true");
-    panel.setAttribute("aria-label", title);
-    element("h2", title, panel);
-    element("p", note, panel, "h3lv-help");
-    const editor = element("textarea", undefined, panel, "h3lv-export-text");
-    editor.value = text;
-    editor.readOnly = true;
-    editor.spellcheck = false;
-    const buttons = element("div", undefined, panel, "h3lv-actions h3lv-confirm-actions");
-    let finished = false;
-    const finish = value => {
-      if (finished) return;
-      finished = true;
-      window.removeEventListener("keydown", onKeyDown);
-      shade.remove();
-      resolve(value);
-    };
-    const onKeyDown = event => { if (event.key === "Escape") finish(null); };
-    window.addEventListener("keydown", onKeyDown);
-    actionButton(buttons, "关闭", () => finish(null));
-    actionButton(buttons, "复制", async () => {
-      await navigator.clipboard.writeText(text);
-      toast("已复制到剪贴板");
-    });
-    actionButton(buttons, "下载 MD", () => {
-      downloadTextFile(fileName, text);
-      finish(true);
-    }, "primary");
-    shade.onclick = event => { if (event.target === shade) finish(null); };
-    queueMicrotask(() => editor.focus());
-  });
-}
-
 async function buildGenerationPayload() {
   const snapshot = await app.graphToPrompt();
   const loaders = Object.entries(snapshot.output).filter(([, node]) =>
@@ -504,7 +454,7 @@ async function openReview(owner) {
   const selectedAudio = element("audio", undefined, selectedBar);
   selectedAudio.controls = true;
   selectedAudio.preload = "metadata";
-  const defaultMaterials = element("section", undefined, content, "h3lv-card");
+  const defaultMaterials = element("section", undefined, content, "h3lv-default-materials");
   let defaultEditor = null;
   const segmentsBody = element("section", undefined, content, "h3lv-segments");
   let plan = null;
@@ -548,7 +498,7 @@ async function openReview(owner) {
   function refreshPreviewAudio(index) {
     if (!rows[index]) return;
     if (selected === index || selected === index+1) selectedAudio.src = selectedPreviewUrl(selected);
-    if (rows[index].vocals) rows[index].vocals.src = previewUrl(index, true);
+    if (rows[index].audio) rows[index].audio.src = previewUrl(index);
   }
   function updateSelected(index, refreshAudio = true) {
     if (!plan?.segments.length) return;
@@ -572,20 +522,6 @@ async function openReview(owner) {
       item.editFrames.textContent = `${editFrames} 剪辑帧`;
       item.generationFrames.textContent = `${generationFrames} 生成帧`;
     });
-  }
-  function segmentTimingMarkdown() {
-    const lines = ["# H3 长视频 · 分段时长", "",
-      "| 分段 | 开始(s) | 结束(s) | 时长(s) |",
-      "| --- | --- | --- | --- |"];
-    let total = 0;
-    rows.forEach((item, index) => {
-      const start = index === 0 ? 0 : Number(rows[index-1].end.value);
-      const end = Number(item.end.value);
-      total += end-start;
-      lines.push(`| 第${index+1}段 | ${start.toFixed(3)} | ${end.toFixed(3)} | ${(end-start).toFixed(3)} |`);
-    });
-    lines.push("", `共 ${rows.length} 段 · 合计 ${total.toFixed(3)}s`);
-    return {text: lines.join("\n"), total};
   }
   function moveBoundary(index, proposed) {
     const start = index === 0 ? 0 : Number(rows[index-1].end.value);
@@ -650,17 +586,16 @@ async function openReview(owner) {
         refreshDraftDisplays(); markDirty(); updateSelected(selected, false); canvas.drawTimeline?.();
       };
       end.onchange = () => { refreshPreviewAudio(row.index); updateSelected(selected); };
-      element("p", "本段分离人声试听（该段完整人声，可拖动进度条）", inner, "h3lv-audio-label");
-      const vocalsAudio = element("audio", undefined, inner, "h3lv-segment-audio");
-      vocalsAudio.controls = true;
-      vocalsAudio.preload = "metadata";
-      vocalsAudio.src = api.apiURL(endpoint(`/audio?index=${row.index}&vocals=1&revision=${plan.revision}`));
-      let note, rowRefs, renderReferences, materialControls;
+      element("p", "本段原曲试听（包含伴奏、前奏和间奏，可拖动进度条）", inner, "h3lv-audio-label");
+      const segmentAudio = element("audio", undefined, inner, "h3lv-segment-audio");
+      segmentAudio.controls = true;
+      segmentAudio.preload = "metadata";
+      segmentAudio.src = api.apiURL(endpoint(`/audio?index=${row.index}&revision=${plan.revision}`));
+      let note, rowRefs, renderReferences, materialControls, visualTypeSelect;
       if (plan.materials_version) {
         materialControls = materialEditor(inner, {projectId:plan.id, index:row.index,
           refs:row.refs || [], note:row.material_note || "",
           source:row.reference_source || (row.refs?.length ? "custom" : "default"),
-          visualType:row.visual_type || "performance",
           defaults:() => ({refs:defaultEditor.refs, note:defaultEditor.getNote()}), changed:markDirty});
         note = materialControls.note; rowRefs = materialControls.refs; renderReferences = materialControls.renderRefs;
       } else {
@@ -765,6 +700,19 @@ async function openReview(owner) {
       }, "reference-copy");
       renderReferences();
       }
+      if (plan.materials_version) {
+        const shotControl = element("div", undefined, inner, "h3lv-shot-control");
+        const shotLabel = element("label", "本段画面", shotControl);
+        visualTypeSelect = element("select", undefined, shotLabel);
+        for (const [value, label] of [["performance", "人物表演"], ["environment", "空镜环境"]]) {
+          const option = element("option", label, visualTypeSelect);
+          option.value = value;
+        }
+        visualTypeSelect.value = row.visual_type || "performance";
+        visualTypeSelect.onchange = markDirty;
+        element("span", "保存草稿后会按该类型重写本段镜头简报；空镜不会使用人声参考。",
+          shotControl, "h3lv-shot-control-help");
+      }
       const promptActions = element("div", undefined, inner, "h3lv-actions h3lv-prompt-actions");
       const prompt = document.createElement("textarea");
       prompt.value = row.prompt;
@@ -775,8 +723,9 @@ async function openReview(owner) {
         prompt.value = updated;
         prompt.dispatchEvent(new Event("input"));
       }, "prompt-edit");
-      rows.push({end, prompt, note, materialControls, refs: rowRefs, renderRefs: renderReferences,
-        duration, time, generationFrames, editFrames, vocals: vocalsAudio});
+      rows.push({end, prompt, note, materialControls, visualType:visualTypeSelect,
+        refs: rowRefs, renderRefs: renderReferences, duration, time,
+        generationFrames, editFrames, audio:segmentAudio});
       details.push(card);
       if (row.job || needsReplacement(row)) {
         element("p", `生成状态：${row.job?.status || "待生成"}${needsReplacement(row) ? ` · ${row.regeneration_reason || "需要重新生成"}` : ""}`+
@@ -823,13 +772,14 @@ async function openReview(owner) {
     }
     syncDefaultReferenceControl();
     defaultMaterials.replaceChildren();
-    element("h3", "项目默认参考图", defaultMaterials);
+    const defaultHeader = element("div", undefined, defaultMaterials, "h3lv-default-materials-header");
+    element("h3", "项目默认参考图", defaultHeader);
     if (plan.materials_version) {
-      element("p", "上传一次，所有使用默认的分段自动继承；本段自定义的图片保持独立。", defaultMaterials, "h3lv-help");
+      element("p", "上传一次，所有使用默认的分段自动继承；本段自定义的图片保持独立。", defaultHeader, "h3lv-help");
       defaultEditor = materialEditor(defaultMaterials, {projectId:plan.id, refs:plan.default_refs || [],
         note:plan.default_material_note || "", changed:() => {markDirty(); rows.forEach(row => row.renderRefs());}});
     } else {
-      element("p", "当前沿用画布参考图。启用内置素材后，请上传默认图并核对每段用途。", defaultMaterials, "h3lv-help");
+      element("p", "当前沿用画布参考图。启用内置素材后，请上传默认图并核对每段用途。", defaultHeader, "h3lv-help");
       actionButton(defaultMaterials, "启用内置素材管理", async () => {
         if (dirty) throw new Error("请先保存当前修改。");
         await request(endpoint("/edit"), {revision:plan.revision, materials:{refs:[], note:""},
@@ -882,7 +832,7 @@ async function openReview(owner) {
         segments: rows.map(row => ({end: Number(row.end.value), prompt: row.prompt.value,
           material_note: row.materialControls ? row.materialControls.getNote() : row.note.value, refs: row.refs,
           ...(row.materialControls ? {reference_source:row.materialControls.source.value,
-            visual_type:row.materialControls.visualType.value} : {})}))});
+            visual_type:row.visualType.value} : {})}))});
       plan = saved; revision = saved.revision; dirty = false;
     }
     return revision;
@@ -943,33 +893,7 @@ async function openReview(owner) {
   actionButton(controls, "仅重新合成", async () => {
     await request(endpoint("/assemble"), {}); await load();
   });
-  actionButton(controls, "复制成片目录", async () => {
-    const result = await request("/h3lv/final-folder");
-    try {
-      await navigator.clipboard.writeText(result.path);
-      await messageDialog({title: "成片目录已复制", message: result.path});
-    } catch {
-      await messageDialog({title: "成片目录", message: result.path});
-    }
-  });
   actionButton(controls, "刷新状态", load);
-  actionButton(controls, "导出分段时长", async () => {
-    if (!rows.length) throw new Error("还没有可导出的分段。");
-    const {text, total} = segmentTimingMarkdown();
-    let copied = false;
-    try {
-      await navigator.clipboard.writeText(text);
-      copied = true;
-    } catch {}
-    await exportDialog({
-      title: copied ? "分段时长已复制" : "分段时长",
-      note: `共 ${rows.length} 段 · 合计 ${total.toFixed(3)}s · ${copied
-        ? "已复制到剪贴板，也可以下载为 Markdown 文件。"
-        : "浏览器拦截了自动复制，可手动选取下方文本，或直接下载 Markdown 文件。"}`,
-      text,
-      fileName: `H3LongVideo_分段时长_${String(select.value).slice(0, 8)}.md`,
-    });
-  });
   select.onchange = () => {
     selected = 0;
     load().catch(error => messageDialog({title: "项目加载失败", message: error.message, tone: "error"}));

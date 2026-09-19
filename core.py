@@ -34,7 +34,7 @@ def inside(root, path):
 
 
 REFERENCE_MIRROR_ROOT = "H3LV"
-MAX_SEGMENT_REFERENCES = 9
+MAX_SEGMENT_REFERENCES = 6
 REFERENCE_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 MAX_REFERENCE_BYTES = 32 * 1024 * 1024
 
@@ -564,8 +564,8 @@ def dynamic_reference_manifest(definitions, picture_count=None):
     if not isinstance(definitions, list):
         raise ValueError("参考图职责必须是按图片顺序保存的列表。")
     count = int(picture_count if picture_count is not None else len(definitions))
-    if not 1 <= count <= 9:
-        raise ValueError("请连接 1至9 张参考图。")
+    if not 1 <= count <= MAX_SEGMENT_REFERENCES:
+        raise ValueError(f"请连接 1至{MAX_SEGMENT_REFERENCES} 张参考图。")
     if len(definitions) != count:
         raise ValueError(f"已连接 {count} 张图，但参考图职责保存了 {len(definitions)} 项；请重新确认。")
     assets = []

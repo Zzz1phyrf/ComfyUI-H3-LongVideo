@@ -148,13 +148,6 @@ def register_routes():
                     continue
         return web.json_response(sorted(result, key=lambda p: p["created"], reverse=True))
 
-    @routes.get("/h3lv/final-folder")
-    @endpoint
-    async def final_folder(request):
-        path = storage_root()/"final_videos"
-        path.mkdir(parents=True, exist_ok=True)
-        return web.json_response({"path": str(path)})
-
     @routes.get("/h3lv/project/{project_id}")
     @endpoint
     async def get_project(request):

@@ -6,26 +6,21 @@ function el(tag, parent, text) {
   parent.append(item); return item;
 }
 
-export function materialEditor(parent, {projectId, index = 0, refs = [], note = "", defaults, source = "default", visualType = "performance", changed}) {
+export function materialEditor(parent, {projectId, index = 0, refs = [], note = "", defaults, source = "default", changed}) {
   const box = el("section", parent); box.className = "h3lv-material-editor";
   const value = [...refs];
-  let sourceSelect, typeSelect;
+  let sourceSelect;
   if (defaults) {
     const controls = el("div", box); controls.className = "h3lv-actions";
     const sourceLabel = el("label", controls, "参考图来源 ");
     sourceSelect = el("select", sourceLabel);
     for (const [id, title] of [["default", "使用项目默认"], ["custom", "本段自定义"]]) el("option", sourceSelect, title).value = id;
     sourceSelect.value = source;
-    const typeLabel = el("label", controls, "画面类型 ");
-    typeSelect = el("select", typeLabel);
-    for (const [id, title] of [["performance", "人物表演"], ["environment", "空镜 / 环境"]]) el("option", typeSelect, title).value = id;
-    typeSelect.value = visualType;
-    typeSelect.onchange = changed;
   }
   const list = el("div", box); list.className = "h3lv-reference-list";
   const actions = el("div", box); actions.className = "h3lv-actions";
   const upload = el("input", box); upload.type = "file"; upload.accept = "image/*"; upload.multiple = true; upload.hidden = true;
-  const add = el("button", actions, "＋ 上传图片（最多 9 张）"); add.type = "button"; add.className = "h3lv-button";
+  const add = el("button", actions, "＋ 上传图片（最多 6 张）"); add.type = "button"; add.className = "h3lv-button";
   add.onclick = () => upload.click();
   const textarea = el("textarea", box); textarea.className = "h3lv-material-note"; textarea.value = note;
   textarea.placeholder = "按顺序说明用途，例如：图1为人物三视图，图2为背景；三视图是同一个人。";
@@ -65,7 +60,7 @@ export function materialEditor(parent, {projectId, index = 0, refs = [], note = 
   }
   upload.onchange = async () => {
     const files = [...upload.files]; upload.value = "";
-    if (value.length + files.length > 9) {window.alert("每段最多 9 张图片，请减少所选文件。"); return;}
+    if (value.length + files.length > 6) {window.alert("每段最多 6 张图片，请减少所选文件。"); return;}
     uploading = true; add.disabled = true;
     try {
       for (const file of files) {
@@ -79,6 +74,6 @@ export function materialEditor(parent, {projectId, index = 0, refs = [], note = 
     finally {uploading = false; render();}
   };
   render();
-  return {refs:value, note:textarea, source:sourceSelect, visualType:typeSelect, renderRefs:render,
+  return {refs:value, note:textarea, source:sourceSelect, renderRefs:render,
     getNote: () => customNote};
 }
