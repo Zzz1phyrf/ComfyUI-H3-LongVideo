@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { materialEditor } from "./materials.js";
 import { createTimeline, pcmWavePeaks } from "./timeline.js";
 
 if (!document.querySelector("link[data-h3lv-style]")) {
@@ -468,7 +469,7 @@ async function openReview(owner) {
       item.value = String(count);
     }
     defaultSelect.value = current === null || current === undefined ? "all" : String(current);
-    defaultRow.hidden = available === 0;
+    defaultRow.hidden = Boolean(plan?.materials_version) || available === 0;
   }
 
   function defaultReferenceText() {
@@ -503,6 +504,8 @@ async function openReview(owner) {
   const selectedAudio = element("audio", undefined, selectedBar);
   selectedAudio.controls = true;
   selectedAudio.preload = "metadata";
+  const defaultMaterials = element("section", undefined, content, "h3lv-card");
+  let defaultEditor = null;
   const segmentsBody = element("section", undefined, content, "h3lv-segments");
   let plan = null;
   let analysis = null;
@@ -652,7 +655,16 @@ async function openReview(owner) {
       vocalsAudio.controls = true;
       vocalsAudio.preload = "metadata";
       vocalsAudio.src = api.apiURL(endpoint(`/audio?index=${row.index}&vocals=1&revision=${plan.revision}`));
-      const note = element("textarea", undefined, inner, "h3lv-material-note");
+      let note, rowRefs, renderReferences, materialControls;
+      if (plan.materials_version) {
+        materialControls = materialEditor(inner, {projectId:plan.id, index:row.index,
+          refs:row.refs || [], note:row.material_note || "",
+          source:row.reference_source || (row.refs?.length ? "custom" : "default"),
+          visualType:row.visual_type || "performance",
+          defaults:() => ({refs:defaultEditor.refs, note:defaultEditor.getNote()}), changed:markDirty});
+        note = materialControls.note; rowRefs = materialControls.refs; renderReferences = materialControls.renderRefs;
+      } else {
+      note = element("textarea", undefined, inner, "h3lv-material-note");
       note.value = row.material_note || "";
       note.placeholder = "本段素材说明，例如：图1是人物，图2是场景。编号要和下面的参考图顺序一致。";
       note.oninput = markDirty;
@@ -661,13 +673,13 @@ async function openReview(owner) {
       element("span", "本段参考图", referenceHeader, "h3lv-audio-label");
       const referenceLimit = referenceSlotLimit();
       const referenceList = element("div", undefined, referenceBlock, "h3lv-reference-list");
-      const rowRefs = Array.isArray(row.refs) ? [...row.refs] : [];
+      rowRefs = Array.isArray(row.refs) ? [...row.refs] : [];
       if (!referenceLimit) {
         element("p", "当前工作流还没有接出 ref_image 槽位：请先在画布上用“加载图像”节点依次接到 "
           + "MiniMax H3 视频参考节点的 ref_image_0、ref_image_1……每接一个槽位，可用的参考图就多一张。",
           referenceBlock, "h3lv-reference-empty");
       }
-      const renderReferences = () => {
+      renderReferences = () => {
         referenceList.replaceChildren();
         if (!rowRefs.length) {
           element("p", `本段未配置参考图，将使用默认参考图（${defaultReferenceText()}）。`,
@@ -752,6 +764,7 @@ async function openReview(owner) {
         markDirty();
       }, "reference-copy");
       renderReferences();
+      }
       const promptActions = element("div", undefined, inner, "h3lv-actions h3lv-prompt-actions");
       const prompt = document.createElement("textarea");
       prompt.value = row.prompt;
@@ -762,7 +775,7 @@ async function openReview(owner) {
         prompt.value = updated;
         prompt.dispatchEvent(new Event("input"));
       }, "prompt-edit");
-      rows.push({end, prompt, note, refs: rowRefs, renderRefs: renderReferences,
+      rows.push({end, prompt, note, materialControls, refs: rowRefs, renderRefs: renderReferences,
         duration, time, generationFrames, editFrames, vocals: vocalsAudio});
       details.push(card);
       if (row.job || needsReplacement(row)) {
@@ -804,7 +817,26 @@ async function openReview(owner) {
       return;
     }
     plan = await request(endpoint());
+    if (!plan.materials_version && !plan.segments.some(row => row.job) && owner.outputs?.slice(5).some(output => output.links?.length)) {
+      plan = await request(endpoint("/edit"), {revision:plan.revision, materials:{refs:[], note:""},
+        segments:plan.segments.map(row => ({...row, reference_source:row.refs?.length ? "custom" : "default"}))});
+    }
     syncDefaultReferenceControl();
+    defaultMaterials.replaceChildren();
+    element("h3", "项目默认参考图", defaultMaterials);
+    if (plan.materials_version) {
+      element("p", "上传一次，所有使用默认的分段自动继承；本段自定义的图片保持独立。", defaultMaterials, "h3lv-help");
+      defaultEditor = materialEditor(defaultMaterials, {projectId:plan.id, refs:plan.default_refs || [],
+        note:plan.default_material_note || "", changed:() => {markDirty(); rows.forEach(row => row.renderRefs());}});
+    } else {
+      element("p", "当前沿用画布参考图。启用内置素材后，请上传默认图并核对每段用途。", defaultMaterials, "h3lv-help");
+      actionButton(defaultMaterials, "启用内置素材管理", async () => {
+        if (dirty) throw new Error("请先保存当前修改。");
+        await request(endpoint("/edit"), {revision:plan.revision, materials:{refs:[], note:""},
+          segments:plan.segments.map(row => ({...row, reference_source:row.refs?.length ? "custom" : "default"}))});
+        await load();
+      });
+    }
     analysis = await request(endpoint("/analysis"));
     if (widget) widget.value = plan.id;
     owner.properties = {...owner.properties, h3lv_project: plan.id};
@@ -841,22 +873,30 @@ async function openReview(owner) {
     }
   }
 
+  async function saveDraft() {
+    let revision = plan.revision;
+    if (dirty) {
+      const saved = await request(endpoint("/edit"), {revision,
+        reference_default_count: defaultSelect.value === "all" ? null : Number(defaultSelect.value),
+        ...(plan.materials_version ? {materials:{refs:defaultEditor.refs, note:defaultEditor.getNote()}} : {}),
+        segments: rows.map(row => ({end: Number(row.end.value), prompt: row.prompt.value,
+          material_note: row.materialControls ? row.materialControls.getNote() : row.note.value, refs: row.refs,
+          ...(row.materialControls ? {reference_source:row.materialControls.source.value,
+            visual_type:row.materialControls.visualType.value} : {})}))});
+      plan = saved; revision = saved.revision; dirty = false;
+    }
+    return revision;
+  }
+  actionButton(controls, "保存草稿", async () => {await saveDraft(); await load();});
   actionButton(controls, "保存并确认", async () => {
     if (!await confirmDialog({
       title: "保存并确认分段？",
       message: "请确认已经试听并检查所有切点。保存后，这个项目将允许开始顺序生成。",
       confirmText: "保存并确认",
     })) return;
-    let revision = plan.revision;
-    if (dirty) {
-      const saved = await request(endpoint("/edit"), {revision,
-        reference_default_count: defaultSelect.value === "all" ? null : Number(defaultSelect.value),
-        segments: rows.map(row => ({end: Number(row.end.value), prompt: row.prompt.value,
-          material_note: row.note.value, refs: row.refs}))});
-      revision = saved.revision;
-    }
-    await request(endpoint("/approve"), {revision});
-    await load();
+    const revision = await saveDraft();
+    try {await request(endpoint("/approve"), {revision});}
+    finally {await load();}
   }, "primary");
   actionButton(controls, "重新分析分段", async () => {
     await reanalyzeProject(owner);

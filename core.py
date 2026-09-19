@@ -34,7 +34,7 @@ def inside(root, path):
 
 
 REFERENCE_MIRROR_ROOT = "H3LV"
-MAX_SEGMENT_REFERENCES = 6
+MAX_SEGMENT_REFERENCES = 9
 REFERENCE_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 MAX_REFERENCE_BYTES = 32 * 1024 * 1024
 
@@ -76,6 +76,13 @@ def store_reference(directory, index, filename, content):
         raise ValueError("上传的参考图内容为空。")
     if len(content) > MAX_REFERENCE_BYTES:
         raise ValueError("单张参考图不能超过 32 MiB。")
+    from PIL import Image, UnidentifiedImageError
+    import io
+    try:
+        with Image.open(io.BytesIO(content)) as image:
+            image.verify()
+    except (UnidentifiedImageError, OSError, ValueError):
+        raise ValueError('上传内容不是有效图片。') from None
     root = reference_directory(directory)
     root.mkdir(parents=True, exist_ok=True)
     name = f"seg{int(index):04d}_{uuid.uuid4().hex[:8]}{suffix}"
@@ -1224,7 +1231,8 @@ def decorate(plan, regenerate_prompts=True):
             raise ValueError("分段过短，未达到一帧。")
         row.update(index=i, start=start/sr, end=end/sr, duration=duration,
                    edit_frames=edit_end-edit_start, generation_frames=frames_for(duration, edit_end-edit_start))
-        if regenerate_prompts or not row.get("prompt"):
+        needs_brief = regenerate_prompts or not row.get("prompt")
+        if needs_brief:
             state = camera_states[i]
             row.update(state)
             framing, ending, move = state["camera_start"], state["camera_end"], state["camera_move"]
@@ -1232,6 +1240,14 @@ def decorate(plan, regenerate_prompts=True):
             row["prompt"] = segment_brief(plan, row, framing, ending, move, state["previous_end_framing"])
         row.pop("h3_prompt", None)
         row.pop("h3_prompt_mode", None)
+        if row.get('visual_type') == 'environment' and (needs_brief or not row.get('environment_brief')):
+            row['prompt'] = '模式：空镜\n镜头方案：沿参考场景平稳横移，连续展示原有空间、灯光与透视关系。\n表演节奏：仅呈现指定环境，按音频节奏展示空间。'
+            row['environment_brief'] = True
+        elif row.get('visual_type') != 'environment':
+            row.pop('environment_brief', None)
+        if plan.get('materials_version'):
+            from .materials import stamp
+            row['material_signature'] = stamp(plan, row)
         row.setdefault("warnings", [])
         row["material_note"] = str(row.get("material_note") or "").strip()
         row["refs"] = normalize_reference_names(row.get("refs"))
@@ -1247,6 +1263,8 @@ def segment_fingerprint(row):
         data["material_note"] = row["material_note"]
     if row.get("refs"):
         data["refs"] = list(row["refs"])
+    for key in ('material_signature', 'expanded_prompt', 'expanded_key'):
+        if key in row: data[key] = row[key]
     return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -1273,7 +1291,7 @@ def request_regeneration(row, reason):
     row.pop("regeneration_reason", None)
 
 
-def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET):
+def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, materials=UNSET):
     if plan.get("run_status") in {"running", "pausing", "stopping", "merging"}:
         raise ValueError("请等当前任务停止后再修改分段。")
     if len(submitted) != len(plan["segments"]):
@@ -1283,6 +1301,11 @@ def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET):
             reference_default_count)
     sr = plan["sample_rate"]
     old_signatures = [segment_fingerprint(row) for row in plan["segments"]]
+    if materials is not UNSET:
+        from .materials import effective
+        plan['materials_version'] = 1
+        plan['default_refs'] = normalize_reference_names(materials.get('refs', []), directory)
+        plan['default_material_note'] = str(materials.get('note', '')).strip()
     previous = 0
     for i, (row, update) in enumerate(zip(plan["segments"], submitted)):
         end = plan["samples"] if i == len(submitted)-1 else round(float(update["end"]) * sr)
@@ -1295,6 +1318,14 @@ def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET):
             row["material_note"] = str(update.get("material_note") or "").strip()
         if "refs" in update:
             row["refs"] = normalize_reference_names(update.get("refs"), directory)
+        if plan.get('materials_version'):
+            from .materials import effective
+            old_kind = row.get('visual_type', 'performance')
+            row['reference_source'] = update.get('reference_source', row.get('reference_source', 'default'))
+            row['visual_type'] = update.get('visual_type', old_kind)
+            effective(plan, row, directory)
+            if old_kind != row['visual_type']:
+                row['prompt'] = ''
         if changed:
             row["reason"] = "手动调整切点"
             row["boundary_kind"] = "manual"
@@ -1323,6 +1354,8 @@ def fingerprint(plan):
             item["material_note"] = row["material_note"]
         if row.get("refs"):
             item["refs"] = list(row["refs"])
+        for key in ('material_signature', 'expanded_prompt', 'expanded_key'):
+            if key in row: item[key] = row[key]
         data.append(item)
     # Only present when the project overrides the canvas fallback, so projects
     # saved before this setting existed keep their previous fingerprint.

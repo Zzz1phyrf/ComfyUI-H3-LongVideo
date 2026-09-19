@@ -366,8 +366,8 @@ class LoadSegment:
     def INPUT_TYPES(cls):
         return {"required": {"project_id": ("STRING", {"default": ""}),
                              "segment_index": ("INT", {"default": 0, "min": 0, "max": 10000})}}
-    RETURN_TYPES = ("AUDIO", "AUDIO", "STRING", "INT", "STRING")
-    RETURN_NAMES = ("original_audio_padded", "vocals_padded", "segment_brief", "generation_frames", "filename_prefix")
+    RETURN_TYPES = ("AUDIO", "AUDIO", "STRING", "INT", "STRING", "H3LV_MATERIAL") + ("IMAGE",)*9
+    RETURN_NAMES = ("original_audio_padded", "vocals_padded", "segment_brief", "generation_frames", "filename_prefix", "segment_material") + tuple(f"image_{i+1}" for i in range(9))
     FUNCTION = "load"
     CATEGORY = "像素幻想/H3 长视频"
 
@@ -396,11 +396,17 @@ class LoadSegment:
         outputs = []
         for name in ("source.wav", "vocals.wav"):
             audio, sr = sf.read(audio_file(directory, name), start=row["start_sample"], stop=row["end_sample"], dtype="float32", always_2d=True)
+            if plan.get('materials_version') and row.get('visual_type') == 'environment' and name == 'vocals.wav':
+                audio = np.zeros_like(audio)
             target = math_ceil_samples(row["generation_frames"], sr)
             audio = np.pad(audio, ((0, max(0, target-len(audio))), (0, 0)))
             outputs.append({"waveform": torch.from_numpy(audio.T.copy()).unsqueeze(0), "sample_rate": sr})
-        return (*outputs, brief_text(row), row["generation_frames"],
-                f"H3LongVideo/projects/{project_id}/takes/seg_{segment_index:04d}")
+        from .materials import packet, images
+        material = packet(plan, row, directory) if plan.get('materials_version') else {}
+        pictures = images(material) if material else (None,)*9
+        brief_row = {**row, "material_note": material["material_note"]} if material else row
+        return (*outputs, brief_text(brief_row), row["generation_frames"],
+                f"H3LongVideo/projects/{project_id}/takes/seg_{segment_index:04d}", material, *pictures)
 
 
 class Unified:
@@ -446,12 +452,14 @@ class Unified:
         # Native Run targets only this node. These placeholders are not sent downstream;
         # the approved controller run replaces them with the selected segment outputs.
         return {"ui": analyzed["ui"],
-                "result": (audio, vocals or audio, "", 0, "")}
+                "result": (audio, vocals or audio, "", 0, "", {}, *((None,)*9))}
 
 
 def math_ceil_samples(frames, sr):
     return (frames*sr+23)//24
 
 
-NODE_CLASS_MAPPINGS = {"H3LVUnified": Unified}
-NODE_DISPLAY_NAME_MAPPINGS = {"H3LVUnified": "H3 长视频 · 音频分析与顺序生成"}
+from .expansion import PromptExpand
+
+NODE_CLASS_MAPPINGS = {"H3LVUnified": Unified, "H3LVPromptExpand": PromptExpand}
+NODE_DISPLAY_NAME_MAPPINGS = {"H3LVUnified": "H3 长视频 · 音频分析与顺序生成", "H3LVPromptExpand": "H3 长视频 · 多图提示词扩写"}

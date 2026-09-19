@@ -196,3 +196,11 @@
   background: #0f1319; color: #edf1f7;
   font: 13px/1.6 Consolas, "Microsoft YaHei", monospace; white-space: pre;
 }
+.h3lv-material-editor { padding: 14px; min-width: 0; }
+.h3lv-material-editor textarea { width: 100%; box-sizing: border-box; min-height: 80px; }
+.h3lv-material-editor .h3lv-reference-list { flex-wrap: wrap; }
+.h3lv-material-editor select { max-width: 100%; }
+.h3lv-expansion-panel { max-width: 900px; }
+.h3lv-expansion-panel .h3lv-content { display: flex; flex-direction: column; gap: 14px; }
+.h3lv-expansion-panel label { display: flex; flex-direction: column; gap: 8px; }
+.h3lv-expansion-panel input, .h3lv-expansion-panel select, .h3lv-expansion-panel textarea { background: #121a21; color: #e1edf5; border: 1px solid #425563; padding: 10px; border-radius: 5px; box-sizing: border-box; width: 100%; }

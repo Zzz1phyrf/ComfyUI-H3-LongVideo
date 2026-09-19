@@ -144,13 +144,13 @@ class CoreTests(unittest.TestCase):
 
     def test_unified_node_preserves_segment_output_contract(self):
         self.assertIs(nodes.NODE_CLASS_MAPPINGS["H3LVUnified"], nodes.Unified)
-        self.assertEqual(set(nodes.NODE_CLASS_MAPPINGS), {"H3LVUnified"})
+        self.assertEqual(set(nodes.NODE_CLASS_MAPPINGS), {"H3LVUnified", "H3LVPromptExpand"})
         self.assertNotIn("H3LVAnalyze", nodes.NODE_DISPLAY_NAME_MAPPINGS)
         self.assertNotIn("H3LVLoadSegment", nodes.NODE_DISPLAY_NAME_MAPPINGS)
-        self.assertEqual(nodes.Unified.RETURN_TYPES[:5], nodes.LoadSegment.RETURN_TYPES)
-        self.assertEqual(nodes.Unified.RETURN_NAMES[:5], nodes.LoadSegment.RETURN_NAMES)
-        self.assertEqual(len(nodes.Unified.RETURN_NAMES), 5)
-        self.assertEqual(nodes.LoadSegment.RETURN_NAMES, (
+        self.assertEqual(nodes.Unified.RETURN_TYPES, nodes.LoadSegment.RETURN_TYPES)
+        self.assertEqual(nodes.Unified.RETURN_NAMES, nodes.LoadSegment.RETURN_NAMES)
+        self.assertEqual(len(nodes.Unified.RETURN_NAMES), 15)
+        self.assertEqual(nodes.LoadSegment.RETURN_NAMES[:5], (
             "original_audio_padded", "vocals_padded", "segment_brief",
             "generation_frames", "filename_prefix"))
         self.assertNotIn("edit_frames", nodes.LoadSegment.RETURN_NAMES)
@@ -1048,7 +1048,10 @@ class ReferenceImageTests(unittest.TestCase):
     def test_store_and_remove_reference_files(self):
         with tempfile.TemporaryDirectory() as d:
             directory = core.project_path(d, "a"*32)
-            name = core.store_reference(directory, 2, "PIC.PNG", b"payload")
+            from PIL import Image
+            buffer = io.BytesIO()
+            Image.new("RGB", (8, 8)).save(buffer, format="PNG")
+            name = core.store_reference(directory, 2, "PIC.PNG", buffer.getvalue())
             self.assertTrue(name.startswith("seg0002_"))
             self.assertTrue(name.endswith(".png"))
             self.assertTrue((core.reference_directory(directory)/name).is_file())
@@ -1060,8 +1063,8 @@ class ReferenceImageTests(unittest.TestCase):
     def test_reference_limit_and_missing_files_are_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             directory = core.project_path(d, "a"*32)
-            with self.assertRaisesRegex(ValueError, "最多 6 张"):
-                core.normalize_reference_names([f"{i}.png" for i in range(7)])
+            with self.assertRaisesRegex(ValueError, "最多 9 张"):
+                core.normalize_reference_names([f"{i}.png" for i in range(10)])
             with self.assertRaisesRegex(ValueError, "已丢失"):
                 core.normalize_reference_names(["missing.png"], directory)
             with self.assertRaisesRegex(ValueError, "文件名无效"):
@@ -1171,8 +1174,8 @@ class ReferenceImageTests(unittest.TestCase):
             updates = [{"end": s["end"], "prompt": s["prompt"]} for s in plan["segments"]]
             core.edit_plan(plan, updates, root, 2)
             self.assertEqual(plan["reference_default_count"], 2)
-            with self.assertRaisesRegex(ValueError, "0 到 6"):
-                core.edit_plan(plan, updates, root, 9)
+            with self.assertRaisesRegex(ValueError, "0 到 9"):
+                core.edit_plan(plan, updates, root, 10)
             with self.assertRaisesRegex(ValueError, "必须是整数"):
                 core.edit_plan(plan, updates, root, "两张")
             core.edit_plan(plan, updates, root, None)
@@ -1214,7 +1217,7 @@ class ReferenceImageTests(unittest.TestCase):
         routes_source = (ROOT/"routes.py").read_text(encoding="utf-8")
         self.assertIn("function referenceSlotLimit()", script)
         self.assertIn("async function uploadReferenceImage(", script)
-        self.assertIn("material_note: row.note.value, refs: row.refs", script)
+        self.assertIn("materialControls.getNote() : row.note.value, refs: row.refs", script)
         self.assertIn("h3lv-material-note", styles)
         self.assertIn(".h3lv-reference-item", styles)
         self.assertIn(".h3lv-default-references select", styles)

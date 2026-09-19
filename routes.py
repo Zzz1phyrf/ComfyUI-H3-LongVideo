@@ -58,6 +58,62 @@ def register_routes():
                 return web.json_response({"error": str(exc)}, status=500)
         return wrapped
 
+    @routes.get('/h3lv/expansion/settings')
+    @endpoint
+    async def expansion_settings(request):
+        from .expansion import public_settings
+        return web.json_response(public_settings())
+
+    @routes.post('/h3lv/expansion/settings')
+    @endpoint
+    async def expansion_save_settings(request):
+        from .expansion import save_settings
+        payload = await request.json()
+        return web.json_response(save_settings(payload['base_url'], payload.get('api_key')))
+
+    @routes.get('/h3lv/expansion/models')
+    @endpoint
+    async def expansion_models(request):
+        from .expansion import call
+        value = await asyncio.to_thread(call, '/models')
+        return web.json_response({'models': sorted(str(item['id']) for item in value.get('data', []))})
+
+    @routes.post('/h3lv/project/{project_id}/expand')
+    @endpoint
+    async def expansion_preview(request):
+        from .materials import packet
+        from .expansion import expand, cache_key, validate_prompt
+        payload = await request.json()
+        root, pid = data_root(), request.match_info['project_id']
+        with LOCK:
+            plan = read_plan(root, pid)
+            if plan['revision'] != payload.get('revision'):
+                raise ValueError('素材已变化，请刷新后重新扩写。')
+            if plan.get('run_status') in {'running','pausing','stopping','merging'}:
+                raise ValueError('请先停止生成任务。')
+            index = int(payload['index'])
+            if not 0 <= index < len(plan['segments']): raise ValueError('分段编号无效。')
+            row = plan['segments'][index]
+            material = packet(plan, row, project_path(root, pid))
+        args = (material, payload['mode'], payload['model'], payload['rule'], int(payload.get('expansion_revision', 0)))
+        key = cache_key(*args)
+        if 'text' not in payload:
+            text = await asyncio.to_thread(expand, *args)
+            return web.json_response({'text': text, 'key': key})
+        text = validate_prompt(str(payload['text']), len(material['paths']))
+        if payload.get('key') != key: raise ValueError('扩写设置已变化，请重新预览。')
+        with LOCK:
+            plan = read_plan(root, pid)
+            if plan['revision'] != payload['revision'] or plan.get('run_status') in {'running','pausing','stopping','merging'}:
+                raise ValueError('项目状态已变化，请刷新。')
+            row = plan['segments'][index]
+            row.update(expanded_prompt=text, expanded_key=key)
+            request_regeneration(row, '扩写提示词已修改')
+            plan.update(revision=plan['revision']+1, approved=False, run_status='draft')
+            if plan.get('final_video'): plan['final_stale'] = True
+            write_plan(root, plan)
+        return web.json_response({'revision':plan['revision']})
+
     @routes.get("/h3lv/rules")
     @endpoint
     async def get_rules(request):
@@ -150,7 +206,7 @@ def register_routes():
                 raise ValueError("方案已被另一个窗口修改，请刷新。")
             transcript, _ = read_project_transcript(project_path(root, pid), plan)
             plan = edit_plan(plan, payload["segments"], project_path(root, pid),
-                             payload.get("reference_default_count", UNSET))
+                             payload.get("reference_default_count", UNSET), payload.get("materials", UNSET))
             for row in plan["segments"]:
                 row["text"] = " / ".join(s["text"] for s in transcript["segments"] if row["start"] <= (s["start"]+s["end"])/2 < row["end"])
             write_plan(root, plan)
@@ -167,6 +223,10 @@ def register_routes():
                 raise ValueError("任务运行中。")
             if payload.get("revision") != plan["revision"]:
                 raise ValueError("请刷新后重新确认。")
+            if plan.get('materials_version'):
+                from .materials import effective
+                for row in plan['segments']:
+                    effective(plan, row, project_path(root, pid), require=True)
             plan.update(approved=True, approved_fingerprint=fingerprint(plan))
             write_plan(root, plan)
         return web.json_response(plan)
@@ -219,7 +279,7 @@ def register_routes():
             name = str(payload.get("name") or "").strip()
             if not name:
                 raise ValueError("缺少要删除的参考图。")
-            if any(name in (row.get("refs") or []) for row in plan["segments"]):
+            if name in plan.get("default_refs", []) or any(name in (row.get("refs") or []) for row in plan["segments"]):
                 raise ValueError("该参考图仍被某个分段使用，请先在分段卡片中移除。")
             remove_reference(directory, name)
         return web.json_response({"removed": name})

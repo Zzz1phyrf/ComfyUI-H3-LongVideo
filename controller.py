@@ -43,6 +43,24 @@ def restore_legacy_prompt_rules(snapshot, current_prompt):
     snapshot["prompt_rule_source"] = "workflow"
 
 
+def refresh_expansion_settings(snapshot, current_prompt):
+    """Use current expansion widgets for pending takes while preserving sampler snapshots."""
+    saved = {key: node for key, node in snapshot.get('prompt', {}).items()
+             if node.get('class_type') == 'H3LVPromptExpand'}
+    current = {key: node for key, node in current_prompt.items()
+               if node.get('class_type') == 'H3LVPromptExpand'}
+    if saved.keys() != current.keys():
+        raise ValueError('扩写节点已被替换，请通过重新生成本段更新工作流快照。')
+    for key, node in saved.items():
+        inputs, source = node['inputs'], current[key]['inputs']
+        if inputs.get('material') != source.get('material'):
+            raise ValueError('扩写素材连线已变化，请通过重新生成本段更新工作流快照。')
+        for field in ('mode', 'model', 'rule', 'revision'):
+            if isinstance(source.get(field), (list, tuple)):
+                raise ValueError('扩写设置改成了连线输入，请通过重新生成本段更新工作流快照。')
+            if field in source: inputs[field] = copy.deepcopy(source[field])
+
+
 def normalize_output_contract(snapshot):
     """Upgrade frozen queue graphs from the former 7-output loader contract."""
     loader = str(snapshot.get("loader_id", ""))
@@ -173,6 +191,23 @@ def apply_segment_references(prompt, plan, row, directory):
     ``reference_default_count`` canvas references, where 0 feeds no picture at
     all. Without that setting the canvas wiring is submitted untouched.
     """
+    if plan.get('materials_version'):
+        from .materials import effective
+        value = effective(plan, row, directory, require=True)
+        loaders = [key for key, item in prompt.items() if item.get('class_type') == 'H3LVUnified']
+        _, node = reference_node(prompt)
+        if len(loaders) != 1 or node is None:
+            raise ValueError('内置素材需要一个长视频节点和一个 H3 参考条件节点。')
+        inputs = node.setdefault('inputs', {})
+        for key in list(inputs):
+            if key.startswith('ref_images.ref_image_'):
+                inputs.pop(key)
+        for i in range(len(value['refs'])):
+            inputs[f'ref_images.ref_image_{i}'] = [loaders[0], 6+i]
+        if value['visual_type'] == 'environment':
+            for key in list(inputs):
+                if key.startswith('ref_audios.ref_audio_'): inputs.pop(key)
+        return
     names = list(row.get("refs") or [])
     limit = plan.get("reference_default_count")
     if not names and limit is None:
@@ -370,6 +405,8 @@ def start(root, project_id, payload, server):
         else:
             snapshot = json.loads(snapshot_file.read_text(encoding="utf-8"))
             restore_legacy_prompt_rules(snapshot, payload.get("prompt", {}))
+            if plan.get("materials_version"):
+                refresh_expansion_settings(snapshot, payload.get("prompt", {}))
             client_id = str(payload.get("client_id") or "").strip()
             if client_id and snapshot.get("client_id") != client_id:
                 snapshot["client_id"] = client_id
