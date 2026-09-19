@@ -67,19 +67,32 @@ def normalize_output_contract(snapshot):
     video = str(snapshot.get("video_id", ""))
     prompt = snapshot.get("prompt", {})
     inputs = prompt.get(video, {}).get("inputs", {})
+    contract_version = int(snapshot.get("output_contract_version") or 0)
     filename = inputs.get("filename_prefix")
-    if isinstance(filename, (list, tuple)) and str(filename[0]) == loader:
+    if contract_version < 3 and isinstance(filename, (list, tuple)) \
+            and str(filename[0]) == loader:
         inputs["filename_prefix"] = [loader, 4]
     frame_rate = inputs.get("frame_rate")
     if isinstance(frame_rate, (list, tuple)) and str(frame_rate[0]) == loader:
         inputs["frame_rate"] = 24
+    if contract_version < 3:
+        for node in prompt.values():
+            for key, source in list((node.get("inputs") or {}).items()):
+                if not (isinstance(source, (list, tuple)) and len(source) >= 2
+                        and str(source[0]) == loader and isinstance(source[1], int)):
+                    continue
+                if node.get("class_type") == "PromptExpand" and key == "source_text" \
+                        and source[1] == 2:
+                    node["inputs"].pop(key, None)
+                elif source[1] >= 3:
+                    node["inputs"][key] = [source[0], source[1]-1]
     for node in prompt.values():
         if node.get("class_type") != "H3LVUnified":
             continue
         node_inputs = node.setdefault("inputs", {})
         node_inputs.pop("camera_activity", None)
         node_inputs.pop("widest_framing", None)
-    snapshot["output_contract_version"] = 2
+    snapshot["output_contract_version"] = 3
     snapshot["node_control_contract_version"] = 1
     return snapshot
 
@@ -210,7 +223,7 @@ def apply_segment_references(prompt, plan, row, directory):
             if key.startswith('ref_images.ref_image_'):
                 inputs.pop(key)
         for i in range(len(value['refs'])):
-            inputs[f'ref_images.ref_image_{i}'] = [loaders[0], 6+i]
+            inputs[f'ref_images.ref_image_{i}'] = [loaders[0], 5+i]
         if value['visual_type'] == 'environment':
             for key in list(inputs):
                 if key.startswith('ref_audios.ref_audio_'): inputs.pop(key)
@@ -405,6 +418,7 @@ def start(root, project_id, payload, server):
             snapshot = normalize_output_contract({"prompt": prompt, "loader_id": loader,
                                                   "video_id": video, "workflow": payload.get("workflow", {}),
                                                   "client_id": str(payload.get("client_id") or "").strip(),
+                                                  "output_contract_version": 3,
                                                   "prompt_rule_source": "workflow"})
             snapshot_file.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
         elif not snapshot_file.is_file():

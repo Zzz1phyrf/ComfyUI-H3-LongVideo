@@ -109,7 +109,7 @@ ComfyUI/output/H3LongVideo/projects
 
 扩写内容在提示词小助手中维护。示例已开启“自定义规则”并内置全文，也可复制 [V5 规则文本](ref2va_performance_rule.txt) 到小助手中使用。节点的“运镜规则”负责镜头规划，小助手负责最终扩写。
 
-自行搭建工作流时，也可将 `segment_brief` 接入其他文本处理节点。顺序生成工作流需保留一个 `H3LVUnified` 节点和一个 VHS Video Combine 输出节点。
+自行搭建工作流时，将 `segment_material` 接入插件的“提示词小助手”，再把扩写结果接入 H3 提示词输入。顺序生成工作流需保留一个 `H3LVUnified` 节点和一个 VHS Video Combine 输出节点。
 
 ## 使用建议
 

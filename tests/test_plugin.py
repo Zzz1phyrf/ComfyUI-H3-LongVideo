@@ -151,10 +151,11 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("H3LVLoadSegment", nodes.NODE_DISPLAY_NAME_MAPPINGS)
         self.assertEqual(nodes.Unified.RETURN_TYPES, nodes.LoadSegment.RETURN_TYPES)
         self.assertEqual(nodes.Unified.RETURN_NAMES, nodes.LoadSegment.RETURN_NAMES)
-        self.assertEqual(len(nodes.Unified.RETURN_NAMES), 12)
+        self.assertEqual(len(nodes.Unified.RETURN_NAMES), 11)
         self.assertEqual(nodes.LoadSegment.RETURN_NAMES[:5], (
-            "original_audio_padded", "vocals_padded", "segment_brief",
-            "generation_frames", "filename_prefix"))
+            "original_audio_padded", "vocals_padded", "generation_frames",
+            "filename_prefix", "segment_material"))
+        self.assertNotIn("segment_brief", nodes.LoadSegment.RETURN_NAMES)
         self.assertEqual(nodes.LoadSegment.RETURN_NAMES[-6:], tuple(f"image_{i}" for i in range(1, 7)))
         self.assertNotIn("edit_frames", nodes.LoadSegment.RETURN_NAMES)
         self.assertNotIn("fps", nodes.LoadSegment.RETURN_NAMES)
@@ -187,6 +188,25 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(inputs["target_seconds"], 8)
         self.assertEqual(snapshot["prompt"]["2"]["inputs"]["steps"], 12)
         self.assertEqual(snapshot["node_control_contract_version"], 1)
+
+    def test_frozen_snapshot_shifts_outputs_after_segment_brief_removal(self):
+        snapshot = {"loader_id": "1", "video_id": "9", "output_contract_version": 2,
+                    "prompt": {
+            "1": {"class_type": "H3LVUnified", "inputs": {}},
+            "2": {"class_type": "H3LVPromptExpand", "inputs": {"material": ["1", 5]}},
+            "3": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
+                "generation_frames": ["1", 3], "ref_images.ref_image_0": ["1", 6]}},
+            "4": {"class_type": "PromptExpand", "inputs": {"source_text": ["1", 2]}},
+            "9": {"class_type": "VHS_VideoCombine", "inputs": {
+                "filename_prefix": ["1", 4]}},
+        }}
+        controller.normalize_output_contract(snapshot)
+        self.assertEqual(snapshot["prompt"]["2"]["inputs"]["material"], ["1", 4])
+        self.assertEqual(snapshot["prompt"]["3"]["inputs"]["generation_frames"], ["1", 2])
+        self.assertEqual(snapshot["prompt"]["3"]["inputs"]["ref_images.ref_image_0"], ["1", 5])
+        self.assertNotIn("source_text", snapshot["prompt"]["4"]["inputs"])
+        self.assertEqual(snapshot["prompt"]["9"]["inputs"]["filename_prefix"], ["1", 3])
+        self.assertEqual(snapshot["output_contract_version"], 3)
 
     def test_unified_node_has_no_reference_image_or_prompt_assembly_surface(self):
         inputs = nodes.Unified.INPUT_TYPES()
@@ -641,7 +661,7 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(all("h3_prompt" not in row and "h3_prompt_mode" not in row
                             for row in p["segments"]))
 
-    def test_generation_snapshot_accepts_direct_segment_brief_without_prompt_expand(self):
+    def test_new_generation_snapshot_keeps_current_output_slots(self):
         with tempfile.TemporaryDirectory() as directory:
             plan = sample_plan()
             plan["approved"] = True
@@ -865,7 +885,7 @@ class CoreTests(unittest.TestCase):
             fake_torch = types.SimpleNamespace(from_numpy=lambda value: MagicMock())
             with patch.dict(sys.modules, {"torch": fake_torch}):
                 loaded = nodes.LoadSegment().load(plan["id"], 0)
-            self.assertEqual(loaded[4], f"H3LongVideo/projects/{plan['id']}/takes/seg_0000")
+            self.assertEqual(loaded[3], f"H3LongVideo/projects/{plan['id']}/takes/seg_0000")
 
     def test_silence_and_short_audio_coverage(self):
         for samples in [70, 1300, 3680]:

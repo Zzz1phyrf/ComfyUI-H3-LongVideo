@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 import uuid
 
 from . import director_rules
-from .core import (audio_file, brief_text, decorate, fingerprint, project_path, read_plan, segmentation,
+from .core import (audio_file, decorate, fingerprint, project_path, read_plan, segmentation,
                    validate_segment_brief, write_plan)
 
 
@@ -361,8 +361,9 @@ class LoadSegment:
     def INPUT_TYPES(cls):
         return {"required": {"project_id": ("STRING", {"default": ""}),
                              "segment_index": ("INT", {"default": 0, "min": 0, "max": 10000})}}
-    RETURN_TYPES = ("AUDIO", "AUDIO", "STRING", "INT", "STRING", "H3LV_MATERIAL") + ("IMAGE",)*6
-    RETURN_NAMES = ("original_audio_padded", "vocals_padded", "segment_brief", "generation_frames", "filename_prefix", "segment_material") + tuple(f"image_{i+1}" for i in range(6))
+    RETURN_TYPES = ("AUDIO", "AUDIO", "INT", "STRING", "H3LV_MATERIAL") + ("IMAGE",)*6
+    RETURN_NAMES = ("original_audio_padded", "vocals_padded", "generation_frames",
+                    "filename_prefix", "segment_material") + tuple(f"image_{i+1}" for i in range(6))
     FUNCTION = "load"
     CATEGORY = "像素幻想/H3 长视频"
 
@@ -399,9 +400,9 @@ class LoadSegment:
         from .materials import packet, images
         material = packet(plan, row, directory) if plan.get('materials_version') else {}
         pictures = images(material) if material else (None,)*6
-        brief_row = {**row, "material_note": material["material_note"]} if material else row
-        return (*outputs, brief_text(brief_row), row["generation_frames"],
-                f"H3LongVideo/projects/{project_id}/takes/seg_{segment_index:04d}", material, *pictures)
+        return (*outputs, row["generation_frames"],
+                f"H3LongVideo/projects/{project_id}/takes/seg_{segment_index:04d}", material,
+                *pictures)
 
 
 class Unified:
@@ -446,7 +447,7 @@ class Unified:
         # Native Run targets only this node. These placeholders are not sent downstream;
         # the approved controller run replaces them with the selected segment outputs.
         return {"ui": analyzed["ui"],
-                "result": (audio, vocals or audio, "", 0, "", {}, *((None,)*6))}
+                "result": (audio, vocals or audio, 0, "", {}, *((None,)*6))}
 
 
 def math_ceil_samples(frames, sr):
