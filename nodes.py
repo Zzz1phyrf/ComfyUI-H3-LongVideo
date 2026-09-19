@@ -361,9 +361,11 @@ class LoadSegment:
     def INPUT_TYPES(cls):
         return {"required": {"project_id": ("STRING", {"default": ""}),
                              "segment_index": ("INT", {"default": 0, "min": 0, "max": 10000})}}
-    RETURN_TYPES = ("AUDIO", "AUDIO", "INT", "STRING", "H3LV_MATERIAL") + ("IMAGE",)*6
+    RETURN_TYPES = (("AUDIO", "AUDIO", "INT", "STRING", "H3LV_MATERIAL")
+                    + ("IMAGE",)*6 + ("STRING",))
     RETURN_NAMES = ("original_audio_padded", "vocals_padded", "generation_frames",
-                    "filename_prefix", "segment_material") + tuple(f"image_{i+1}" for i in range(6))
+                    "filename_prefix", "segment_material") + tuple(f"image_{i+1}" for i in range(6)) \
+                   + ("segment_prompt",)
     FUNCTION = "load"
     CATEGORY = "像素幻想/H3 长视频"
 
@@ -392,7 +394,8 @@ class LoadSegment:
         outputs = []
         for name in ("source.wav", "vocals.wav"):
             audio, sr = sf.read(audio_file(directory, name), start=row["start_sample"], stop=row["end_sample"], dtype="float32", always_2d=True)
-            if plan.get('materials_version') and row.get('visual_type') == 'environment' and name == 'vocals.wav':
+            if (plan.get('materials_version') and row.get('visual_type') in {'atmosphere', 'environment'}
+                    and name == 'vocals.wav'):
                 audio = np.zeros_like(audio)
             target = math_ceil_samples(row["generation_frames"], sr)
             audio = np.pad(audio, ((0, max(0, target-len(audio))), (0, 0)))
@@ -402,7 +405,7 @@ class LoadSegment:
         pictures = images(material) if material else (None,)*6
         return (*outputs, row["generation_frames"],
                 f"H3LongVideo/projects/{project_id}/takes/seg_{segment_index:04d}", material,
-                *pictures)
+                *pictures, str(row.get("final_prompt") or ""))
 
 
 class Unified:

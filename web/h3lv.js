@@ -91,8 +91,8 @@ function editPromptDialog(index, value) {
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-modal", "true");
     const title = element("div", undefined, panel, "h3lv-title-row");
-    element("h2", `编辑第 ${index + 1} 段镜头简报（提示词）`, title);
-    element("p", "这是本段输出的文本，可直接连接下游文本输入，也可交给提示词小助手扩写。既可以只写镜头方案和表演节奏，也可以直接粘贴完整提示词（含参考图和主体标签）。生成时长由节点自动控制。", panel, "h3lv-help");
+    element("h2", `编辑第 ${index + 1} 段导演简报`, title);
+    element("p", "导演简报会与本段多图、素材用途、画面类型和音频判断一起交给提示词扩写节点。可以逐行修改画面任务、声音关系、构图、主体动作和镜头运动。", panel, "h3lv-help");
     const editor = element("textarea", undefined, panel, "h3lv-prompt-editor");
     editor.value = value;
     editor.spellcheck = false;
@@ -704,26 +704,40 @@ async function openReview(owner) {
         const shotControl = element("div", undefined, inner, "h3lv-shot-control");
         const shotLabel = element("label", "本段画面", shotControl);
         visualTypeSelect = element("select", undefined, shotLabel);
-        for (const [value, label] of [["performance", "人物表演"], ["environment", "空镜环境"]]) {
+        const performanceLabel = plan.mode === "speaking" ? "人物口播" : "人物演唱";
+        for (const [value, label] of [["performance", performanceLabel],
+          ["atmosphere", "人物氛围表演"], ["environment", "空镜环境"]]) {
           const option = element("option", label, visualTypeSelect);
           option.value = value;
         }
         visualTypeSelect.value = row.visual_type || "performance";
         visualTypeSelect.onchange = markDirty;
-        element("span", "保存草稿后会按该类型重写本段镜头简报；空镜不会使用人声参考。",
+        const sectionName = {intro:"前奏", interlude:"间奏", outro:"尾奏"}[row.audio_section];
+        const audioHint = row.audio_role === "vocal" ? "检测到识别人声" :
+          (row.audio_role === "instrumental" ? `疑似${sectionName || "无人声段"}` : "人声状态需试听确认");
+        element("span", `音频判断：${audioHint}。保存草稿后会按所选画面重写导演简报；人物氛围和空镜不会使用人声参考。`,
           shotControl, "h3lv-shot-control-help");
       }
       const promptActions = element("div", undefined, inner, "h3lv-actions h3lv-prompt-actions");
       const prompt = document.createElement("textarea");
-      prompt.value = row.prompt;
+      prompt.value = row.prompt || "";
       prompt.oninput = markDirty;
-      actionButton(promptActions, "编辑本段镜头简报（提示词）", async () => {
+      actionButton(promptActions, "编辑本段导演简报", async () => {
         const updated = await editPromptDialog(row.index, prompt.value);
         if (updated === null || updated === prompt.value) return;
         prompt.value = updated;
         prompt.dispatchEvent(new Event("input"));
       }, "prompt-edit");
-      rows.push({end, prompt, note, materialControls, visualType:visualTypeSelect,
+      const directPrompt = element("details", undefined, inner, "h3lv-direct-prompt");
+      element("summary", "手写提示词（segment_prompt 直连，可选）", directPrompt);
+      element("p", "此处文字由长视频节点的 segment_prompt 原样输出。默认多图扩写接法不读取这里；只有手动把 segment_prompt 接到 H3 的 prompt 时才使用。",
+        directPrompt, "h3lv-help");
+      const finalPrompt = element("textarea", undefined, directPrompt, "h3lv-direct-prompt-editor");
+      finalPrompt.value = row.final_prompt || "";
+      finalPrompt.placeholder = "粘贴或输入本段要直接发送给 H3 的提示词。插件不扩写、不校验、不回退。";
+      finalPrompt.spellcheck = false;
+      finalPrompt.oninput = markDirty;
+      rows.push({end, prompt, finalPrompt, note, materialControls, visualType:visualTypeSelect,
         refs: rowRefs, renderRefs: renderReferences, duration, time,
         generationFrames, editFrames, audio:segmentAudio});
       details.push(card);
@@ -839,6 +853,7 @@ async function openReview(owner) {
         reference_default_count: defaultSelect.value === "all" ? null : Number(defaultSelect.value),
         ...(plan.materials_version ? {materials:{refs:defaultEditor.refs, note:defaultEditor.getNote()}} : {}),
         segments: rows.map(row => ({end: Number(row.end.value), prompt: row.prompt.value,
+          final_prompt: row.finalPrompt.value,
           material_note: row.materialControls ? row.materialControls.getNote() : row.note.value, refs: row.refs,
           ...(row.materialControls ? {reference_source:row.materialControls.source.value,
             visual_type:row.visualType.value} : {})}))});

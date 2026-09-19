@@ -233,6 +233,17 @@
 }
 .h3lv-shot-control-help { color: #aeb8c6; font-size: 12px; }
 .h3lv-prompt-actions { margin-top: 10px; }
+.h3lv-direct-prompt {
+  margin-top: 12px; border: 1px solid #425563; border-radius: 7px; background: #151b22;
+}
+.h3lv-direct-prompt > summary { cursor: pointer; padding: 10px 12px; color: #d8ecff; }
+.h3lv-direct-prompt > .h3lv-help { margin: 0; padding: 0 12px 8px; }
+.h3lv-direct-prompt-editor {
+  display: block; width: calc(100% - 24px); min-height: 180px; box-sizing: border-box;
+  margin: 0 12px 12px; padding: 12px; resize: vertical; border: 1px solid #566274;
+  border-radius: 6px; background: #0f1319; color: #edf1f7;
+  font: 13px/1.6 Consolas, "Microsoft YaHei", monospace;
+}
 .h3lv-expansion-panel { max-width: 900px; }
 .h3lv-expansion-panel .h3lv-content { display: flex; flex-direction: column; gap: 14px; }
 .h3lv-expansion-panel label { display: flex; flex-direction: column; gap: 8px; }

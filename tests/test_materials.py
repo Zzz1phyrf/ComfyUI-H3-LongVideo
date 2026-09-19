@@ -47,23 +47,30 @@ class MaterialTests(unittest.TestCase):
         self.assertEqual(tuple(images[1].shape),(1,16,8,3))
         self.assertTrue(all(value is None for value in images[2:]))
 
-    def test_controller_removes_unused_slots_and_environment_audio(self):
+    def test_controller_removes_unused_slots_and_non_lipsync_audio(self):
         prompt = {'1':{'class_type':'H3LVUnified','inputs':{}},'2':{'class_type':'MiniMaxH3ReferenceToVideo','inputs':{
             'ref_images.ref_image_0':['x',0],'ref_images.ref_image_5':['y',0],'ref_audios.ref_audio_0':['1',1],'prompt':'keep'}}}
         controller.apply_segment_references(prompt,self.plan,self.plan['segments'][1],self.directory)
         self.assertEqual(prompt['2']['inputs'],{'ref_images.ref_image_0':['1',5],'prompt':'keep'})
         core.validate_segment_brief(self.plan['segments'][1]['prompt'])
+        atmosphere = self.plan['segments'][0]
+        atmosphere['visual_type'] = 'atmosphere'
+        prompt['2']['inputs']['ref_audios.ref_audio_0'] = ['1',1]
+        controller.apply_segment_references(prompt,self.plan,atmosphere,self.directory)
+        self.assertNotIn('ref_audios.ref_audio_0',prompt['2']['inputs'])
 
     def test_environment_silences_generation_voice_but_keeps_final_audio(self):
         import numpy as np
         root = self.directory/'projects'; directory = core.project_path(root,self.plan['id'])
         self.plan['approved'] = True
+        self.plan['segments'][1]['final_prompt'] = 'user text exactly'
         core.write_plan(root,self.plan)
         fake = {'paths':[], 'brief':'test', 'material_note':'图1场景'}
         with patch.object(nodes,'data_root',return_value=root), patch('soundfile.read',return_value=(np.ones((1000,1),dtype=np.float32),100)), patch.object(materials,'packet',return_value=fake):
             result = nodes.LoadSegment().load(self.plan['id'],1)
         self.assertGreater(float(result[0]['waveform'].abs().sum()),0)
         self.assertEqual(float(result[1]['waveform'].abs().sum()),0)
+        self.assertEqual(result[-1], 'user text exactly')
 
     def test_vision_cache_and_context_invalidation(self):
         packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)
@@ -73,6 +80,14 @@ class MaterialTests(unittest.TestCase):
             self.assertEqual(call.call_count,1)
             content = call.call_args.args[1]['messages'][1]['content']
             self.assertEqual([c['type'] for c in content],['text','image_url','image_url'])
+            context = __import__('json').loads(content[0]['text'])
+            self.assertEqual(context['generation_frames'], self.plan['segments'][0]['generation_frames'])
+            self.assertEqual(context['audio_role'], 'vocal')
+            self.assertEqual(context['visual_type'], 'performance')
+            system = call.call_args.args[1]['messages'][0]['content']
+            self.assertIn('atmosphere means a visible performer who remains closed-mouth', system)
+            self.assertIn('environment means only the declared environment is visible', system)
+            self.assertIn('generation_seconds', system)
             other = copy.deepcopy(packet); other['material_note'] = 'different roles'
             expansion.expand(other,'vision','m','r')
             self.assertEqual(call.call_count,2)
@@ -106,8 +121,23 @@ class MaterialTests(unittest.TestCase):
         updates = self.updates(); updates[0]['end'] = 9
         core.edit_plan(self.plan, updates, self.directory)
         row = self.plan['segments'][1]
-        self.assertIn('模式：空镜', row['prompt'])
+        self.assertIn('画面任务：空镜环境', row['prompt'])
         core.validate_segment_brief(row['prompt'])
+
+    def test_atmosphere_silences_generation_voice_and_expansion_context(self):
+        import numpy as np
+        row = self.plan['segments'][0]
+        row['visual_type'] = 'atmosphere'
+        root = self.directory/'projects'; directory = core.project_path(root,self.plan['id'])
+        self.plan['approved'] = True
+        core.write_plan(root,self.plan)
+        fake = {'paths':[], 'brief':'test', 'material_note':'图1人物'}
+        with patch.object(nodes,'data_root',return_value=root), \
+             patch('soundfile.read',return_value=(np.ones((1000,1),dtype=np.float32),100)), \
+             patch.object(materials,'packet',return_value=fake):
+            result = nodes.LoadSegment().load(self.plan['id'],0)
+        self.assertGreater(float(result[0]['waveform'].abs().sum()),0)
+        self.assertEqual(float(result[1]['waveform'].abs().sum()),0)
 
     def test_stale_prompt_override_is_not_reused(self):
         packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)

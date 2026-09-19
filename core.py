@@ -999,28 +999,100 @@ def _zh_motion(row, entry=True):
     return f"向{side}横移已自然进行" if entry else f"向{side}横移保持进行"
 
 
+def segment_audio_context(plan, row):
+    """Classify a segment from saved acoustic evidence without inventing certainty."""
+    if str(row.get("text") or "").strip():
+        return {"role": "vocal", "section": "", "reason": "本段含识别人声"}
+    sr = float(plan.get("sample_rate") or 1)
+    start = float(row.get("start_sample", 0)) / sr
+    end = float(row.get("end_sample", 0)) / sr
+    duration = max(end - start, 1e-9)
+    best = None
+    for section in (plan.get("audio_structure") or {}).get("sections") or []:
+        overlap = max(0.0, min(end, float(section.get("end", 0)))
+                      - max(start, float(section.get("start", 0))))
+        if best is None or overlap > best[0]:
+            best = (overlap, section)
+    if best and best[0] / duration >= .6:
+        kind = str(best[1].get("kind") or "interlude")
+        return {"role": "instrumental", "section": kind,
+                "reason": str(best[1].get("reason") or "疑似无人声区")}
+    return {"role": "uncertain", "section": "", "reason": "未识别出文字，人声状态需试听确认"}
+
+
+def _audio_section_zh(value):
+    return {"intro": "前奏", "interlude": "间奏", "outro": "尾奏"}.get(value, "无人声段")
+
+
+def _environment_camera(row):
+    family = row.get("camera_move_family")
+    direction = row.get("camera_move_direction")
+    if family == "steady":
+        return "固定机位，保持参考场景的空间结构、透视、灯光和地标位置稳定"
+    if family == "dolly in":
+        return "摄影机平稳向参考场景内部推进，逐步揭示空间纵深，场景地标产生自然视差"
+    if family == "dolly out":
+        return "摄影机平稳后移，逐步扩大参考场景的可见范围，保持空间结构和灯光连续"
+    if family == "micro reframe":
+        return "摄影机做小幅构图调整，重新组织场景地标与留白，空间关系保持连贯"
+    side = "左侧" if direction == "left" else "右侧"
+    if family == "arc":
+        return f"摄影机沿参考场景向{side}做约20度小弧线移动，地标产生清晰但克制的空间视差"
+    return f"摄影机向{side}短距离平稳横移，参考场景地标产生连续横向视差"
+
+
 def segment_brief(plan, row, framing, ending, move, previous_frame):
     mode = plan["mode"]
-    if mode == "speaking":
-        camera_plan = ("沿用参考画面的原有构图，保持人物位置、人物尺度、身体可见范围、头顶留白和裁切边界；"
-                       "全程固定机位单一连续镜头，背景透视和构图跨段保持一致")
-        performance = "自然口播，口型跟随音频，保留自然眨眼、呼吸和克制的小幅动作"
+    visual_type = row.get("visual_type", "performance")
+    audio_role = row.get("audio_role", "uncertain")
+    section = _audio_section_zh(row.get("audio_section"))
+    if visual_type == "environment":
+        task = "空镜环境"
+        sound = (f"疑似{section}；不出现人物，不要求口型同步，只按本段音乐节奏组织环境变化"
+                 if audio_role == "instrumental" else
+                 "不出现人物，不要求口型同步；原曲由最终工作流恢复")
+        opening = "沿参考场景既有构图开场，保持空间结构、地标、材质、灯光和透视关系"
+        subject = "仅呈现指定环境及其原有可见元素，不新增人物、字幕、歌词文字或图形覆盖"
+        camera = _environment_camera(row)
+        ending_text = "结束在可自然承接下一分段的空间构图，保持参考场景身份和光线连续"
+    elif mode == "speaking":
+        task = "人物口播" if visual_type == "performance" else "人物氛围表演"
+        sound = ("人物跟随本段人声做自然可见口型，停顿和呼吸与音频一致"
+                 if visual_type == "performance" else
+                 "人物不说话、不做口型，只以视线、呼吸和克制动作回应本段声音")
+        opening = "沿用参考画面的原有构图，保持人物位置、人物尺度、身体可见范围、头顶留白和裁切边界"
+        subject = ("自然口播，保留眨眼、呼吸和克制的小幅头部、肩部与手势动作"
+                   if visual_type == "performance" else
+                   "人物保持闭口，以自然眨眼、呼吸、视线和小幅身体动作维持画面生命感")
+        camera = "全程固定机位单一连续镜头，背景透视和构图跨段保持一致"
+        ending_text = "保持与开场一致的人物尺度、位置、裁切边界和背景透视"
     else:
+        task = "人物演唱" if visual_type == "performance" else "人物氛围表演"
+        if visual_type == "performance":
+            sound = "人物仅在本段可辨识人声出现时同步演唱口型，停顿和呼吸跟随音频"
+        else:
+            sound = (f"疑似{section}；人物不张口演唱，只按本段音乐节奏行动"
+                     if audio_role == "instrumental" else
+                     "人物不张口演唱、不做口型，只按本段音乐节奏行动")
         opening = f"{_zh_framing(framing)}{_zh_angle(row.get('camera_start_angle', 'front'))}开场，依表演朝向留出空间"
         camera = _zh_camera_operation(row, framing, ending)
         ending_text = f"{_zh_framing(ending)}{_zh_angle(row.get('camera_end_angle', 'front'))}"
         exit_motion = _zh_motion(row, entry=False)
         ending_state = "静止结束" if exit_motion == "静止" else f"{exit_motion}至片段结束"
         if row.get("camera_move_family") in {"dolly in", "dolly out"}:
-            camera_plan = (f"{opening}；{camera}；整个片段只完成上述景别变化，"
-                           f"最后一帧恰好到达{ending_text}，取景范围始终处于开场与终点景别之间")
+            ending_text = (f"最后一帧恰好到达{ending_text}，取景范围始终处于开场与终点景别之间")
         else:
-            camera_plan = f"{opening}；{camera}；结束于{ending_text}，{ending_state}"
-        performance = _zh_performance(row.get('performance_direction', 'natural controlled performance'), mode)
+            ending_text = f"结束于{ending_text}，{ending_state}"
+        subject = (_zh_performance(row.get('performance_direction', 'natural controlled performance'), mode)
+                   if visual_type == "performance" else
+                   "人物保持闭口，以视线、呼吸、头部、肩部和空闲手动作回应音乐，不表演歌词")
     return (
-        f"模式：{'口播' if mode == 'speaking' else '唱歌'}\n"
-        + f"镜头方案：{camera_plan}\n"
-        + f"表演节奏：{performance}\n"
+        f"画面任务：{task}\n"
+        + f"声音关系：{sound}\n"
+        + f"开场构图：{opening}\n"
+        + f"主体动作：{subject}\n"
+        + f"镜头运动：{camera}\n"
+        + f"结束构图：{ending_text}\n"
     )
 
 
@@ -1034,6 +1106,7 @@ def brief_text(row):
 
 
 H3LV_CAMERA_FIELDS = ("镜头方案", "表演节奏")
+H3LV_DIRECTOR_FIELDS = ("画面任务", "声音关系", "开场构图", "主体动作", "镜头运动", "结束构图")
 H3LV_CAMERA_LEGACY_FIELDS = (
     "生成时长", "开场构图", "段内运镜", "结束构图",
     "入口衔接", "出口运动状态", "表演节奏",
@@ -1058,6 +1131,11 @@ def validate_segment_brief(value):
             fields[name.strip()] = content.strip()
     if "协议" in fields and fields["协议"] != "H3LV_CAMERA_V1":
         raise ValueError("分段镜头简报协议版本无效。")
+    if any(name in fields for name in ("画面任务", "声音关系", "主体动作", "镜头运动")):
+        missing = [name for name in H3LV_DIRECTOR_FIELDS if not fields.get(name)]
+        if missing:
+            raise ValueError("分段镜头简报缺少字段：" + "、".join(missing))
+        return text
     if "镜头方案" in fields:
         missing = [name for name in H3LV_CAMERA_FIELDS if not fields.get(name)]
         if missing:
@@ -1206,6 +1284,14 @@ def decorate(plan, regenerate_prompts=True):
         plan.get("reference_default_count"))
     plan.pop("ai_shot_plan", None)
     plan.pop("ai_motion_contract", None)
+    for row in rows:
+        context = segment_audio_context(plan, row)
+        row.update(audio_role=context["role"], audio_section=context["section"],
+                   audio_role_reason=context["reason"])
+        if not row.get("visual_type"):
+            row["visual_type"] = ("atmosphere"
+                                  if plan["mode"] == "singing" and context["role"] == "instrumental"
+                                  else "performance")
     camera_states = camera_sequence(plan["mode"], rows, prefs)
     for i, row in enumerate(rows):
         start, end = int(row["start_sample"]), int(row["end_sample"])
@@ -1227,11 +1313,7 @@ def decorate(plan, regenerate_prompts=True):
             row["prompt"] = segment_brief(plan, row, framing, ending, move, state["previous_end_framing"])
         row.pop("h3_prompt", None)
         row.pop("h3_prompt_mode", None)
-        if row.get('visual_type') == 'environment' and (needs_brief or not row.get('environment_brief')):
-            row['prompt'] = '模式：空镜\n镜头方案：沿参考场景平稳横移，连续展示原有空间、灯光与透视关系。\n表演节奏：仅呈现指定环境，按音频节奏展示空间。'
-            row['environment_brief'] = True
-        elif row.get('visual_type') != 'environment':
-            row.pop('environment_brief', None)
+        row.pop('environment_brief', None)
         if plan.get('materials_version'):
             from .materials import stamp
             row['material_signature'] = stamp(plan, row)
@@ -1250,6 +1332,8 @@ def segment_fingerprint(row):
         data["material_note"] = row["material_note"]
     if row.get("refs"):
         data["refs"] = list(row["refs"])
+    if row.get("final_prompt"):
+        data["final_prompt"] = row["final_prompt"]
     for key in ('material_signature', 'expanded_prompt', 'expanded_key'):
         if key in row: data[key] = row[key]
     return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode()).hexdigest()
@@ -1301,6 +1385,8 @@ def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, ma
         if not changed:
             validate_segment_brief(prompt)
         row.update(start_sample=previous, end_sample=end, prompt=prompt)
+        if "final_prompt" in update:
+            row["final_prompt"] = str(update.get("final_prompt") or "")
         if "material_note" in update:
             row["material_note"] = str(update.get("material_note") or "").strip()
         if "refs" in update:
@@ -1341,6 +1427,8 @@ def fingerprint(plan):
             item["material_note"] = row["material_note"]
         if row.get("refs"):
             item["refs"] = list(row["refs"])
+        if row.get("final_prompt"):
+            item["final_prompt"] = row["final_prompt"]
         for key in ('material_signature', 'expanded_prompt', 'expanded_key'):
             if key in row: item[key] = row[key]
         data.append(item)

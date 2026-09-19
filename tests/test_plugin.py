@@ -79,7 +79,10 @@ class CoreTests(unittest.TestCase):
         script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
         styles = (ROOT/"web"/"h3lv.css").read_text(encoding="utf-8")
         routes_source = (ROOT/"routes.py").read_text(encoding="utf-8")
-        self.assertIn('actionButton(promptActions, "编辑本段镜头简报（提示词）"', script)
+        self.assertIn('actionButton(promptActions, "编辑本段导演简报"', script)
+        self.assertIn('"手写提示词（segment_prompt 直连，可选）"', script)
+        self.assertIn('final_prompt: row.finalPrompt.value', script)
+        self.assertIn("插件不扩写、不校验、不回退", script)
         self.assertNotIn('element("label", "结束时间（秒）", metrics)', script)
         self.assertIn("width: min(1440px, 100%)", styles)
         self.assertIn(
@@ -151,12 +154,13 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("H3LVLoadSegment", nodes.NODE_DISPLAY_NAME_MAPPINGS)
         self.assertEqual(nodes.Unified.RETURN_TYPES, nodes.LoadSegment.RETURN_TYPES)
         self.assertEqual(nodes.Unified.RETURN_NAMES, nodes.LoadSegment.RETURN_NAMES)
-        self.assertEqual(len(nodes.Unified.RETURN_NAMES), 11)
+        self.assertEqual(len(nodes.Unified.RETURN_NAMES), 12)
         self.assertEqual(nodes.LoadSegment.RETURN_NAMES[:5], (
             "original_audio_padded", "vocals_padded", "generation_frames",
             "filename_prefix", "segment_material"))
         self.assertNotIn("segment_brief", nodes.LoadSegment.RETURN_NAMES)
-        self.assertEqual(nodes.LoadSegment.RETURN_NAMES[-6:], tuple(f"image_{i}" for i in range(1, 7)))
+        self.assertEqual(nodes.LoadSegment.RETURN_NAMES[5:11], tuple(f"image_{i}" for i in range(1, 7)))
+        self.assertEqual(nodes.LoadSegment.RETURN_NAMES[-1], "segment_prompt")
         self.assertNotIn("edit_frames", nodes.LoadSegment.RETURN_NAMES)
         self.assertNotIn("fps", nodes.LoadSegment.RETURN_NAMES)
         required = nodes.Unified.INPUT_TYPES()["required"]
@@ -511,10 +515,11 @@ class CoreTests(unittest.TestCase):
         for row in p["segments"]:
             self.assertNotIn("协议：", row["prompt"])
             self.assertNotIn("片段：", row["prompt"])
-            self.assertTrue(row["prompt"].startswith("模式：口播\n"))
+            self.assertTrue(row["prompt"].startswith("画面任务：人物口播\n"))
             self.assertIn("沿用参考画面的原有构图", row["prompt"])
             self.assertIn("固定机位单一连续镜头", row["prompt"])
-            self.assertIn("表演节奏：自然口播，口型跟随音频", row["prompt"])
+            self.assertIn("声音关系：人物跟随本段人声做自然可见口型", row["prompt"])
+            self.assertIn("主体动作：自然口播", row["prompt"])
             for reframing in ("胸部以上", "人物居中", "上三分之一", "正面"):
                 self.assertNotIn(reframing, row["prompt"])
             self.assertNotIn("生成时长：", row["prompt"])
@@ -536,7 +541,7 @@ class CoreTests(unittest.TestCase):
         self.assertNotEqual(old, core.fingerprint(p))
         self.assertEqual(p["segments"][1]["start"], 9)
         self.assertNotEqual(old_frames, p["segments"][0]["generation_frames"])
-        self.assertEqual(p["segments"][0]["prompt"].count("\n"), 3)
+        self.assertEqual(p["segments"][0]["prompt"].count("\n"), 6)
 
     def test_prompt_edit_invalidates_only_changed_segment(self):
         p = sample_plan()
@@ -590,7 +595,7 @@ class CoreTests(unittest.TestCase):
         updates = [{"end": s["end"], "prompt": s["prompt"]} for s in p["segments"]]
         updates[2]["end"] = 31
         core.edit_plan(p, updates)
-        self.assertIn("镜头方案：", p["segments"][2]["prompt"])
+        self.assertIn("镜头运动：", p["segments"][2]["prompt"])
         self.assertIn(core._zh_framing(p["segments"][2]["camera_start"]),
                       p["segments"][2]["prompt"])
 
@@ -600,10 +605,10 @@ class CoreTests(unittest.TestCase):
         for row in p["segments"]:
             self.assertNotIn("协议：", row["prompt"])
             self.assertNotIn("片段：", row["prompt"])
-            self.assertTrue(row["prompt"].startswith("模式：唱歌\n"))
-            self.assertIn("镜头方案：", row["prompt"])
-            self.assertIn("表演节奏：", row["prompt"])
-            self.assertEqual(row["prompt"].count("\n"), 3)
+            self.assertTrue(row["prompt"].startswith("画面任务：人物演唱\n"))
+            self.assertIn("镜头运动：", row["prompt"])
+            self.assertIn("主体动作：", row["prompt"])
+            self.assertEqual(row["prompt"].count("\n"), 6)
             self.assertNotIn("<Picture", row["prompt"])
             self.assertNotIn("<Subject", row["prompt"])
             self.assertNotIn("<Audio", row["prompt"])
@@ -693,8 +698,32 @@ class CoreTests(unittest.TestCase):
         for token in ("<Picture", "<Subject", "<Audio", "参考角色", "手持道具", "穿戴配饰"):
             self.assertNotIn(token, prompt)
         labels = [line.split("：", 1)[0] for line in prompt.splitlines()]
-        self.assertEqual(labels, ["模式", "镜头方案", "表演节奏"])
+        self.assertEqual(labels, ["画面任务", "声音关系", "开场构图", "主体动作", "镜头运动", "结束构图"])
         self.assertEqual(core.validate_segment_brief(prompt), prompt.strip())
+
+    def test_long_intro_marks_every_covered_segment_as_atmosphere(self):
+        plan = sample_plan()
+        plan["audio_structure"] = {"sections": [{"start": 0, "end": 20, "kind": "intro",
+                                                   "reason": "无识别文字且分离人声活动较低"}]}
+        for index, row in enumerate(plan["segments"]):
+            row.pop("prompt", None)
+            row.pop("visual_type", None)
+            row["text"] = "" if index < 2 else "主歌"
+        core.decorate(plan)
+        self.assertEqual([row["visual_type"] for row in plan["segments"]],
+                         ["atmosphere", "atmosphere", "performance"])
+        self.assertTrue(all(row["audio_section"] == "intro" for row in plan["segments"][:2]))
+        self.assertIn("疑似前奏", plan["segments"][0]["prompt"])
+        self.assertIn("人物不张口演唱", plan["segments"][1]["prompt"])
+
+    def test_handwritten_prompt_changes_fingerprint_without_format_validation(self):
+        plan = sample_plan()
+        original = core.fingerprint(plan)
+        updates = [dict(row) for row in plan["segments"]]
+        updates[0]["final_prompt"] = "ordinary free-form H3 prompt"
+        core.edit_plan(plan, updates)
+        self.assertEqual(plan["segments"][0]["final_prompt"], "ordinary free-form H3 prompt")
+        self.assertNotEqual(core.fingerprint(plan), original)
 
     def test_existing_two_field_camera_brief_remains_valid(self):
         prompt = "镜头方案：向右环绕人物\n表演节奏：克制的音乐表演\n"
@@ -813,7 +842,7 @@ class CoreTests(unittest.TestCase):
         moving = [row for row in p["segments"] if row["camera_move_family"] != "steady"]
         self.assertTrue(moving)
         self.assertTrue(all("active at the cut" in row["exit_motion_state"] for row in moving))
-        self.assertTrue(any("镜头方案：" in row["prompt"] and "至片段结束" in row["prompt"]
+        self.assertTrue(any("镜头运动：" in row["prompt"] and "至片段结束" in row["prompt"]
                             for row in moving))
 
     def test_equal_energy_sequence_still_varies_composition_and_motion(self):
@@ -855,8 +884,8 @@ class CoreTests(unittest.TestCase):
             self.assertFalse(same_size and same_angle)
             self.assertIn(current["entry_cut_strategy"], {
                 "shot-size cut", "30-degree angle cut", "shot-size plus angle cut"})
-            self.assertIn("镜头方案：", previous["prompt"])
-            self.assertIn("镜头方案：", current["prompt"])
+            self.assertIn("镜头运动：", previous["prompt"])
+            self.assertIn("镜头运动：", current["prompt"])
 
     def test_paths_and_atomic_roundtrip(self):
         with tempfile.TemporaryDirectory() as d:
@@ -1262,7 +1291,8 @@ class ReferenceImageTests(unittest.TestCase):
         self.assertIn("套用到所有分段", script)
         self.assertIn("renderRefs: renderReferences", script)
         self.assertIn('element("label", "本段画面", shotControl)', script)
-        self.assertIn("保存草稿后会按该类型重写本段镜头简报", script)
+        self.assertIn("保存草稿后会按所选画面重写导演简报", script)
+        self.assertIn('["atmosphere", "人物氛围表演"]', script)
         self.assertNotIn("画面类型", materials_script)
         self.assertIn("最多 6 张", materials_script)
         self.assertIn(".h3lv-default-materials-header", styles)
