@@ -290,10 +290,7 @@ class Analyze:
             "target_seconds": ("FLOAT", {"default": 11, "min": 5, "max": 15, "step": .1}),
             "asr_python": ("STRING", {"default": ""}), "asr_model": ("STRING", {"default": ""}),
             "asr_device": (["auto", "cuda", "cpu"],),
-            "camera_activity": (["auto", "moderate", "dynamic"],),
-            "widest_framing": (["medium close-up", "medium shot", "full shot", "close-up"],),
-            # Hidden and ignored compatibility slot. Keeping its position prevents
-            # older workflow widget values from shifting project_id/segment_index.
+            # Hidden and ignored compatibility slot retained for saved projects.
             "director_mode": ("STRING", {"default": "本地规则"}),
             }, "optional": {"vocals": ("AUDIO",)}}
     RETURN_TYPES = ("STRING", "INT")
@@ -307,8 +304,7 @@ class Analyze:
         return float("nan")
 
     def analyze(self, audio, mode, max_seconds, target_seconds, asr_python, asr_model,
-                asr_device="auto", camera_activity="auto", widest_framing="medium close-up",
-                director_mode="本地规则", vocals=None):
+                asr_device="auto", director_mode="本地规则", vocals=None):
         import soundfile as sf
         import numpy as np
         mix, sr = audio_array(audio)
@@ -344,7 +340,6 @@ class Analyze:
             "mode": mode, "max_seconds": float(max_seconds), "target_seconds": float(target_seconds),
             "sample_rate": sr, "samples": len(mix), "duration": len(mix)/sr,
             "director": {"mode": "rule", "performance_intensity": "auto",
-                         "camera_activity": camera_activity, "widest_framing": widest_framing,
                          "note": "", "rule_config": rules["config"],
                          "schedule_seed": audio_seed, "rule_revision": rules["revision"]},
             "audio_structure": audio_structure,
@@ -437,8 +432,8 @@ class Unified:
         return float("nan")
 
     def process(self, audio, mode, max_seconds, target_seconds, asr_python, asr_model,
-                asr_device="auto", camera_activity="auto", widest_framing="medium close-up",
-                director_mode="本地规则", project_id="", segment_index=0, vocals=None):
+                asr_device="auto", director_mode="本地规则", project_id="", segment_index=0,
+                vocals=None):
         if str(project_id).strip():
             try:
                 plan = read_plan(data_root(), project_id)
@@ -447,8 +442,7 @@ class Unified:
             except FileNotFoundError:
                 pass
         analyzed = Analyze().analyze(audio, mode, max_seconds, target_seconds,
-                                     asr_python, asr_model, asr_device, camera_activity,
-                                     widest_framing, director_mode, vocals)
+                                     asr_python, asr_model, asr_device, director_mode, vocals)
         # Native Run targets only this node. These placeholders are not sent downstream;
         # the approved controller run replaces them with the selected segment outputs.
         return {"ui": analyzed["ui"],

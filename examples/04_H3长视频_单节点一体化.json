@@ -2044,24 +2044,6 @@
           "link": null
         },
         {
-          "localized_name": "camera_activity",
-          "name": "camera_activity",
-          "type": "COMBO",
-          "widget": {
-            "name": "camera_activity"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "widest_framing",
-          "name": "widest_framing",
-          "type": "COMBO",
-          "widget": {
-            "name": "widest_framing"
-          },
-          "link": null
-        },
-        {
           "localized_name": "director_mode",
           "name": "director_mode",
           "type": "STRING",
@@ -2148,8 +2130,6 @@
         "",
         "",
         "auto",
-        "dynamic",
-        "full shot",
         "本地规则",
         "",
         0
@@ -2161,8 +2141,6 @@
         "asr_python": "",
         "asr_model": "",
         "asr_device": "auto",
-        "camera_activity": "dynamic",
-        "widest_framing": "full shot",
         "director_mode": "本地规则",
         "project_id": "",
         "segment_index": 0

@@ -62,7 +62,7 @@ def refresh_expansion_settings(snapshot, current_prompt):
 
 
 def normalize_output_contract(snapshot):
-    """Upgrade frozen queue graphs from the former 7-output loader contract."""
+    """Upgrade frozen queue graphs for current loader outputs and node inputs."""
     loader = str(snapshot.get("loader_id", ""))
     video = str(snapshot.get("video_id", ""))
     prompt = snapshot.get("prompt", {})
@@ -73,7 +73,14 @@ def normalize_output_contract(snapshot):
     frame_rate = inputs.get("frame_rate")
     if isinstance(frame_rate, (list, tuple)) and str(frame_rate[0]) == loader:
         inputs["frame_rate"] = 24
+    for node in prompt.values():
+        if node.get("class_type") != "H3LVUnified":
+            continue
+        node_inputs = node.setdefault("inputs", {})
+        node_inputs.pop("camera_activity", None)
+        node_inputs.pop("widest_framing", None)
     snapshot["output_contract_version"] = 2
+    snapshot["node_control_contract_version"] = 1
     return snapshot
 
 

@@ -512,21 +512,13 @@ def director_preferences(plan):
     """Normalize local-rule controls while keeping legacy saved projects readable."""
     supplied = plan.get("director") or {}
     performance = supplied.get("performance_intensity", "auto")
-    camera = supplied.get("camera_activity", "auto")
-    widest = supplied.get("widest_framing", "medium close-up")
     note = str(supplied.get("note", plan.get("visual_brief", "")) or "").strip()
     if performance not in {"auto", "restrained", "natural", "energetic"}:
         performance = "auto"
-    if camera not in {"auto", "steady", "moderate", "dynamic"}:
-        camera = "auto"
-    if plan.get("mode") == "singing" and camera == "steady":
-        camera = "moderate"
-    if widest not in {"close-up", "medium close-up", "medium shot", "full shot"}:
-        widest = "medium close-up"
     rules = (validate_config(supplied["rule_config"])
              if isinstance(supplied.get("rule_config"), dict) else default_config())
-    return {"mode": "rule", "performance_intensity": performance, "camera_activity": camera,
-            "widest_framing": widest, "note": note, "rule_config": rules,
+    return {"mode": "rule", "performance_intensity": performance,
+            "note": note, "rule_config": rules,
             "schedule_seed": str(supplied.get("schedule_seed") or plan.get("id") or "h3lv"),
             "rule_revision": str(supplied.get("rule_revision") or "legacy")}
 
@@ -862,8 +854,7 @@ def _arc_ending_angle(angle, direction, allowed_angles):
 
 def camera_sequence(mode, rows, director=None):
     """Plan the full editorial sequence from relative audio evidence and prior camera state."""
-    prefs = director or {"performance_intensity": "auto", "camera_activity": "auto",
-                         "widest_framing": "medium close-up", "note": "",
+    prefs = director or {"performance_intensity": "auto", "note": "",
                          "rule_config": default_config()}
     rules = validate_config(prefs.get("rule_config") or default_config())
     if mode == "speaking":
@@ -885,13 +876,9 @@ def camera_sequence(mode, rows, director=None):
             "composition_anchor": "reference-consistent subject placement, gaze and body framing",
         } for index in range(len(rows))]
     singing = rules["singing"]
-    # The visible node control is the sole singing shot-size authority.
-    # Legacy allowed_framings remains readable but cannot silently narrow it.
+    # Singing composition and movement now come from the editable local rules.
     size_order = ["close-up", "medium close-up", "medium shot", "full shot"]
-    widest = prefs.get("widest_framing", "medium close-up")
-    sizes = size_order[:size_order.index(widest)+1]
-    if widest == "medium close-up":
-        sizes = ["medium close-up"]
+    sizes = [size for size in size_order if size in singing["allowed_framings"]]
     angles = list(singing["allowed_angles"])
     seed_key = f"{prefs.get('schedule_seed', 'h3lv')}|{prefs.get('rule_revision', 'legacy')}"
     bands = energy_bands(rows)
@@ -903,7 +890,7 @@ def camera_sequence(mode, rows, director=None):
             index, band, rows, sizes, previous_end, states, angles=angles,
             seed_key=seed_key, avoid_axis_cross=singing.get("avoid_direct_axis_cross", True))
         ending, family, direction, move, entry_motion, exit_motion, movement_type = _movement_for(
-            framing, angle, band, prefs["camera_activity"], sizes, states,
+            framing, angle, band, "auto", sizes, states,
             rules=singing, seed_key=seed_key)
         ending_angle = angle
         if family == "arc":
@@ -922,7 +909,7 @@ def camera_sequence(mode, rows, director=None):
             "previous_end_angle": previous_end["angle"],
             "camera_move_family": family, "camera_move_direction": direction,
             "camera_move_type": movement_type,
-            "camera_activity": prefs["camera_activity"],
+            "camera_activity": "auto",
             "relative_energy": band,
             "performance_direction": performance_direction(prefs["performance_intensity"], band),
             "composition_anchor": "performer remains readable, with room in the direction of movement and a consistent environment",

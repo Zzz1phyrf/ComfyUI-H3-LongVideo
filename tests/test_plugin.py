@@ -49,8 +49,7 @@ def wide_rule_config():
 def sample_plan():
     return core.decorate({"id": "a"*32, "sample_rate": 100, "samples": 3000, "duration": 30,
         "mode": "singing", "max_seconds": 15, "target_seconds": 11,
-        "director": {"performance_intensity": "auto", "camera_activity": "auto",
-                      "widest_framing": "medium close-up", "note": "",
+        "director": {"performance_intensity": "auto", "note": "",
                       "rule_config": director_rules.default_config(),
                       "schedule_seed": "sample-audio", "rule_revision": "test-rules"},
         "approved": False, "revision": 1, "run_status": "draft", "created": 0,
@@ -129,6 +128,9 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("segment_brief 输出连接到提示词小助手", script)
         self.assertIn('api.addEventListener("h3lv-model-download"', script)
         self.assertIn("正在下载人声分离模型", script)
+        self.assertIn("oldActivities.has(values[6])", script)
+        self.assertIn("values.splice(6, 2)", script)
+        self.assertIn('"director_mode", "project_id", "segment_index"', script)
 
     def test_final_output_has_vhs_preview_descriptor(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -158,8 +160,8 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("fps", nodes.LoadSegment.RETURN_NAMES)
         required = nodes.Unified.INPUT_TYPES()["required"]
         self.assertIn("audio", required)
-        self.assertIn("camera_activity", required)
-        self.assertIn("widest_framing", required)
+        self.assertNotIn("camera_activity", required)
+        self.assertNotIn("widest_framing", required)
         self.assertEqual(required["director_mode"][0], "STRING")
         self.assertEqual(required["asr_device"][0], ["auto", "cuda", "cpu"])
         optional = nodes.Unified.INPUT_TYPES()["optional"]
@@ -170,6 +172,21 @@ class CoreTests(unittest.TestCase):
         self.assertIn("project_id", required)
         self.assertIn("segment_index", required)
         self.assertIn("H3LVUnified", controller.SEGMENT_NODE_TYPES)
+
+    def test_frozen_snapshot_drops_removed_camera_controls(self):
+        snapshot = {"loader_id": "1", "video_id": "2", "prompt": {
+            "1": {"class_type": "H3LVUnified", "inputs": {
+                "camera_activity": "dynamic", "widest_framing": "full shot",
+                "target_seconds": 8}},
+            "2": {"class_type": "Sampler", "inputs": {"steps": 12}},
+        }}
+        controller.normalize_output_contract(snapshot)
+        inputs = snapshot["prompt"]["1"]["inputs"]
+        self.assertNotIn("camera_activity", inputs)
+        self.assertNotIn("widest_framing", inputs)
+        self.assertEqual(inputs["target_seconds"], 8)
+        self.assertEqual(snapshot["prompt"]["2"]["inputs"]["steps"], 12)
+        self.assertEqual(snapshot["node_control_contract_version"], 1)
 
     def test_unified_node_has_no_reference_image_or_prompt_assembly_surface(self):
         inputs = nodes.Unified.INPUT_TYPES()
@@ -575,7 +592,8 @@ class CoreTests(unittest.TestCase):
             self.assertNotIn("导演控制：", row["prompt"])
             self.assertNotIn("音频结构依据：", row["prompt"])
             self.assertLess(len(row["prompt"]), 700)
-        self.assertEqual(p["segments"][0]["camera_start"], "medium close-up")
+        self.assertIn(p["segments"][0]["camera_start"],
+                      p["director"]["rule_config"]["singing"]["allowed_framings"])
         self.assertNotIn("wide", p["segments"][-1]["camera_end"])
 
     def test_reference_layouts_create_stable_subject_and_picture_roles(self):
@@ -731,8 +749,7 @@ class CoreTests(unittest.TestCase):
             config["singing"]["energy_movements"][band] = [
                 "truck_left", "truck_right", "micro_reframe"]
         rows = [{"energy_db": -20, "text": "vocal"} for _ in range(12)]
-        prefs = {"performance_intensity": "auto", "camera_activity": "auto",
-                 "widest_framing": "medium close-up", "note": "",
+        prefs = {"performance_intensity": "auto", "note": "",
                  "schedule_seed": "lateral-test", "rule_revision": "one",
                  "rule_config": config}
         states = core.camera_sequence("singing", rows, prefs)
@@ -757,14 +774,17 @@ class CoreTests(unittest.TestCase):
         for first, second in zip(states, states[1:]):
             self.assertFalse(first["camera_move_family"] == second["camera_move_family"] == "dolly in")
 
-    def test_singing_steady_override_is_migrated_to_moving_plan_and_note_is_not_emitted(self):
+    def test_legacy_camera_controls_are_ignored_and_note_is_not_emitted(self):
         p = sample_plan()
+        baseline = copy.deepcopy(p)
         p["director"].update(performance_intensity="energetic", camera_activity="steady",
-                             widest_framing="medium close-up", note="Keep gestures compact.")
+                             widest_framing="close-up", note="Keep gestures compact.")
         core.decorate(p)
         self.assertTrue(all(row["camera_move_family"] != "steady" for row in p["segments"]))
-        self.assertTrue(all(row["camera_start"] == row["camera_end"] == "medium close-up"
-                            for row in p["segments"]))
+        self.assertEqual([(row["camera_start"], row["camera_end"], row["camera_move_type"])
+                          for row in p["segments"]],
+                         [(row["camera_start"], row["camera_end"], row["camera_move_type"])
+                          for row in baseline["segments"]])
         self.assertNotIn("Keep gestures compact.", p["segments"][0]["prompt"])
         self.assertIn("投入而受控的音乐表演", p["segments"][0]["prompt"])
 
@@ -778,8 +798,7 @@ class CoreTests(unittest.TestCase):
 
     def test_equal_energy_sequence_still_varies_composition_and_motion(self):
         rows = [{"energy_db": -20, "text": "vocal"} for _ in range(4)]
-        prefs = {"performance_intensity": "auto", "camera_activity": "auto",
-                 "widest_framing": "medium shot", "note": "",
+        prefs = {"performance_intensity": "auto", "note": "",
                  "rule_config": wide_rule_config()}
         states = core.camera_sequence("singing", rows, prefs)
         self.assertTrue(all(state["camera_move_family"] != "steady" for state in states))

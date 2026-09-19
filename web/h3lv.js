@@ -215,7 +215,7 @@ async function openDirectorRules(owner) {
   actionButton(title, "关闭", () => shade.remove(), "h3lv-close");
   const explanation = selectedMode === "speaking"
     ? "当前节点选择了 speaking。这里只编辑口播规则：连续固定机位和跨段一致构图。"
-    : "唱歌景别由节点的“最远允许景别”直接控制；旧 allowed_framings 字段不再限制景别。dynamic 使用可见横移、环绕或推拉，不选择轻微构图调整。这里编辑能量对应的运镜候选及相邻运动关系。";
+    : "唱歌景别由 allowed_framings 控制，运镜由各能量级别的 energy_movements 控制。这里也可以调整机位角度及相邻运动关系。";
   element("p", `${explanation} 规则不判断图片内容，也不决定音频被切成几段；保存后只用于重新分析的新项目。`, panel, "h3lv-help");
   const rules = await request("/h3lv/rules");
   let fullConfig = JSON.parse(rules.config_text);
@@ -988,12 +988,26 @@ app.registerExtension({
   },
   async beforeRegisterNodeDef(nodeType, nodeData) {
     if (nodeData.name !== "H3LVUnified") return;
+    const oldConfigured = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function (info) {
+      const values = info?.widgets_values;
+      const oldActivities = new Set(["auto", "moderate", "dynamic"]);
+      const oldFramings = new Set(["medium close-up", "medium shot", "full shot", "close-up"]);
+      if (Array.isArray(values) && oldActivities.has(values[6]) && oldFramings.has(values[7])) {
+        values.splice(6, 2);
+        const names = ["mode", "max_seconds", "target_seconds", "asr_python", "asr_model",
+          "asr_device", "director_mode", "project_id", "segment_index"];
+        names.forEach((name, index) => {
+          const widget = this.widgets?.find(item => item.name === name);
+          if (widget) widget.value = values[index];
+        });
+      }
+      return oldConfigured?.call(this, info);
+    };
     const oldCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
       const result = oldCreated?.apply(this, arguments);
       const directorLabels = {
-        camera_activity: "镜头活跃度",
-        widest_framing: "最远允许景别",
         asr_python: "语音识别 Python 覆盖（可选）",
         asr_model: "语音识别模型覆盖（可选）",
         asr_device: "语音识别设备",

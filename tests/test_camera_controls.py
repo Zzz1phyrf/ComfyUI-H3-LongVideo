@@ -2,32 +2,35 @@ from test_plugin import core, director_rules, sample_plan
 import unittest
 
 class CameraControlsTests(unittest.TestCase):
-    def plan(self, widest='medium shot', activity='dynamic'):
+    def plan(self, allowed=None):
         p = sample_plan()
         p.update(samples=9000, duration=90)
-        p['director']['rule_config']['singing']['allowed_framings'] = ['medium close-up']
-        p['director'].update(widest_framing=widest, camera_activity=activity)
+        if allowed is not None:
+            p['director']['rule_config']['singing']['allowed_framings'] = allowed
         p['segments'] = [{'start_sample': i*1000, 'end_sample': (i+1)*1000, 'energy_db': -30+i%3*10, 'text': 'vocal'} for i in range(9)]
         return core.decorate(p)
 
-    def test_node_medium_shot_overrides_legacy_single_size(self):
-        p = self.plan()
+    def test_allowed_framings_come_from_local_rules(self):
+        p = self.plan(['medium close-up', 'medium shot'])
+        sizes = {r['camera_start'] for r in p['segments']} | {r['camera_end'] for r in p['segments']}
+        self.assertTrue(sizes <= {'medium close-up', 'medium shot'})
         self.assertIn('medium shot', {r['camera_start'] for r in p['segments']} | {r['camera_end'] for r in p['segments']})
 
-    def test_dynamic_has_visible_motion_and_plain_composition(self):
+    def test_energy_rules_have_visible_motion_and_plain_composition(self):
         for r in self.plan()['segments']:
-            self.assertNotIn(r['camera_move_type'], ['micro_reframe', 'steady'])
+            self.assertNotEqual(r['camera_move_type'], 'steady')
             self.assertNotIn('眼线', r['prompt'])
             self.assertNotIn('人物居中', r['prompt'])
             self.assertNotIn('人物保持居中', r['prompt'])
 
-    def test_full_shot_and_close_up_are_reachable(self):
-        p = self.plan('full shot')
+    def test_default_rules_can_use_full_shot_and_close_up(self):
+        p = self.plan()
         sizes = {r['camera_start'] for r in p['segments']} | {r['camera_end'] for r in p['segments']}
         self.assertTrue({'close-up', 'full shot'} <= sizes)
 
-    def test_dynamic_truck_is_not_limited_to_brief_drift(self):
-        trucks = [r for r in self.plan()['segments'] if r['camera_move_family'] == 'lateral']
+    def test_high_energy_truck_is_not_limited_to_brief_drift(self):
+        trucks = [r for r in self.plan()['segments']
+                  if r['relative_energy'] == 'high' and r['camera_move_family'] == 'lateral']
         self.assertTrue(trucks)
         for row in trucks:
             self.assertIn('持续平稳横移', row['prompt'])
@@ -35,7 +38,7 @@ class CameraControlsTests(unittest.TestCase):
             self.assertNotIn('stays short', row['camera_move'])
 
     def test_speaking_remains_fixed(self):
-        p = self.plan('full shot')
+        p = self.plan()
         p['mode'] = 'speaking'
         core.decorate(p)
         self.assertTrue(all(r['camera_move_type'] == 'steady' and '全程固定机位' in r['prompt'] for r in p['segments']))
