@@ -34,6 +34,9 @@ export function materialEditor(parent, {projectId, index = 0, refs = [], note = 
     const names = linked ? defaults().refs : value;
     textarea.value = linked ? defaults().note : customNote;
     textarea.disabled = Boolean(linked); add.disabled = Boolean(linked) || uploading;
+    add.classList.toggle("is-inherited", Boolean(linked));
+    add.title = linked ? "选择“本段自定义”后可上传图片" : "";
+    upload.disabled = Boolean(linked) || uploading;
     list.replaceChildren();
     if (!names.length) el("p", list, linked ? "项目默认图尚未上传。" : "请为本段上传参考图。");
     names.forEach((name, position) => {

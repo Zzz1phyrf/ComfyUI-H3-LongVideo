@@ -58,6 +58,7 @@
 }
 .h3lv-button:hover { border-color: #7e8b9f; background: #333b47; }
 .h3lv-button:disabled { opacity: .5; cursor: wait; }
+.h3lv-button:disabled.is-inherited { cursor: not-allowed; }
 .h3lv-button.primary { border-color: #3286d7; background: #1769aa; }
 .h3lv-button.run {
   padding: 8px 17px; border-color: #40d986; background: linear-gradient(180deg, #1b9f60, #117747);
@@ -194,10 +195,21 @@
   border: 1px solid #414c5b; border-radius: 9px; background: #1d232b;
 }
 .h3lv-default-materials-header {
-  padding: 13px 16px 11px; border-bottom: 1px solid #3d4652; background: #252c35;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 13px 16px 11px; background: #252c35; cursor: pointer; list-style: none;
 }
+.h3lv-default-materials-header::-webkit-details-marker { display: none; }
+.h3lv-default-materials[open] > .h3lv-default-materials-header { border-bottom: 1px solid #3d4652; }
+.h3lv-default-materials-title { min-width: 0; }
 .h3lv-default-materials-header h3 { margin: 0 0 5px; font-size: 16px; }
 .h3lv-default-materials-header .h3lv-help { margin: 0; color: #aeb8c6; }
+.h3lv-default-materials-toggle {
+  flex: 0 0 auto; padding: 5px 10px; border: 1px solid #5a6575; border-radius: 6px;
+  background: #2f3641; color: #e6ecf5; font-size: 12px;
+}
+.h3lv-default-materials-header:hover .h3lv-default-materials-toggle {
+  border-color: #7e8b9f; background: #39414e;
+}
 .h3lv-material-editor {
   min-width: 0; margin-top: 12px; padding: 12px 0 0; border-top: 1px solid #38414d;
 }

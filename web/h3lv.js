@@ -454,7 +454,7 @@ async function openReview(owner) {
   const selectedAudio = element("audio", undefined, selectedBar);
   selectedAudio.controls = true;
   selectedAudio.preload = "metadata";
-  const defaultMaterials = element("section", undefined, content, "h3lv-default-materials");
+  const defaultMaterials = element("details", undefined, content, "h3lv-default-materials");
   let defaultEditor = null;
   const segmentsBody = element("section", undefined, content, "h3lv-segments");
   let plan = null;
@@ -772,14 +772,23 @@ async function openReview(owner) {
     }
     syncDefaultReferenceControl();
     defaultMaterials.replaceChildren();
-    const defaultHeader = element("div", undefined, defaultMaterials, "h3lv-default-materials-header");
-    element("h3", "项目默认参考图", defaultHeader);
+    const defaultHeader = element("summary", undefined, defaultMaterials, "h3lv-default-materials-header");
+    const defaultHeaderText = element("div", undefined, defaultHeader, "h3lv-default-materials-title");
+    element("h3", "项目默认参考图", defaultHeaderText);
+    element("span", defaultMaterials.open ? "收起" : "展开", defaultHeader,
+      "h3lv-default-materials-toggle");
+    defaultMaterials.ontoggle = () => {
+      const toggle = defaultHeader.querySelector(".h3lv-default-materials-toggle");
+      if (toggle) toggle.textContent = defaultMaterials.open ? "收起" : "展开";
+    };
     if (plan.materials_version) {
-      element("p", "上传一次，所有使用默认的分段自动继承；本段自定义的图片保持独立。", defaultHeader, "h3lv-help");
+      element("p", "上传一次，所有使用默认的分段自动继承；本段自定义的图片保持独立。",
+        defaultHeaderText, "h3lv-help");
       defaultEditor = materialEditor(defaultMaterials, {projectId:plan.id, refs:plan.default_refs || [],
         note:plan.default_material_note || "", changed:() => {markDirty(); rows.forEach(row => row.renderRefs());}});
     } else {
-      element("p", "当前沿用画布参考图。启用内置素材后，请上传默认图并核对每段用途。", defaultHeader, "h3lv-help");
+      element("p", "当前沿用画布参考图。启用内置素材后，请上传默认图并核对每段用途。",
+        defaultHeaderText, "h3lv-help");
       actionButton(defaultMaterials, "启用内置素材管理", async () => {
         if (dirty) throw new Error("请先保存当前修改。");
         await request(endpoint("/edit"), {revision:plan.revision, materials:{refs:[], note:""},
