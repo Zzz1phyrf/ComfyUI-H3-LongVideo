@@ -8,7 +8,8 @@ from . import controller
 from . import director_rules
 from .core import (LOCK, UNSET, archive_take, audio_file, edit_plan, fingerprint, inside, preview_bounds,
                    output_preview, project_path, read_plan, read_project_transcript,
-                   reference_directory, remove_reference, request_regeneration, segmentation,
+                   preview_segment_brief, reference_directory, remove_reference,
+                   request_regeneration, segmentation,
                    state_file, store_reference, write_plan)
 from .nodes import data_root, rules_path, storage_root
 
@@ -204,6 +205,19 @@ def register_routes():
                 row["text"] = " / ".join(s["text"] for s in transcript["segments"] if row["start"] <= (s["start"]+s["end"])/2 < row["end"])
             write_plan(root, plan)
         return web.json_response(plan)
+
+    @routes.post("/h3lv/project/{project_id}/brief-preview")
+    @endpoint
+    async def brief_preview(request):
+        payload = await request.json()
+        root, pid = data_root(), request.match_info["project_id"]
+        with LOCK:
+            plan = read_plan(root, pid)
+            if int(payload.get("revision", -1)) != plan["revision"]:
+                raise ValueError("项目已变化，请刷新后重试。")
+            text = preview_segment_brief(
+                plan, payload.get("index"), str(payload.get("visual_type") or ""))
+        return web.json_response({"prompt": text})
 
     @routes.post("/h3lv/project/{project_id}/approve")
     @endpoint

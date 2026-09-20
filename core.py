@@ -1096,6 +1096,25 @@ def segment_brief(plan, row, framing, ending, move, previous_frame):
     )
 
 
+def preview_segment_brief(plan, index, visual_type):
+    """Render one visual-type alternative without mutating the saved plan."""
+    if visual_type not in {"performance", "atmosphere", "environment"}:
+        raise ValueError("画面类型无效。")
+    try:
+        index = int(index)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("分段编号无效。") from exc
+    rows = plan.get("segments") or []
+    if not 0 <= index < len(rows):
+        raise ValueError("分段编号无效。")
+    state = camera_sequence(plan["mode"], rows, director_preferences(plan))[index]
+    row = copy.deepcopy(rows[index])
+    row.update(state)
+    row["visual_type"] = visual_type
+    return segment_brief(plan, row, state["camera_start"], state["camera_end"],
+                         state["camera_move"], state["previous_end_framing"])
+
+
 def brief_text(row):
     """Compose the text handed to downstream prompt nodes for one segment."""
     body = str(row.get("prompt") or "").strip()
@@ -1397,7 +1416,7 @@ def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, ma
             row['reference_source'] = update.get('reference_source', row.get('reference_source', 'default'))
             row['visual_type'] = update.get('visual_type', old_kind)
             effective(plan, row, directory)
-            if old_kind != row['visual_type']:
+            if old_kind != row['visual_type'] and not update.get('brief_matches_visual_type'):
                 row['prompt'] = ''
         if changed:
             row["reason"] = "手动调整切点"

@@ -106,7 +106,7 @@ function editPromptDialog(index, value) {
       resolve(result);
     };
     actionButton(buttons, "取消", () => finish(null));
-    actionButton(buttons, "应用到当前草稿", () => finish(editor.value), "primary");
+    actionButton(buttons, "应用到当前修改", () => finish(editor.value), "primary");
     const onKeyDown = event => { if (event.key === "Escape") finish(null); };
     window.addEventListener("keydown", onKeyDown);
     shade.onclick = event => { if (event.target === shade) finish(null); };
@@ -390,7 +390,17 @@ async function openReview(owner) {
   const header = element("header", undefined, panel, "h3lv-header");
   const titleRow = element("div", undefined, header, "h3lv-title-row");
   element("h2", "H3 长视频 · 音频切分审核", titleRow);
-  actionButton(titleRow, "关闭", () => shade.remove(), "h3lv-close");
+  actionButton(titleRow, "关闭", async () => {
+    if (dirty && !await confirmDialog({
+      title: "放弃未保存的修改？",
+      message: "切点、参考图、画面类型和提示词修改都尚未保存。",
+      confirmText: "放弃修改",
+      confirmClass: "stop",
+      tone: "warning",
+    })) return;
+    canvas.disposeTimeline?.();
+    shade.remove();
+  }, "h3lv-close");
   const projectRow = element("div", undefined, header, "h3lv-project-row");
   const selectLabel = element("label", "分析项目", projectRow);
   const select = element("select", undefined, selectLabel);
@@ -709,17 +719,47 @@ async function openReview(owner) {
           option.value = value;
         }
         visualTypeSelect.value = row.visual_type || "performance";
-        visualTypeSelect.onchange = markDirty;
         const sectionName = {intro:"前奏", interlude:"间奏", outro:"尾奏"}[row.audio_section];
         const audioHint = row.audio_role === "vocal" ? "检测到识别人声" :
           (row.audio_role === "instrumental" ? `疑似${sectionName || "无人声段"}` : "人声状态需试听确认");
-        element("span", `音频判断：${audioHint}。保存草稿后会按所选画面重写导演简报；人物氛围和空镜不会使用人声参考。`,
+        element("span", `音频判断：${audioHint}。选择后会立即重写本段导演简报；人物氛围和空镜不会使用人声参考。`,
           shotControl, "h3lv-shot-control-help");
       }
       const promptActions = element("div", undefined, inner, "h3lv-actions h3lv-prompt-actions");
       const prompt = document.createElement("textarea");
       prompt.value = row.prompt || "";
-      prompt.oninput = markDirty;
+      let promptEdited = false;
+      prompt.oninput = () => {promptEdited = true; markDirty();};
+      if (visualTypeSelect) {
+        let currentVisualType = visualTypeSelect.value;
+        visualTypeSelect.onchange = async () => {
+          const nextVisualType = visualTypeSelect.value;
+          if (nextVisualType === currentVisualType) return;
+          if (promptEdited && !await confirmDialog({
+            title: "切换画面类型会重写当前导演简报",
+            message: "你已手动修改过这一段导演简报。继续切换将用新画面类型的规则结果覆盖它。",
+            confirmText: "重写导演简报",
+            tone: "warning",
+          })) {
+            visualTypeSelect.value = currentVisualType;
+            return;
+          }
+          visualTypeSelect.disabled = true;
+          try {
+            const result = await request(endpoint("/brief-preview"), {
+              revision:plan.revision, index:row.index, visual_type:nextVisualType});
+            prompt.value = result.prompt;
+            promptEdited = false;
+            currentVisualType = nextVisualType;
+            markDirty();
+          } catch (error) {
+            visualTypeSelect.value = currentVisualType;
+            await messageDialog({title: "导演简报更新失败", message:error.message || String(error), tone:"error"});
+          } finally {
+            visualTypeSelect.disabled = false;
+          }
+        };
+      }
       actionButton(promptActions, "编辑本段导演简报", async () => {
         const updated = await editPromptDialog(row.index, prompt.value);
         if (updated === null || updated === prompt.value) return;
@@ -855,12 +895,11 @@ async function openReview(owner) {
           final_prompt: row.finalPrompt.value,
           material_note: row.materialControls ? row.materialControls.getNote() : row.note.value, refs: row.refs,
           ...(row.materialControls ? {reference_source:row.materialControls.source.value,
-            visual_type:row.visualType.value} : {})}))});
+            visual_type:row.visualType.value, brief_matches_visual_type:true} : {})}))});
       plan = saved; revision = saved.revision; dirty = false;
     }
     return revision;
   }
-  actionButton(controls, "保存草稿", async () => {await saveDraft(); await load();});
   actionButton(controls, "保存并确认", async () => {
     if (!await confirmDialog({
       title: "保存并确认分段？",

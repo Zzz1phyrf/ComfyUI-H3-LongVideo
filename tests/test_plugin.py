@@ -58,6 +58,33 @@ def sample_plan():
 
 
 class CoreTests(unittest.TestCase):
+    def test_visual_type_preview_rewrites_brief_without_mutating_plan(self):
+        plan = sample_plan()
+        original = plan["segments"][0]["prompt"]
+        expected = {
+            "performance": "画面任务：人物演唱",
+            "atmosphere": "画面任务：人物氛围表演",
+            "environment": "画面任务：空镜环境",
+        }
+        for visual_type, first_line in expected.items():
+            with self.subTest(visual_type=visual_type):
+                preview = core.preview_segment_brief(plan, 0, visual_type)
+                self.assertTrue(preview.startswith(first_line))
+        self.assertEqual(plan["segments"][0]["prompt"], original)
+        with self.assertRaisesRegex(ValueError, "画面类型无效"):
+            core.preview_segment_brief(plan, 0, "invalid")
+
+    def test_dynamic_brief_is_preserved_when_visual_type_is_saved(self):
+        plan = sample_plan()
+        plan.update(materials_version=1, default_refs=[], default_material_note="")
+        preview = core.preview_segment_brief(plan, 0, "environment")
+        updates = [dict(row) for row in plan["segments"]]
+        updates[0].update(prompt=preview, visual_type="environment",
+                          reference_source="default", brief_matches_visual_type=True)
+        core.edit_plan(plan, updates)
+        self.assertEqual(plan["segments"][0]["visual_type"], "environment")
+        self.assertEqual(plan["segments"][0]["prompt"], preview)
+
     def test_new_analysis_enables_material_editor_without_canvas_connections(self):
         import torch
         with tempfile.TemporaryDirectory() as directory:
@@ -1313,7 +1340,13 @@ class ReferenceImageTests(unittest.TestCase):
         self.assertIn("套用到所有分段", script)
         self.assertIn("renderRefs: renderReferences", script)
         self.assertIn('element("label", "本段画面", shotControl)', script)
-        self.assertIn("保存草稿后会按所选画面重写导演简报", script)
+        self.assertIn("选择后会立即重写本段导演简报", script)
+        self.assertIn('request(endpoint("/brief-preview")', script)
+        self.assertIn('visualTypeSelect.onchange = async () =>', script)
+        self.assertIn("切换画面类型会重写当前导演简报", script)
+        self.assertNotIn('actionButton(controls, "保存草稿"', script)
+        self.assertIn('title: "放弃未保存的修改？"', script)
+        self.assertIn('brief_matches_visual_type:true', script)
         self.assertIn('["atmosphere", "人物氛围表演"]', script)
         self.assertNotIn("画面类型", materials_script)
         self.assertIn("最多 6 张", materials_script)
@@ -1330,6 +1363,7 @@ class ReferenceImageTests(unittest.TestCase):
         self.assertIn('add.classList.toggle("is-inherited"', materials_script)
         self.assertIn(".h3lv-shot-control", styles)
         self.assertIn('@routes.post("/h3lv/project/{project_id}/refs")', routes_source)
+        self.assertIn('@routes.post("/h3lv/project/{project_id}/brief-preview")', routes_source)
         self.assertIn('@routes.post("/h3lv/project/{project_id}/refs/remove")', routes_source)
         self.assertIn('@routes.get("/h3lv/project/{project_id}/refs/{name}")', routes_source)
 
