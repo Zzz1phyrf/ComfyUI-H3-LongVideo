@@ -262,15 +262,15 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("H3LVLoadSegment", nodes.NODE_DISPLAY_NAME_MAPPINGS)
         self.assertEqual(nodes.Unified.RETURN_TYPES, nodes.LoadSegment.RETURN_TYPES)
         self.assertEqual(nodes.Unified.RETURN_NAMES, nodes.LoadSegment.RETURN_NAMES)
-        self.assertEqual(len(nodes.Unified.RETURN_NAMES), 12)
+        self.assertEqual(len(nodes.Unified.RETURN_NAMES), 13)
         self.assertEqual(nodes.LoadSegment.RETURN_NAMES[:5], (
             "original_audio_padded", "vocals_padded", "generation_frames",
             "filename_prefix", "segment_material"))
         self.assertNotIn("segment_brief", nodes.LoadSegment.RETURN_NAMES)
         self.assertEqual(nodes.LoadSegment.RETURN_NAMES[5:11], tuple(f"image_{i}" for i in range(1, 7)))
-        self.assertEqual(nodes.LoadSegment.RETURN_NAMES[-1], "segment_prompt")
+        self.assertEqual(nodes.LoadSegment.RETURN_NAMES[-2:], ("segment_prompt", "fps"))
         self.assertNotIn("edit_frames", nodes.LoadSegment.RETURN_NAMES)
-        self.assertNotIn("fps", nodes.LoadSegment.RETURN_NAMES)
+        self.assertEqual(nodes.LoadSegment.RETURN_TYPES[-1], "FLOAT")
         required = nodes.Unified.INPUT_TYPES()["required"]
         self.assertIn("audio", required)
         self.assertNotIn("camera_activity", required)
@@ -318,7 +318,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(snapshot["prompt"]["3"]["inputs"]["ref_images.ref_image_0"], ["1", 5])
         self.assertNotIn("source_text", snapshot["prompt"]["4"]["inputs"])
         self.assertEqual(snapshot["prompt"]["9"]["inputs"]["filename_prefix"], ["1", 3])
-        self.assertEqual(snapshot["output_contract_version"], 3)
+        self.assertEqual(snapshot["output_contract_version"], controller.OUTPUT_CONTRACT_VERSION)
 
     def test_unified_node_has_no_reference_image_or_prompt_assembly_surface(self):
         inputs = nodes.Unified.INPUT_TYPES()
@@ -798,6 +798,157 @@ class CoreTests(unittest.TestCase):
             self.assertNotIn("204", snapshot["prompt"])
             self.assertEqual(snapshot["prompt"]["136"]["inputs"]["positive"], ["231", 2])
             controller.TASKS.pop(plan["id"], None)
+
+    def test_resolution_change_regenerates_completed_segments_without_reanalysis(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plan = sample_plan()
+            plan["approved"] = True
+            plan["approved_fingerprint"] = core.fingerprint(plan)
+            project = core.project_path(directory, plan["id"])
+            project.mkdir()
+            for index, row in enumerate(plan["segments"]):
+                video = project/f"old_{index}.mp4"
+                video.write_bytes(b"old")
+                row["job"] = {"status": "completed", "video": str(video),
+                              "prompt_id": f"old-{index}"}
+            core.write_plan(directory, plan)
+
+            def generation_prompt(megapixels):
+                return {
+                    "1": {"class_type": "H3LVUnified", "inputs": {}},
+                    "2": {"class_type": "ResolutionSelector", "inputs": {
+                        "aspect_ratio": "9:16", "megapixels": megapixels}},
+                    "3": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
+                        "source": ["1", 2], "width": ["2", 0]}},
+                    "7": {"class_type": "VHS_VideoCombine", "inputs": {
+                        "images": ["3", 0], "frame_rate": 24}},
+                }
+
+            snapshot_path = core.state_file(project, "queue_snapshot.json")
+            snapshot_path.write_text(json.dumps({
+                "loader_id": "1", "video_id": "7", "output_contract_version": 3,
+                "prompt": generation_prompt(.4),
+            }), encoding="utf-8")
+            payload = {"loader_id": "1", "video_id": "7",
+                       "prompt": generation_prompt(.6)}
+
+            def capture_task(coroutine):
+                coroutine.close()
+                return MagicMock()
+
+            try:
+                with patch.object(controller.asyncio, "create_task", side_effect=capture_task):
+                    controller.start(directory, plan["id"], payload, MagicMock())
+                saved = core.read_plan(directory, plan["id"])
+                self.assertTrue(all(row.get("needs_regeneration")
+                                    for row in saved["segments"]))
+                self.assertEqual(
+                    json.loads(snapshot_path.read_text(encoding="utf-8"))["prompt"]["2"]["inputs"]["megapixels"],
+                    .6)
+                self.assertEqual([row["start_sample"] for row in saved["segments"]],
+                                 [row["start_sample"] for row in plan["segments"]])
+            finally:
+                controller.TASKS.pop(plan["id"], None)
+
+    def test_prompt_rule_change_regenerates_completed_segments_without_reanalysis(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plan = sample_plan()
+            plan["approved"] = True
+            plan["approved_fingerprint"] = core.fingerprint(plan)
+            for index, row in enumerate(plan["segments"]):
+                row["job"] = {"status": "completed", "video": f"old_{index}.mp4",
+                              "prompt_id": f"old-{index}"}
+            core.write_plan(directory, plan)
+            project = core.project_path(directory, plan["id"])
+
+            def generation_prompt(rule):
+                return {
+                    "1": {"class_type": "H3LVUnified", "inputs": {}},
+                    "2": {"class_type": "H3LVPromptExpand", "inputs": {
+                        "material": ["1", 4], "rule": rule}},
+                    "3": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
+                        "positive": ["2", 0]}},
+                    "7": {"class_type": "VHS_VideoCombine", "inputs": {
+                        "images": ["3", 0], "frame_rate": 24}},
+                }
+
+            snapshot_path = core.state_file(project, "queue_snapshot.json")
+            snapshot_path.write_text(json.dumps({
+                "loader_id": "1", "video_id": "7", "output_contract_version": 3,
+                "prompt": generation_prompt("old prompt rule"),
+            }), encoding="utf-8")
+
+            def capture_task(coroutine):
+                coroutine.close()
+                return MagicMock()
+
+            try:
+                with patch.object(controller.asyncio, "create_task", side_effect=capture_task):
+                    controller.start(directory, plan["id"], {
+                        "loader_id": "1", "video_id": "7",
+                        "prompt": generation_prompt("new prompt rule"),
+                    }, MagicMock())
+                saved = core.read_plan(directory, plan["id"])
+                self.assertTrue(all(row.get("needs_regeneration")
+                                    for row in saved["segments"]))
+                self.assertEqual(
+                    json.loads(snapshot_path.read_text(encoding="utf-8"))["prompt"]["2"]["inputs"]["rule"],
+                    "new prompt rule")
+            finally:
+                controller.TASKS.pop(plan["id"], None)
+
+    def test_current_fps_output_link_survives_snapshot_normalization(self):
+        snapshot = {"loader_id": "1", "video_id": "7",
+                    "output_contract_version": controller.OUTPUT_CONTRACT_VERSION,
+                    "prompt": {
+                        "1": {"class_type": "H3LVUnified", "inputs": {}},
+                        "7": {"class_type": "VHS_VideoCombine", "inputs": {
+                            "frame_rate": ["1", controller.FPS_OUTPUT_INDEX]}},
+                    }}
+        controller.normalize_output_contract(snapshot)
+        self.assertEqual(snapshot["prompt"]["7"]["inputs"]["frame_rate"],
+                         ["1", controller.FPS_OUTPUT_INDEX])
+
+    def test_unchanged_generation_workflow_keeps_completed_segments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plan = sample_plan()
+            plan["approved"] = True
+            plan["approved_fingerprint"] = core.fingerprint(plan)
+            for index, row in enumerate(plan["segments"]):
+                row["job"] = {"status": "completed", "video": f"old_{index}.mp4"}
+            core.write_plan(directory, plan)
+            prompt = {
+                "1": {"class_type": "H3LVUnified", "inputs": {}},
+                "2": {"class_type": "ResolutionSelector", "inputs": {"megapixels": .6}},
+                "3": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
+                    "width": ["2", 0], "source": ["1", 2]}},
+                "7": {"class_type": "VHS_VideoCombine", "inputs": {
+                    "images": ["3", 0], "frame_rate": ["1", controller.FPS_OUTPUT_INDEX]}},
+            }
+            snapshot_path = core.state_file(
+                core.project_path(directory, plan["id"]), "queue_snapshot.json")
+            snapshot_path.write_text(json.dumps({
+                "loader_id": "1", "video_id": "7",
+                "output_contract_version": controller.OUTPUT_CONTRACT_VERSION,
+                "prompt": prompt,
+            }), encoding="utf-8")
+
+            def capture_task(coroutine):
+                coroutine.close()
+                return MagicMock()
+
+            try:
+                with patch.object(controller.asyncio, "create_task", side_effect=capture_task):
+                    controller.start(directory, plan["id"], {
+                        "loader_id": "1", "video_id": "7", "prompt": prompt,
+                    }, MagicMock())
+                saved = core.read_plan(directory, plan["id"])
+                self.assertFalse(any(row.get("needs_regeneration")
+                                     for row in saved["segments"]))
+                self.assertEqual([row["job"]["video"] for row in saved["segments"]],
+                                 [f"old_{index}.mp4" for index in range(3)])
+            finally:
+                controller.TASKS.pop(plan["id"], None)
 
     def test_segment_brief_is_material_agnostic(self):
         prompt = sample_plan()["segments"][0]["prompt"]

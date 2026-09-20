@@ -110,7 +110,7 @@ ComfyUI/output/H3LongVideo/projects
 
 扩写内容在提示词小助手中维护。示例已开启“自定义规则”并内置全文，也可复制 [V5 规则文本](ref2va_performance_rule.txt) 到小助手中使用。节点的“运镜规则”负责镜头规划，小助手负责最终扩写。
 
-自行搭建工作流时，将 `segment_material` 接入插件的“H3 长视频 · 分镜提示词生成器”，再把生成结果接入 H3 提示词输入。若使用外部工具写提示词，可在分段界面填写“手写提示词”，将长视频节点末尾的 `segment_prompt` 直接接入 H3 `prompt`；该接口不会改写、校验或回退。H3 的 `prompt` 同时只能选择一条连线。顺序生成工作流需保留一个 `H3LVUnified` 节点和一个 VHS Video Combine 输出节点。
+自行搭建工作流时，将 `segment_material` 接入插件的“H3 长视频 · 分镜提示词生成器”，再把生成结果接入 H3 提示词输入。若使用外部工具写提示词，可在分段界面填写“手写提示词”，将长视频节点末尾的 `segment_prompt` 直接接入 H3 `prompt`；该接口不会改写、校验或回退。H3 的 `prompt` 同时只能选择一条连线。将节点末尾的 `fps` 接入 VHS Video Combine 的 `frame_rate`，使分段输出始终按 24fps 编码。顺序生成工作流需保留一个 `H3LVUnified` 节点和一个 VHS Video Combine 输出节点。
 
 ## 使用建议
 

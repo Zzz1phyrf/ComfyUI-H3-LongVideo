@@ -13,10 +13,12 @@ import uuid
 
 from .core import (LOCK, REFERENCE_MIRROR_ROOT, archive_take, audio_file, fingerprint, inside,
                    output_preview, project_path, read_plan, reference_directory,
-                   segment_fingerprint, write_plan)
+                   request_regeneration, segment_fingerprint, write_plan)
 
 TASKS = {}
 SEGMENT_NODE_TYPES = {"H3LVUnified"}
+OUTPUT_CONTRACT_VERSION = 4
+FPS_OUTPUT_INDEX = 12
 
 
 def restore_legacy_prompt_rules(snapshot, current_prompt):
@@ -73,7 +75,8 @@ def normalize_output_contract(snapshot):
             and str(filename[0]) == loader:
         inputs["filename_prefix"] = [loader, 4]
     frame_rate = inputs.get("frame_rate")
-    if isinstance(frame_rate, (list, tuple)) and str(frame_rate[0]) == loader:
+    if contract_version < OUTPUT_CONTRACT_VERSION \
+            and isinstance(frame_rate, (list, tuple)) and str(frame_rate[0]) == loader:
         inputs["frame_rate"] = 24
     if contract_version < 3:
         for node in prompt.values():
@@ -92,9 +95,27 @@ def normalize_output_contract(snapshot):
         node_inputs = node.setdefault("inputs", {})
         node_inputs.pop("camera_activity", None)
         node_inputs.pop("widest_framing", None)
-    snapshot["output_contract_version"] = 3
+    snapshot["output_contract_version"] = OUTPUT_CONTRACT_VERSION
     snapshot["node_control_contract_version"] = 1
     return snapshot
+
+
+def generation_graph_fingerprint(snapshot):
+    """Fingerprint the frozen generation graph without per-segment loader state."""
+    prompt = copy.deepcopy(snapshot.get("prompt", {}))
+    loader = str(snapshot.get("loader_id", ""))
+    video = str(snapshot.get("video_id", ""))
+    loader_inputs = prompt.get(loader, {}).get("inputs", {})
+    loader_inputs.pop("project_id", None)
+    loader_inputs.pop("segment_index", None)
+    video_inputs = prompt.get(video, {}).get("inputs", {})
+    frame_rate = video_inputs.get("frame_rate")
+    if isinstance(frame_rate, (list, tuple)) and len(frame_rate) >= 2 \
+            and str(frame_rate[0]) == loader and frame_rate[1] == FPS_OUTPUT_INDEX:
+        video_inputs["frame_rate"] = 24.0
+    encoded = json.dumps(prompt, ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def final_prompt_from_history(history):
@@ -428,30 +449,64 @@ def start(root, project_id, payload, server):
             raise ValueError("请先保存并确认分段方案。")
         directory = project_path(root, project_id)
         only_segment = payload.get("only_segment_index")
+        if only_segment is not None:
+            only_segment = int(only_segment)
+            if not 0 <= only_segment < len(plan["segments"]):
+                raise ValueError("要重新生成的片段编号无效。")
+        snapshot_file = directory/"state"/"queue_snapshot.json"
+        replace_snapshot = bool(payload.get("replace_snapshot"))
+        current_snapshot = None
+        if snapshot_file.is_file():
+            previous_snapshot = normalize_output_contract(
+                json.loads(snapshot_file.read_text(encoding="utf-8")))
+            loader = str(payload.get("loader_id") or previous_snapshot.get("loader_id") or "")
+            video = str(payload.get("video_id") or previous_snapshot.get("video_id") or "")
+            current_prompt = copy.deepcopy(payload.get("prompt", {}))
+            if (current_prompt.get(loader, {}).get("class_type") in SEGMENT_NODE_TYPES
+                    and current_prompt.get(video, {}).get("class_type") == "VHS_VideoCombine"):
+                current_snapshot = normalize_output_contract({
+                    "prompt": current_prompt, "loader_id": loader, "video_id": video,
+                    "workflow": payload.get("workflow", {}),
+                    "client_id": str(payload.get("client_id") or "").strip(),
+                    "output_contract_version": OUTPUT_CONTRACT_VERSION,
+                    "prompt_rule_source": "workflow",
+                })
+                previous_fingerprint = previous_snapshot.get("generation_graph_fingerprint") \
+                    or generation_graph_fingerprint(previous_snapshot)
+                current_fingerprint = generation_graph_fingerprint(current_snapshot)
+                current_snapshot["generation_graph_fingerprint"] = current_fingerprint
+                if only_segment is None and current_fingerprint != previous_fingerprint:
+                    for row in plan["segments"]:
+                        request_regeneration(row, "生成工作流参数已修改")
+                    if plan.get("final_video"):
+                        plan["final_stale"] = True
+                    replace_snapshot = True
         if only_segment is None:
             generation_indices = [index for index, row in enumerate(plan["segments"])
                                   if row.get("job", {}).get("status") != "completed"
                                   or row.get("needs_regeneration")]
         else:
-            only_segment = int(only_segment)
-            if not 0 <= only_segment < len(plan["segments"]):
-                raise ValueError("要重新生成的片段编号无效。")
             generation_indices = [only_segment]
         validate_generation_materials(plan, directory, generation_indices)
-        snapshot_file = directory/"state"/"queue_snapshot.json"
-        replace_snapshot = bool(payload.get("replace_snapshot"))
         if not any(row.get("job") for row in plan["segments"]) or replace_snapshot:
-            prompt = copy.deepcopy(payload.get("prompt", {}))
-            loader, video = str(payload.get("loader_id", "")), str(payload.get("video_id", ""))
-            if prompt.get(loader, {}).get("class_type") not in SEGMENT_NODE_TYPES:
-                raise ValueError("请打开含 H3 分段读取节点或一体化节点的视频工作流。")
-            if prompt.get(video, {}).get("class_type") != "VHS_VideoCombine":
-                raise ValueError("请选择此工作流的 VHS Video Combine 输出节点。")
-            snapshot = normalize_output_contract({"prompt": prompt, "loader_id": loader,
-                                                  "video_id": video, "workflow": payload.get("workflow", {}),
-                                                  "client_id": str(payload.get("client_id") or "").strip(),
-                                                  "output_contract_version": 3,
-                                                  "prompt_rule_source": "workflow"})
+            if current_snapshot is None:
+                prompt = copy.deepcopy(payload.get("prompt", {}))
+                loader = str(payload.get("loader_id", ""))
+                video = str(payload.get("video_id", ""))
+                if prompt.get(loader, {}).get("class_type") not in SEGMENT_NODE_TYPES:
+                    raise ValueError("请打开含 H3 分段读取节点或一体化节点的视频工作流。")
+                if prompt.get(video, {}).get("class_type") != "VHS_VideoCombine":
+                    raise ValueError("请选择此工作流的 VHS Video Combine 输出节点。")
+                current_snapshot = normalize_output_contract({
+                    "prompt": prompt, "loader_id": loader, "video_id": video,
+                    "workflow": payload.get("workflow", {}),
+                    "client_id": str(payload.get("client_id") or "").strip(),
+                    "output_contract_version": OUTPUT_CONTRACT_VERSION,
+                    "prompt_rule_source": "workflow",
+                })
+                current_snapshot["generation_graph_fingerprint"] = \
+                    generation_graph_fingerprint(current_snapshot)
+            snapshot = current_snapshot
             snapshot_file.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
         elif not snapshot_file.is_file():
             raise ValueError("缺少原工作流快照，无法安全继续。")

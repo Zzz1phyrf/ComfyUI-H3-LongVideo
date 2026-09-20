@@ -370,10 +370,10 @@ class LoadSegment:
         return {"required": {"project_id": ("STRING", {"default": ""}),
                              "segment_index": ("INT", {"default": 0, "min": 0, "max": 10000})}}
     RETURN_TYPES = (("AUDIO", "AUDIO", "INT", "STRING", "H3LV_MATERIAL")
-                    + ("IMAGE",)*6 + ("STRING",))
+                    + ("IMAGE",)*6 + ("STRING", "FLOAT"))
     RETURN_NAMES = ("original_audio_padded", "vocals_padded", "generation_frames",
                     "filename_prefix", "segment_material") + tuple(f"image_{i+1}" for i in range(6)) \
-                   + ("segment_prompt",)
+                   + ("segment_prompt", "fps")
     FUNCTION = "load"
     CATEGORY = "像素幻想/H3 长视频"
 
@@ -413,7 +413,7 @@ class LoadSegment:
         pictures = images(material) if material else (None,)*6
         return (*outputs, row["generation_frames"],
                 f"H3LongVideo/projects/{project_id}/takes/seg_{segment_index:04d}", material,
-                *pictures, str(row.get("final_prompt") or ""))
+                *pictures, str(row.get("final_prompt") or ""), 24.0)
 
 
 class Unified:

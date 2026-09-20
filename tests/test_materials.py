@@ -2,6 +2,7 @@ import copy
 import importlib
 import io
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -99,7 +100,8 @@ class MaterialTests(unittest.TestCase):
             result = nodes.LoadSegment().load(self.plan['id'],1)
         self.assertGreater(float(result[0]['waveform'].abs().sum()),0)
         self.assertEqual(float(result[1]['waveform'].abs().sum()),0)
-        self.assertEqual(result[-1], 'user text exactly')
+        self.assertEqual(result[-2], 'user text exactly')
+        self.assertEqual(result[-1], 24.0)
 
     def test_vision_cache_and_context_invalidation(self):
         packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)
@@ -119,6 +121,7 @@ class MaterialTests(unittest.TestCase):
             self.assertIn('atmosphere means a visible performer who remains closed-mouth', system)
             self.assertIn('environment means only the declared environment is visible', system)
             self.assertIn('generation_seconds', system)
+            self.assertIn('do not quote, transcribe, translate, paraphrase or describe its wording', system)
             other = copy.deepcopy(packet); other['material_note'] = 'different roles'
             expansion.expand(other,'vision','m','r')
             self.assertEqual(call.call_count,2)
@@ -145,6 +148,70 @@ class MaterialTests(unittest.TestCase):
     def test_bad_picture_reference_rejected(self):
         with self.assertRaisesRegex(ValueError,'不存在的图片'):
             expansion.validate_prompt(TEXT.replace('<Picture 1>','<Picture 9>'),2)
+
+    def test_missing_single_shot_label_is_repaired(self):
+        missing_label = TEXT.replace('[Shot 1] ', '')
+        result = expansion.validate_prompt(missing_label, 2)
+        self.assertEqual(result.count('[Shot 1]'), 1)
+        self.assertIn('detailed_description:\n[Shot 1]\nMove.', result)
+
+    def test_summary_shot_label_is_removed_when_detail_has_single_shot(self):
+        duplicated_in_summary = TEXT.replace('summary:\nOne shot.', 'summary:\n[Shot 1] One shot.')
+        result = expansion.validate_prompt(duplicated_in_summary, 2)
+        self.assertEqual(result.count('[Shot 1]'), 1)
+        self.assertIn('summary:\nOne shot.', result)
+        self.assertIn('detailed_description:\n[Shot 1] Move.', result)
+
+    def test_single_shot_label_variations_are_canonicalized(self):
+        cases = {
+            'bold_compact_uppercase_summary': TEXT.replace(
+                'summary:\nOne shot.', 'summary:\n**[SHOT1]** One shot.'),
+            'label_after_detail_prose': TEXT.replace(
+                'detailed_description:\n[Shot 1] Move.',
+                'detailed_description:\nContinuous take. [shot 1] Move.'),
+            'label_only_outside_detail': TEXT.replace(
+                'summary:\nOne shot.', 'summary:\n[ Shot 1 ] One shot.').replace('[Shot 1] ', ''),
+        }
+        for name, prompt in cases.items():
+            with self.subTest(name=name):
+                result = expansion.validate_prompt(prompt, 2)
+                self.assertEqual(result.count('[Shot 1]'), 1)
+                self.assertIn('detailed_description:\n[Shot 1]', result)
+                self.assertEqual(
+                    re.findall(r'(?i)\[\s*shot\s*\d+\s*\]', result),
+                    ['[Shot 1]'],
+                )
+
+    def test_redundant_single_shot_label_is_removed_from_every_other_section(self):
+        for heading in expansion.HEADINGS:
+            if heading == 'detailed_description':
+                continue
+            with self.subTest(heading=heading):
+                prompt = TEXT.replace(f'{heading}:\n', f'{heading}:\n**[SHOT #1]**: ', 1)
+                result = expansion.validate_prompt(prompt, 2)
+                self.assertEqual(result.count('[Shot 1]'), 1)
+                self.assertIn('detailed_description:\n[Shot 1]', result)
+                self.assertNotIn('[SHOT #1]', result)
+
+    def test_duplicate_single_shot_labels_are_rejected(self):
+        duplicate = TEXT.replace('[Shot 1] Move.', '[Shot 1] Move.\n[Shot 1] Continue.')
+        with self.assertRaisesRegex(ValueError, '\\[Shot 1\\]'):
+            expansion.validate_prompt(duplicate, 2)
+
+    def test_noncanonical_multi_shot_and_duplicate_detail_are_rejected(self):
+        prompts = {
+            'uppercase_second_shot': TEXT.replace('[Shot 1] Move.', '[SHOT 2] Move.'),
+            'compact_duplicate_detail': TEXT.replace(
+                '[Shot 1] Move.', '[Shot 1] Move.\n**[SHOT1]** Continue.'),
+        }
+        for name, prompt in prompts.items():
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, '\\[Shot 1\\]'):
+                expansion.validate_prompt(prompt, 2)
+
+    def test_malformed_bracketed_shot_label_is_rejected(self):
+        malformed = TEXT.replace('[Shot 1] Move.', '[Shot one] Move.')
+        with self.assertRaisesRegex(ValueError, '\\[Shot 1\\]'):
+            expansion.validate_prompt(malformed, 2)
 
     def test_cache_source_reports_exact_match_only(self):
         packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)
