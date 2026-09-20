@@ -454,7 +454,7 @@ async function openReview(owner) {
   const selectedAudio = element("audio", undefined, selectedBar);
   selectedAudio.controls = true;
   selectedAudio.preload = "metadata";
-  const defaultMaterials = element("section", undefined, content, "h3lv-default-materials");
+  const defaultMaterials = element("details", undefined, content, "h3lv-default-materials");
   let defaultEditor = null;
   const segmentsBody = element("section", undefined, content, "h3lv-segments");
   let plan = null;
@@ -783,10 +783,17 @@ async function openReview(owner) {
         segments:plan.segments.map(row => ({...row, reference_source:row.refs?.length ? "custom" : "default"}))});
     }
     syncDefaultReferenceControl();
+    const defaultOpen = defaultMaterials.open;
     defaultMaterials.replaceChildren();
-    const defaultHeader = element("div", undefined, defaultMaterials, "h3lv-default-materials-header");
+    const defaultHeader = element("summary", undefined, defaultMaterials, "h3lv-default-materials-header");
     const defaultHeaderText = element("div", undefined, defaultHeader, "h3lv-default-materials-title");
     element("h3", "项目默认参考图", defaultHeaderText);
+    const defaultToggle = element("span", defaultOpen ? "收起" : "展开", defaultHeader,
+      "h3lv-default-materials-toggle");
+    defaultMaterials.open = defaultOpen;
+    defaultMaterials.ontoggle = () => {
+      defaultToggle.textContent = defaultMaterials.open ? "收起" : "展开";
+    };
     if (plan.materials_version) {
       element("p", "上传一次，所有使用默认的分段自动继承；本段自定义的图片保持独立。",
         defaultHeaderText, "h3lv-help");
