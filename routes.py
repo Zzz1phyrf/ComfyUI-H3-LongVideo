@@ -2,18 +2,77 @@ import asyncio
 import copy
 import io
 import json
+from pathlib import Path
 import re
+import shutil
 
 from . import controller
 from . import director_rules
-from .core import (LOCK, UNSET, archive_take, audio_file, edit_plan, fingerprint, inside, preview_bounds,
+from .core import (LOCK, REFERENCE_MIRROR_ROOT, UNSET, archive_take, audio_file, edit_plan, fingerprint, inside, preview_bounds,
                    output_preview, project_path, read_plan, read_project_transcript,
                    preview_segment_brief, reference_directory, remove_reference,
                    request_regeneration, segmentation,
                    state_file, store_reference, write_plan)
-from .nodes import data_root, rules_path, storage_root
+from .nodes import data_root, final_root, rules_path, storage_root
 
 RANGE_HEADER = re.compile(r"\s*bytes=(\d*)-(\d*)\s*")
+
+
+def path_bytes(path):
+    path = Path(path)
+    if path.is_file():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    if not path.is_dir():
+        return 0
+    total = 0
+    for item in path.rglob("*"):
+        if not item.is_file():
+            continue
+        try:
+            total += item.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def project_storage_entry(root, project_id, finals, mirrors, active=False):
+    directory = project_path(root, project_id)
+    plan = read_plan(root, project_id)
+    mirror = inside(mirrors, Path(mirrors)/project_id)
+    final_files = []
+    for value in [plan.get("final_video"), *(plan.get("final_versions") or [])]:
+        if not value:
+            continue
+        try:
+            candidate = inside(finals, Path(value))
+        except ValueError:
+            continue
+        if candidate.is_file() and candidate not in final_files:
+            final_files.append(candidate)
+    return {
+        "id": plan["id"], "created": plan["created"], "duration": plan["duration"],
+        "count": len(plan["segments"]), "status": plan["run_status"],
+        "mode": plan.get("mode", "singing"), "active": bool(active),
+        "project_bytes": path_bytes(directory) + path_bytes(mirror),
+        "final_bytes": sum(path_bytes(path) for path in final_files),
+        "has_final": bool(final_files), "directory": directory, "mirror": mirror,
+        "final_files": final_files,
+    }
+
+
+def remove_project_storage(entry, delete_final=False):
+    reclaimed = entry["project_bytes"] + (entry["final_bytes"] if delete_final else 0)
+    if entry["directory"].is_dir():
+        shutil.rmtree(entry["directory"])
+    if entry["mirror"].is_dir():
+        shutil.rmtree(entry["mirror"])
+    if delete_final:
+        for path in entry["final_files"]:
+            path.unlink(missing_ok=True)
+    return reclaimed
 
 
 def byte_range(header, total):
@@ -150,6 +209,52 @@ def register_routes():
                     continue
         return web.json_response(sorted(result, key=lambda p: p["created"], reverse=True))
 
+    @routes.get("/h3lv/projects/manage")
+    @endpoint
+    async def manage_projects(request):
+        import folder_paths
+        root, finals = data_root(), final_root()
+        mirrors = Path(folder_paths.get_input_directory())/REFERENCE_MIRROR_ROOT
+
+        def scan():
+            result = []
+            if root.exists():
+                for file in root.glob("*/state/segments.json"):
+                    try:
+                        entry = project_storage_entry(
+                            root, file.parent.parent.name, finals, mirrors,
+                            active=file.parent.parent.name in controller.TASKS)
+                        result.append({key:value for key, value in entry.items()
+                                       if key not in {"directory", "mirror", "final_files"}})
+                    except (ValueError, OSError):
+                        continue
+            return sorted(result, key=lambda item:item["created"], reverse=True)
+
+        return web.json_response(await asyncio.to_thread(scan))
+
+    @routes.post("/h3lv/projects/delete")
+    @endpoint
+    async def delete_projects(request):
+        import folder_paths
+        payload = await request.json()
+        project_ids = list(dict.fromkeys(str(item) for item in payload.get("ids", [])))
+        if not project_ids:
+            raise ValueError("请至少选择一个要删除的项目。")
+        if len(project_ids) > 200:
+            raise ValueError("一次最多删除 200 个项目。")
+        delete_final = bool(payload.get("delete_final"))
+        root, finals = data_root(), final_root()
+        mirrors = Path(folder_paths.get_input_directory())/REFERENCE_MIRROR_ROOT
+        with LOCK:
+            active = [project_id for project_id in project_ids if project_id in controller.TASKS]
+            if active:
+                raise ValueError("选中的项目仍在生成或合成，请等待任务结束后再删除。")
+            entries = [project_storage_entry(root, project_id, finals, mirrors)
+                       for project_id in project_ids]
+            reclaimed = sum(remove_project_storage(entry, delete_final) for entry in entries)
+        return web.json_response({"deleted": project_ids, "delete_final": delete_final,
+                                  "reclaimed_bytes": reclaimed})
+
     @routes.get("/h3lv/project/{project_id}")
     @endpoint
     async def get_project(request):
@@ -231,10 +336,6 @@ def register_routes():
                 raise ValueError("任务运行中。")
             if payload.get("revision") != plan["revision"]:
                 raise ValueError("请刷新后重新确认。")
-            if plan.get('materials_version'):
-                from .materials import effective
-                for row in plan['segments']:
-                    effective(plan, row, project_path(root, pid), require=True)
             plan.update(approved=True, approved_fingerprint=fingerprint(plan))
             write_plan(root, plan)
         return web.json_response(plan)

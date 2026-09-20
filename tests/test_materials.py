@@ -39,6 +39,29 @@ class MaterialTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'没有有效参考图'):
             materials.effective(self.plan,row,self.directory,require=True)
 
+    def test_generation_preflight_reports_all_missing_segments(self):
+        plan = copy.deepcopy(self.plan)
+        plan['default_refs'] = []
+        with self.assertRaisesRegex(ValueError, '第 1、3 段没有有效参考图'):
+            controller.validate_generation_materials(plan, self.directory)
+        controller.validate_generation_materials(plan, self.directory, [1])
+
+    def test_missing_images_block_generation_without_changing_project_state(self):
+        root = self.directory/'projects'
+        plan = copy.deepcopy(self.plan)
+        plan['default_refs'] = []
+        for row in plan['segments']:
+            row.update(reference_source='default', refs=[])
+        plan['approved'] = True
+        plan['approved_fingerprint'] = core.fingerprint(plan)
+        core.write_plan(root, plan)
+        with self.assertRaisesRegex(ValueError, '第 1、2、3 段没有有效参考图'):
+            controller.start(root, plan['id'], {}, object())
+        saved = core.read_plan(root, plan['id'])
+        self.assertEqual(saved['run_status'], 'draft')
+        self.assertFalse(core.state_file(
+            core.project_path(root, plan['id']), 'queue_snapshot.json').exists())
+
     def test_packet_allows_empty_material_note(self):
         self.plan['default_material_note'] = ''
         packet = materials.packet(self.plan, self.plan['segments'][0], self.directory)

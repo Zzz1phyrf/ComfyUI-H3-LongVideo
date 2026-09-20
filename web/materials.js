@@ -10,7 +10,7 @@ function el(tag, parent, text) {
 export function materialEditor(parent, {projectId, index = 0, refs = [], note = "", defaults, source = "default", changed}) {
   const box = el("section", parent); box.className = "h3lv-material-editor";
   const value = [...refs];
-  let sourceSelect;
+  let sourceSelect, copy;
   if (defaults) {
     const controls = el("div", box); controls.className = "h3lv-actions";
     const sourceLabel = el("label", controls, "参考图来源 ");
@@ -68,8 +68,15 @@ export function materialEditor(parent, {projectId, index = 0, refs = [], note = 
     textarea.value = linked ? defaults().note : customNote;
     textarea.disabled = Boolean(linked); add.disabled = Boolean(linked) || uploading; mention.disabled = Boolean(linked) || !names.length;
     add.classList.toggle("is-inherited", Boolean(linked));
+    mention.classList.toggle("is-unavailable", Boolean(linked) || !names.length);
     add.title = linked ? "选择“本段自定义”后可上传图片" : "";
     mention.title = linked ? "请在项目默认参考图区编辑默认素材说明" : (!names.length ? "请先上传图片" : "插入当前图片的 @图号引用");
+    if (copy) {
+      const hasDefaults = Boolean(defaults().refs.length);
+      copy.disabled = !linked || !hasDefaults;
+      copy.classList.toggle("is-unavailable", copy.disabled);
+      copy.title = !linked ? "当前已经是本段自定义" : (!hasDefaults ? "项目默认参考图尚未上传" : "复制项目默认图片和素材说明到本段");
+    }
     upload.disabled = Boolean(linked) || uploading;
     closePicker();
     list.replaceChildren();
@@ -101,7 +108,7 @@ export function materialEditor(parent, {projectId, index = 0, refs = [], note = 
   }
   if (sourceSelect) {
     sourceSelect.onchange = () => {render(); changed();};
-    const copy = el("button", actions, "复制默认图到本段"); copy.type = "button"; copy.className = "h3lv-button";
+    copy = el("button", actions, "复制默认图到本段"); copy.type = "button"; copy.className = "h3lv-button";
     copy.onclick = () => {value.splice(0, value.length, ...defaults().refs); customNote = defaults().note; sourceSelect.value = "custom"; render(); changed();};
   }
   upload.onchange = async () => {

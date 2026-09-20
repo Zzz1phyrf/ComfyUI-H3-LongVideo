@@ -272,6 +272,27 @@ def apply_segment_references(prompt, plan, row, directory):
     detach_reference_slots(prompt, node, detached)
 
 
+def validate_generation_materials(plan, directory, indices=None):
+    """Validate only the segments that are about to be submitted for generation."""
+    if not plan.get("materials_version"):
+        return
+    from .materials import effective
+    targets = range(len(plan["segments"])) if indices is None else indices
+    missing = []
+    for index in targets:
+        try:
+            effective(plan, plan["segments"][index], directory, require=True)
+        except ValueError as exc:
+            if "没有有效参考图" not in str(exc):
+                raise ValueError(f"第 {index + 1} 段：{exc}") from exc
+            missing.append(index + 1)
+    if missing:
+        labels = "、".join(str(index) for index in missing)
+        raise ValueError(
+            f"第 {labels} 段没有有效参考图。请上传项目默认图，或为这些分段选择"
+            "“本段自定义”并上传图片后再开始生成。")
+
+
 async def execute_project(root, project_id, server):
     import execution
     import folder_paths
@@ -406,6 +427,17 @@ def start(root, project_id, payload, server):
         if not plan.get("approved") or plan.get("approved_fingerprint") != fingerprint(plan):
             raise ValueError("请先保存并确认分段方案。")
         directory = project_path(root, project_id)
+        only_segment = payload.get("only_segment_index")
+        if only_segment is None:
+            generation_indices = [index for index, row in enumerate(plan["segments"])
+                                  if row.get("job", {}).get("status") != "completed"
+                                  or row.get("needs_regeneration")]
+        else:
+            only_segment = int(only_segment)
+            if not 0 <= only_segment < len(plan["segments"]):
+                raise ValueError("要重新生成的片段编号无效。")
+            generation_indices = [only_segment]
+        validate_generation_materials(plan, directory, generation_indices)
         snapshot_file = directory/"state"/"queue_snapshot.json"
         replace_snapshot = bool(payload.get("replace_snapshot"))
         if not any(row.get("job") for row in plan["segments"]) or replace_snapshot:
@@ -432,13 +464,9 @@ def start(root, project_id, payload, server):
             if client_id and snapshot.get("client_id") != client_id:
                 snapshot["client_id"] = client_id
             snapshot_file.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
-        only_segment = payload.get("only_segment_index")
         if only_segment is None:
             plan.pop("run_only_segment", None)
         else:
-            only_segment = int(only_segment)
-            if not 0 <= only_segment < len(plan["segments"]):
-                raise ValueError("要重新生成的片段编号无效。")
             plan["run_only_segment"] = only_segment
         plan.update(run_status="running", pause_requested=False, stop_requested=False, error="")
         write_plan(root, plan)

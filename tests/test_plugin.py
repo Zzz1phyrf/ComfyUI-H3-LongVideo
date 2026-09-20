@@ -184,6 +184,64 @@ class CoreTests(unittest.TestCase):
         self.assertIn("values.splice(6, 2)", script)
         self.assertIn('"director_mode", "project_id", "segment_index"', script)
 
+    def test_project_manager_contract_is_exposed_in_review(self):
+        script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
+        styles = (ROOT/"web"/"h3lv.css").read_text(encoding="utf-8")
+        routes_source = (ROOT/"routes.py").read_text(encoding="utf-8")
+        self.assertIn('actionButton(projectRow, "管理项目"', script)
+        self.assertIn('request("/h3lv/projects/manage")', script)
+        self.assertIn('request("/h3lv/projects/delete"', script)
+        self.assertIn("同时删除最终合成视频", script)
+        self.assertIn("最终合成视频默认保留", script)
+        self.assertIn("全选当前筛选", script)
+        self.assertIn("selectAll.indeterminate", script)
+        self.assertIn(".h3lv-project-manager-panel", styles)
+        self.assertIn(".h3lv-project-manager-select-all", styles)
+        self.assertIn('@routes.get("/h3lv/projects/manage")', routes_source)
+        self.assertIn('@routes.post("/h3lv/projects/delete")', routes_source)
+
+    def test_project_storage_deletion_keeps_finals_unless_requested(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base/"projects"
+            finals = base/"final_videos"
+            mirrors = base/"input"/core.REFERENCE_MIRROR_ROOT
+            finals.mkdir(parents=True)
+            final = finals/"current.mp4"
+            previous = finals/"previous.mp4"
+            outside = base/"unrelated.mp4"
+            final.write_bytes(b"current-final")
+            previous.write_bytes(b"previous-final")
+            outside.write_bytes(b"must-stay")
+            plan = sample_plan()
+            plan["final_video"] = str(final)
+            plan["final_versions"] = [str(previous), str(outside)]
+            core.write_plan(root, plan)
+            project_file = core.project_path(root, plan["id"])/"segments"/"clip.mp4"
+            project_file.parent.mkdir(parents=True)
+            project_file.write_bytes(b"segment-cache")
+            mirror_file = mirrors/plan["id"]/"ref.png"
+            mirror_file.parent.mkdir(parents=True)
+            mirror_file.write_bytes(b"reference-mirror")
+
+            entry = routes.project_storage_entry(root, plan["id"], finals, mirrors)
+            self.assertTrue(entry["has_final"])
+            self.assertEqual(entry["final_bytes"], final.stat().st_size + previous.stat().st_size)
+            self.assertGreaterEqual(entry["project_bytes"], project_file.stat().st_size + mirror_file.stat().st_size)
+            routes.remove_project_storage(entry)
+            self.assertFalse(core.project_path(root, plan["id"]).exists())
+            self.assertFalse((mirrors/plan["id"]).exists())
+            self.assertTrue(final.is_file())
+            self.assertTrue(previous.is_file())
+            self.assertTrue(outside.is_file())
+
+            core.write_plan(root, plan)
+            entry = routes.project_storage_entry(root, plan["id"], finals, mirrors)
+            routes.remove_project_storage(entry, delete_final=True)
+            self.assertFalse(final.exists())
+            self.assertFalse(previous.exists())
+            self.assertTrue(outside.is_file())
+
     def test_final_output_has_vhs_preview_descriptor(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
@@ -994,6 +1052,41 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(analysis["phrases"]), 3)
         self.assertTrue(any(r["boundary_kind"] in {"phrase_gap", "quiet", "section"} for r in rows[:-1]))
 
+    def test_isolated_asr_timestamp_anomaly_is_quarantined_not_deleted(self):
+        suspicious_text = "优优独播剧场——YoYo Television Series Exclusive"
+        transcript = {"segments": [
+            {"start": 11.4, "end": 27.54, "text": suspicious_text, "words": [
+                {"word": "优", "start": 11.4, "end": 12.8, "probability": .95},
+                {"word": "独", "start": 14.2, "end": 18.3, "probability": .99},
+                {"word": "场", "start": 20.1, "end": 20.12, "probability": .99},
+                {"word": " Series", "start": 26.72, "end": 26.74, "probability": .99},
+            ]},
+            {"start": 30.16, "end": 31.32, "text": "正常歌词", "words": [
+                {"word": "正常歌词", "start": 30.16, "end": 31.32, "probability": .95},
+            ]},
+        ]}
+        audited = core.audit_asr_transcript(transcript, 40)
+        self.assertTrue(audited["segments"][0]["suspicious"])
+        self.assertEqual(audited["suspicious_segments"][0]["text"], suspicious_text)
+        self.assertEqual(transcript["segments"][0]["text"], suspicious_text)
+        rows, analysis = core.segmentation(
+            np.zeros((4000, 1), dtype=np.float32), 100, audited, "singing", 15, 11,
+            return_analysis=True)
+        self.assertFalse(any(suspicious_text in row["text"] for row in rows))
+        self.assertTrue(any(suspicious_text in row["asr_suspicious_text"] for row in rows))
+        self.assertEqual(analysis["asr_suspicions"][0]["text"], suspicious_text)
+
+    def test_connected_long_sung_words_are_not_quarantined(self):
+        transcript = {"segments": [
+            {"start": 5, "end": 9, "text": "长音", "words": [
+                {"word": "长音", "start": 5, "end": 9, "probability": .98}]},
+            {"start": 9.1, "end": 11, "text": "下一句", "words": [
+                {"word": "下一句", "start": 9.1, "end": 11, "probability": .98}]},
+        ]}
+        audited = core.audit_asr_transcript(transcript, 20)
+        self.assertFalse(audited["segments"][0].get("suspicious", False))
+        self.assertEqual(audited["suspicious_segments"], [])
+
     def test_word_interior_is_avoided_when_safe_cut_exists(self):
         sr = 1000
         voice = np.full((18000, 1), .3, dtype=np.float32)
@@ -1346,7 +1439,14 @@ class ReferenceImageTests(unittest.TestCase):
         self.assertIn('visualTypeSelect.onchange = async () =>', script)
         self.assertIn("切换画面类型会重写当前导演简报", script)
         self.assertNotIn('actionButton(controls, "保存草稿"', script)
-        self.assertIn('title: "放弃未保存的修改？"', script)
+        self.assertIn('title: "保存修改后关闭？"', script)
+        self.assertIn('confirmText: "保存并确认后关闭"', script)
+        self.assertIn('secondaryText: "不保存并关闭"', script)
+        self.assertIn('if (decision !== "secondary") await saveAndApprove();', script)
+        self.assertIn("参考图是否齐全会在开始生成时检查", script)
+        approve_source = routes_source.split('@routes.post("/h3lv/project/{project_id}/approve")', 1)[1]
+        approve_source = approve_source.split('@routes.post("/h3lv/project/{project_id}/refs")', 1)[0]
+        self.assertNotIn("require=True", approve_source)
         self.assertIn('brief_matches_visual_type:true', script)
         self.assertIn('["atmosphere", "人物氛围表演"]', script)
         self.assertNotIn("画面类型", materials_script)
@@ -1362,6 +1462,12 @@ class ReferenceImageTests(unittest.TestCase):
         self.assertNotIn('throw new Error("当前工作流还没有接出 ref_image 槽位', script)
         self.assertIn('.h3lv-button:disabled.is-inherited', styles)
         self.assertIn('add.classList.toggle("is-inherited"', materials_script)
+        self.assertIn('.h3lv-button:disabled.is-unavailable', styles)
+        self.assertIn('mention.classList.toggle("is-unavailable"', materials_script)
+        self.assertIn('copy.disabled = !linked || !hasDefaults', materials_script)
+        self.assertIn('copy.title = !linked ? "当前已经是本段自定义"', materials_script)
+        self.assertIn("疑似 ASR 识别幻觉，已忽略", script)
+        self.assertIn(".h3lv-lyrics.h3lv-asr-suspicious", styles)
         self.assertIn(".h3lv-shot-control", styles)
         self.assertIn('@routes.post("/h3lv/project/{project_id}/refs")', routes_source)
         self.assertIn('@routes.post("/h3lv/project/{project_id}/brief-preview")', routes_source)

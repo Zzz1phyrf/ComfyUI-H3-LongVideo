@@ -12,8 +12,8 @@ from urllib.request import Request, urlopen
 import uuid
 
 from . import director_rules
-from .core import (audio_file, decorate, fingerprint, project_path, read_plan, segmentation,
-                   validate_segment_brief, write_plan)
+from .core import (audio_file, audit_asr_transcript, decorate, fingerprint, project_path,
+                   read_plan, segmentation, validate_segment_brief, write_plan)
 
 
 HDEMUCS_MODEL_URL = "https://download.pytorch.org/torchaudio/models/hdemucs_high_trained.pt"
@@ -323,7 +323,11 @@ class Analyze:
             (directory/name).mkdir(parents=True, exist_ok=True)
         sf.write(audio_file(directory, "source.wav"), mix, sr, subtype="FLOAT")
         sf.write(audio_file(directory, "vocals.wav"), voice, sr, subtype="FLOAT")
-        transcript = run_asr(directory)
+        transcript = audit_asr_transcript(run_asr(directory), len(voice)/sr)
+        transcript_temp = directory/"state"/f".transcript-{uuid.uuid4().hex}.tmp"
+        transcript_temp.write_text(
+            json.dumps(transcript, ensure_ascii=False, indent=2), encoding="utf-8")
+        transcript_temp.replace(directory/"state"/"transcript.json")
         rows, analysis = segmentation(voice, sr, transcript, mode, float(max_seconds),
                                       float(target_seconds), mix_audio=mix, return_analysis=True)
         analysis_temp = directory/"state"/f".analysis-{uuid.uuid4().hex}.tmp"
@@ -346,7 +350,10 @@ class Analyze:
             "audio_structure": audio_structure,
             "segments": [dict(row, reference_source="default") for row in rows], "approved": False,
             "run_status": "draft", "warnings": ["ASR 文字和时间戳未经校对；请试听风险切点。",
-            "气口、拖音和无人声段是声学估计；无文字不代表无人声。"]}
+            "气口、拖音和无人声段是声学估计；无文字不代表无人声。"]
+            + ([f"检测到 {len(transcript.get('suspicious_segments') or [])} 条疑似 ASR 识别幻觉，"
+                "已保留原文但不参与切点和人声判断。"]
+               if transcript.get("suspicious_segments") else [])}
         plan = decorate(plan)
         reconstructed = np.concatenate([mix[r["start_sample"]:r["end_sample"]] for r in plan["segments"]])
         if not np.array_equal(reconstructed, mix):

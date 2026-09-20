@@ -230,6 +230,63 @@ def waveform_peaks(audio, bins=1200):
     return [round(min(1, value/max(scale, 1e-9)), 4) for value in peaks]
 
 
+def audit_asr_transcript(transcript, duration, silence_threshold=2.0):
+    """Quarantine isolated Whisper timestamp anomalies without deleting raw text."""
+    result = copy.deepcopy(transcript or {})
+    segments = list(result.get("segments") or [])
+    duration = max(0.0, float(duration or 0))
+
+    def lexical_words(segment):
+        words = []
+        for word in segment.get("words") or []:
+            value = str(word.get("word") or "").strip()
+            if any(character.isalnum() or "\u4e00" <= character <= "\u9fff"
+                   for character in value):
+                words.append(word)
+        return words[:8]
+
+    for index, segment in enumerate(segments):
+        segment.pop("suspicious", None)
+        segment.pop("suspicion_reason", None)
+        words = lexical_words(segment)
+        if not words:
+            continue
+        score = 0.0
+        for word in words:
+            probability = float(word.get("probability") or 0)
+            word_duration = max(0.0, float(word.get("end") or 0)
+                                - float(word.get("start") or 0))
+            if probability < .15:
+                score += 1
+            if word_duration < .133:
+                score += (.133-word_duration)*15
+            if word_duration > 2:
+                score += word_duration-2
+        anomalous = score >= 3 or score+.01 >= len(words)
+        previous_end = float(segments[index-1].get("end") or 0) if index else 0.0
+        next_start = (float(segments[index+1].get("start") or duration)
+                      if index+1 < len(segments) else duration)
+        gap_before = max(0.0, float(segment.get("start") or 0)-previous_end)
+        gap_after = max(0.0, next_start-float(segment.get("end") or 0))
+        if anomalous and gap_before > silence_threshold and gap_after > silence_threshold:
+            segment["suspicious"] = True
+            segment["suspicion_reason"] = (
+                "词级时间戳异常，且前后均存在较长无识别文字区")
+
+    result["segments"] = segments
+    nested_words = [dict(word, suspicious=bool(segment.get("suspicious")))
+                    for segment in segments for word in segment.get("words") or []]
+    if nested_words:
+        result["words"] = nested_words
+    else:
+        result["words"] = [dict(word) for word in result.get("words") or []]
+    result["suspicious_segments"] = [
+        {"start": segment.get("start"), "end": segment.get("end"),
+         "text": segment.get("text", ""), "reason": segment["suspicion_reason"]}
+        for segment in segments if segment.get("suspicious")]
+    return result
+
+
 def zero_crossing(audio, starts, sr):
     mono = _mono(audio)
     signs = mono >= 0
@@ -310,7 +367,11 @@ def segmentation(audio, sr, transcript, mode, maximum, target, mix_audio=None, r
     if not 5 <= maximum <= 15 or not 5 <= target <= maximum:
         raise ValueError("首版测试范围：5 ≤ 目标时长 ≤ 最长时长 ≤ 15 秒。")
     starts, db = envelope(audio, sr)
-    lines, words = transcript.get("segments", []), transcript.get("words", [])
+    transcript = audit_asr_transcript(transcript, len(audio)/sr)
+    all_lines = transcript.get("segments", [])
+    lines = [line for line in all_lines if not line.get("suspicious")]
+    suspicious_lines = [line for line in all_lines if line.get("suspicious")]
+    words = [word for word in transcript.get("words", []) if not word.get("suspicious")]
     noise, voice = np.percentile(db, [15, 85])
     dynamic = max(6, float(voice-noise))
     quiet_threshold = min(float(np.median(db)-8), float(noise+.35*dynamic))
@@ -454,11 +515,18 @@ def segmentation(audio, sr, transcript, mode, maximum, target, mix_audio=None, r
     rows = []
     for start, end in zip(boundaries, boundaries[1:]):
         related = [line["text"] for line in lines if start/sr <= (line["start"]+line["end"])/2 < end/sr]
+        suspicious = [line for line in suspicious_lines
+                      if max(start/sr, float(line["start"])) < min(end/sr, float(line["end"]))]
         mask = (starts >= start) & (starts < end)
         level = float(np.median(db[mask])) if mask.any() else -120
+        warnings = list(candidates[end]["warnings"])
+        if suspicious:
+            warnings.insert(0, "疑似 ASR 识别幻觉，已从切点和人声判断中忽略")
         rows.append({"start_sample": start, "end_sample": end, "text": " / ".join(related),
+                     "asr_suspicious_text": " / ".join(str(line.get("text") or "").strip()
+                                                         for line in suspicious),
                      "energy_db": level, "reason": candidates[end]["reason"],
-                     "warnings": list(candidates[end]["warnings"]),
+                     "warnings": warnings,
                      "boundary_kind": candidates[end]["kind"],
                      "boundary_confidence": round(float(candidates[end]["confidence_score"]), 3),
                      "vocal_state": "含识别人声" if related else "人声状态不确定"})
@@ -476,6 +544,7 @@ def segmentation(audio, sr, transcript, mode, maximum, target, mix_audio=None, r
                      "text": s["text"]} for s in lines],
         "protected_words": [{"start": round(float(w["start"]), 3), "end": round(float(w["end"]), 3),
                              "text": w["word"]} for w in words],
+        "asr_suspicions": list(transcript.get("suspicious_segments") or []),
         "sections": sections, "rhythm": rhythm, "candidates": diagnostics,
         "thresholds_db": {"quiet": round(quiet_threshold, 2), "active": round(active_threshold, 2)},
         "limitations": ["气口、拖音和无人声段均为声学估计，必须试听确认", "节拍仅用于安全候选间的次级择优"]}

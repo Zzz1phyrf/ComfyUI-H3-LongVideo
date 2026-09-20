@@ -69,6 +69,9 @@ def main():
             segments = []
             for segment in iterator:
                 segments.append({"start": segment.start, "end": segment.end, "text": segment.text,
+                    "avg_logprob": getattr(segment, "avg_logprob", None),
+                    "no_speech_prob": getattr(segment, "no_speech_prob", None),
+                    "compression_ratio": getattr(segment, "compression_ratio", None),
                     "words": [{"word": word.word, "start": word.start, "end": word.end,
                                "probability": word.probability} for word in segment.words or []]})
             return {"segments": segments,

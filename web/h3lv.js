@@ -83,6 +83,139 @@ function toast(summary, detail = "", severity = "info") {
   app.extensionManager?.toast?.add({severity, summary, detail, life: 3000});
 }
 
+function formatBytes(value) {
+  let size = Math.max(0, Number(value) || 0);
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) { size /= 1024; index += 1; }
+  return `${size >= 10 || index === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[index]}`;
+}
+
+function projectStatusLabel(value) {
+  return ({draft:"草稿", running:"生成中", pausing:"暂停中", paused:"已暂停",
+    stopping:"停止中", stopped:"已停止", merging:"合成中", completed:"已完成",
+    failed:"失败"})[value] || value;
+}
+
+async function projectManagerDialog(currentId) {
+  const projects = await request("/h3lv/projects/manage");
+  return new Promise(resolve => {
+    const shade = element("div", undefined, document.body,
+      "h3lv-shade h3lv-settings-shade h3lv-project-manager-shade");
+    const panel = element("div", undefined, shade,
+      "h3lv-settings-panel h3lv-project-manager-panel");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-label", "管理分析项目");
+    const title = element("div", undefined, panel, "h3lv-title-row");
+    element("h2", "管理分析项目", title);
+    const close = actionButton(title, "关闭", () => finish(null));
+    element("p", "删除项目会清理分析音频、切分记录、参考图、扩写缓存和分段视频；最终合成视频默认保留。",
+      panel, "h3lv-help h3lv-project-manager-help");
+    const toolbar = element("div", undefined, panel, "h3lv-project-manager-toolbar");
+    const filterLabel = element("label", "显示", toolbar);
+    const filter = element("select", undefined, filterLabel);
+    for (const [value, label] of [["all", "全部"], ["draft", "草稿"],
+      ["completed", "已完成"], ["failed", "失败"]]) {
+      const option = element("option", label, filter); option.value = value;
+    }
+    const selectAllLabel = element("label", undefined, toolbar, "h3lv-project-manager-select-all");
+    const selectAll = element("input", undefined, selectAllLabel); selectAll.type = "checkbox";
+    element("span", "全选当前筛选", selectAllLabel);
+    const list = element("div", undefined, panel, "h3lv-project-manager-list");
+    const empty = element("p", "没有符合当前筛选的项目。", list, "h3lv-project-manager-empty");
+    const selected = new Set();
+    const footer = element("div", undefined, panel, "h3lv-project-manager-footer");
+    const summary = element("strong", "尚未选择项目", footer, "h3lv-project-manager-summary");
+    const includeFinalLabel = element("label", undefined, footer, "h3lv-delete-final-option");
+    const includeFinal = element("input", undefined, includeFinalLabel); includeFinal.type = "checkbox";
+    element("span", "同时删除最终合成视频", includeFinalLabel);
+    const actions = element("div", undefined, footer, "h3lv-actions h3lv-project-manager-actions");
+    actionButton(actions, "取消", () => finish(null));
+    const remove = actionButton(actions, "删除所选项目", async () => {
+      const chosen = projects.filter(item => selected.has(item.id));
+      if (!chosen.length) return;
+      const projectSize = chosen.reduce((sum, item) => sum + item.project_bytes, 0);
+      const finalSize = includeFinal.checked ? chosen.reduce((sum, item) => sum + item.final_bytes, 0) : 0;
+      const finalCopy = includeFinal.checked ? "同时删除这些项目关联的最终合成视频。" : "最终合成视频将保留。";
+      if (!await confirmDialog({
+        title: `删除 ${chosen.length} 个分析项目？`,
+        message: `将永久删除所选项目的分析音频、切分记录、参考图、扩写缓存和分段视频，预计释放 ${formatBytes(projectSize + finalSize)}。\n\n${finalCopy}`,
+        confirmText: "确认删除", confirmClass: "stop", tone: "warning",
+      })) return;
+      const result = await request("/h3lv/projects/delete",
+        {ids:chosen.map(item => item.id), delete_final:includeFinal.checked});
+      toast("分析项目已删除", `已释放约 ${formatBytes(result.reclaimed_bytes)}。`);
+      finish(result);
+    }, "stop");
+    remove.disabled = true;
+
+    let finished = false;
+    function finish(value) {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener("keydown", onKeyDown);
+      shade.remove();
+      resolve(value);
+    }
+    function updateSummary() {
+      const chosen = projects.filter(item => selected.has(item.id));
+      const projectSize = chosen.reduce((sum, item) => sum + item.project_bytes, 0);
+      const finalSize = includeFinal.checked ? chosen.reduce((sum, item) => sum + item.final_bytes, 0) : 0;
+      summary.textContent = chosen.length ? `已选择 ${chosen.length} 个项目 · 预计释放 ${formatBytes(projectSize + finalSize)}` : "尚未选择项目";
+      remove.disabled = chosen.length === 0;
+      const selectable = projects.filter(item => !item.active &&
+        (filter.value === "all" || item.status === filter.value));
+      const selectedCount = selectable.filter(item => selected.has(item.id)).length;
+      selectAll.checked = selectable.length > 0 && selectedCount === selectable.length;
+      selectAll.indeterminate = selectedCount > 0 && selectedCount < selectable.length;
+      selectAll.disabled = selectable.length === 0;
+    }
+    function render() {
+      list.querySelectorAll(".h3lv-project-manager-item").forEach(item => item.remove());
+      const visible = projects.filter(item => filter.value === "all" || item.status === filter.value);
+      empty.hidden = visible.length > 0;
+      for (const project of visible) {
+        const row = element("label", undefined, list,
+          `h3lv-project-manager-item${project.id === currentId ? " is-current" : ""}${project.active ? " is-active" : ""}`);
+        const checkbox = element("input", undefined, row); checkbox.type = "checkbox";
+        checkbox.checked = selected.has(project.id); checkbox.disabled = project.active;
+        checkbox.onchange = () => {
+          if (checkbox.checked) selected.add(project.id); else selected.delete(project.id);
+          updateSummary();
+        };
+        const copy = element("div", undefined, row, "h3lv-project-manager-copy");
+        const heading = element("div", undefined, copy, "h3lv-project-manager-heading");
+        const mode = project.mode === "speaking" ? "口播" : "唱歌";
+        element("strong", `${new Date(project.created*1000).toLocaleString()} · ${mode} · ${project.duration.toFixed(2)}s · ${project.count}段`, heading);
+        if (project.id === currentId) element("span", "当前", heading, "h3lv-manager-current");
+        element("span", project.id.slice(0,8), copy, "h3lv-project-manager-id");
+        const state = element("span", project.active ? "正在运行" : projectStatusLabel(project.status), row,
+          `h3lv-project-manager-state state-${project.status}`);
+        if (project.active) state.title = "请等待生成或合成任务结束后再删除";
+        const storage = element("div", undefined, row, "h3lv-project-manager-storage");
+        element("strong", formatBytes(project.project_bytes), storage);
+        element("span", project.has_final ? `成片 ${formatBytes(project.final_bytes)}（默认保留）` : "无最终成片", storage);
+      }
+      updateSummary();
+    }
+    filter.onchange = render;
+    selectAll.onchange = () => {
+      const selectable = projects.filter(item => !item.active &&
+        (filter.value === "all" || item.status === filter.value));
+      for (const project of selectable) {
+        if (selectAll.checked) selected.add(project.id); else selected.delete(project.id);
+      }
+      render();
+    };
+    includeFinal.onchange = updateSummary;
+    const onKeyDown = event => { if (event.key === "Escape") finish(null); };
+    window.addEventListener("keydown", onKeyDown);
+    shade.onclick = event => { if (event.target === shade) finish(null); };
+    render(); queueMicrotask(() => close.focus());
+  });
+}
+
 function editPromptDialog(index, value) {
   return new Promise(resolve => {
     const shade = element("div", undefined, document.body,
@@ -391,28 +524,56 @@ async function openReview(owner) {
   const titleRow = element("div", undefined, header, "h3lv-title-row");
   element("h2", "H3 长视频 · 音频切分审核", titleRow);
   actionButton(titleRow, "关闭", async () => {
-    if (dirty && !await confirmDialog({
-      title: "放弃未保存的修改？",
-      message: "切点、参考图、画面类型和提示词修改都尚未保存。",
-      confirmText: "放弃修改",
-      confirmClass: "stop",
-      tone: "warning",
-    })) return;
+    if (dirty) {
+      const decision = await confirmDialog({
+        title: "保存修改后关闭？",
+        message: "切点、画面类型、导演简报或素材设置还有未保存的修改。可以保存并确认分段后关闭；参考图是否齐全会在开始生成时检查。",
+        confirmText: "保存并确认后关闭",
+        secondaryText: "不保存并关闭",
+        secondaryClass: "stop",
+        tone: "warning",
+      });
+      if (!decision) return;
+      if (decision !== "secondary") await saveAndApprove();
+    }
     canvas.disposeTimeline?.();
     shade.remove();
   }, "h3lv-close");
   const projectRow = element("div", undefined, header, "h3lv-project-row");
   const selectLabel = element("label", "分析项目", projectRow);
   const select = element("select", undefined, selectLabel);
-  const projects = await request("/h3lv/projects");
-  for (const project of projects) {
-    const mode = project.mode === "speaking" ? "口播" : "唱歌";
-    const option = element("option", `${new Date(project.created*1000).toLocaleString()} · ${mode} · ${project.duration.toFixed(2)}s · ${project.count}段 · ${project.id.slice(0,8)}`, select);
-    option.value = project.id;
+  let projects = await request("/h3lv/projects");
+  function populateProjects(preferredId = select.value) {
+    select.replaceChildren();
+    for (const project of projects) {
+      const mode = project.mode === "speaking" ? "口播" : "唱歌";
+      const option = element("option", `${new Date(project.created*1000).toLocaleString()} · ${mode} · ${project.duration.toFixed(2)}s · ${project.count}段 · ${project.id.slice(0,8)}`, select);
+      option.value = project.id;
+    }
+    if (projects.some(project => project.id === preferredId)) select.value = preferredId;
   }
   const widget = owner.widgets?.find(item => item.name === "project_id");
   const preferred = owner.properties?.h3lv_project || widget?.value;
-  if (projects.some(project => project.id === preferred)) select.value = preferred;
+  populateProjects(preferred);
+  actionButton(projectRow, "管理项目", async () => {
+    if (dirty) throw new Error("请先保存当前修改，或关闭面板放弃修改后再管理项目。");
+    const currentId = select.value;
+    const result = await projectManagerDialog(currentId);
+    if (!result?.deleted?.length) return;
+    if (result.deleted.includes(currentId)) {
+      if (widget) widget.value = "";
+      owner.properties = {...owner.properties, h3lv_project:""};
+      owner.setDirtyCanvas?.(true, true);
+      clearVideoNodePreview();
+      canvas.disposeTimeline?.();
+      shade.remove();
+      toast("当前分析项目已删除", "请重新分析音频，或再次打开面板选择其他项目。");
+      return;
+    }
+    projects = await request("/h3lv/projects");
+    populateProjects(currentId);
+    await load();
+  }, "project-manager");
   const defaultRow = element("label", "默认参考图张数", projectRow, "h3lv-default-references");
   const defaultSelect = element("select", undefined, defaultRow);
   defaultSelect.onchange = () => { if (plan) markDirty(); };
@@ -580,6 +741,10 @@ async function openReview(owner) {
         video.src = outputPreviewUrl(row.video_preview);
       }
       element("p", row.text || "未识别出文字，人声状态仍需试听确认。", inner, "h3lv-lyrics");
+      if (row.asr_suspicious_text) {
+        element("p", `疑似 ASR 识别幻觉，已忽略：${row.asr_suspicious_text}`,
+          inner, "h3lv-lyrics h3lv-asr-suspicious");
+      }
       if (row.warnings?.length) {
         const warningList = element("ul", undefined, inner, "h3lv-warnings");
         row.warnings.forEach(warning => element("li", warning, warningList));
@@ -900,14 +1065,20 @@ async function openReview(owner) {
     }
     return revision;
   }
+  async function saveAndApprove() {
+    const revision = await saveDraft();
+    const approved = await request(endpoint("/approve"), {revision});
+    plan = approved;
+    dirty = false;
+    return approved;
+  }
   actionButton(controls, "保存并确认", async () => {
     if (!await confirmDialog({
       title: "保存并确认分段？",
       message: "请确认已经试听并检查所有切点。保存后，这个项目将允许开始顺序生成。",
       confirmText: "保存并确认",
     })) return;
-    const revision = await saveDraft();
-    try {await request(endpoint("/approve"), {revision});}
+    try {await saveAndApprove();}
     finally {await load();}
   }, "primary");
   actionButton(controls, "重新分析分段", async () => {

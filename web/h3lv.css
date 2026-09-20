@@ -59,6 +59,7 @@
 .h3lv-button:hover { border-color: #7e8b9f; background: #333b47; }
 .h3lv-button:disabled { opacity: .5; cursor: wait; }
 .h3lv-button:disabled.is-inherited { cursor: not-allowed; }
+.h3lv-button:disabled.is-unavailable { cursor: not-allowed; }
 .h3lv-button.primary { border-color: #3286d7; background: #1769aa; }
 .h3lv-button.run {
   padding: 8px 17px; border-color: #40d986; background: linear-gradient(180deg, #1b9f60, #117747);
@@ -124,6 +125,7 @@
   display: block; width: 100%; height: 176px; object-fit: contain; background: #080a0e;
 }
 .h3lv-lyrics { margin: 0 0 8px; color: #f0f3f7; }
+.h3lv-lyrics.h3lv-asr-suspicious { color: #ffbf7a; }
 .h3lv-warnings { margin: 6px 0 10px; padding-left: 22px; color: #ffbf7a; }
 .h3lv-metrics { margin: 9px 0; color: #aeb8c6; }
 .h3lv-audio-label { margin: 10px 0 5px; color: #aeb8c6; font-size: 12px; }
@@ -132,6 +134,70 @@
 .h3lv-button.prompt-edit { border-color: #4f9fe8; color: #d8ecff; background: #203b55; }
 .h3lv-prompt-editor-panel { width: min(1180px, 94vw); height: min(820px, 92vh); display: flex; flex-direction: column; }
 .h3lv-prompt-editor-panel > .h3lv-help { margin: 10px 0; }
+.h3lv-button.project-manager { margin-left: 2px; }
+.h3lv-project-manager-panel {
+  width: min(980px, 94vw); max-height: 90vh; padding: 0; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.h3lv-project-manager-panel > .h3lv-title-row { padding: 18px 18px 0; }
+.h3lv-project-manager-help {
+  margin: 12px 18px 0; padding: 10px 12px; border: 1px solid #3f4b5a; border-radius: 7px;
+  background: #151a22; color: #bfc9d7; font-size: 13px;
+}
+.h3lv-project-manager-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 18px 10px;
+}
+.h3lv-project-manager-toolbar label { display: flex; align-items: center; gap: 8px; color: #b9c4d2; }
+.h3lv-project-manager-select-all { cursor: pointer; }
+.h3lv-project-manager-select-all input { width: 16px; height: 16px; margin: 0; accent-color: #4f9fe8; }
+.h3lv-project-manager-select-all:has(input:disabled) { cursor: not-allowed; opacity: .55; }
+.h3lv-project-manager-toolbar select {
+  min-width: 130px; padding: 6px 9px; border: 1px solid #566274; border-radius: 6px;
+  background: #11151c; color: #edf1f7;
+}
+.h3lv-project-manager-list {
+  min-height: 120px; max-height: 52vh; margin: 0 18px; overflow: auto;
+  border: 1px solid #3f4855; border-radius: 8px; background: #141920;
+}
+.h3lv-project-manager-empty { margin: 0; padding: 32px; color: #9ba7b6; text-align: center; }
+.h3lv-project-manager-item {
+  display: grid; grid-template-columns: 22px minmax(280px, 1fr) 92px minmax(150px, auto);
+  align-items: center; gap: 12px; min-height: 62px; padding: 10px 12px;
+  border-bottom: 1px solid #343d49; cursor: pointer;
+}
+.h3lv-project-manager-item:last-child { border-bottom: 0; }
+.h3lv-project-manager-item:hover { background: #1d242d; }
+.h3lv-project-manager-item.is-current { box-shadow: inset 3px 0 #4f9fe8; background: #192530; }
+.h3lv-project-manager-item.is-active { cursor: not-allowed; opacity: .68; }
+.h3lv-project-manager-item input { width: 16px; height: 16px; margin: 0; accent-color: #4f9fe8; }
+.h3lv-project-manager-copy { min-width: 0; }
+.h3lv-project-manager-heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.h3lv-project-manager-heading strong { overflow: hidden; color: #eef2f8; text-overflow: ellipsis; white-space: nowrap; }
+.h3lv-project-manager-id { color: #8794a5; font: 12px/1.4 Consolas, monospace; }
+.h3lv-manager-current {
+  flex: 0 0 auto; padding: 2px 6px; border-radius: 999px;
+  background: rgba(79,159,232,.18); color: #9fd2ff; font-size: 11px;
+}
+.h3lv-project-manager-state {
+  justify-self: start; padding: 3px 7px; border-radius: 999px;
+  background: rgba(147,161,180,.15); color: #c5cfdb; font-size: 12px; white-space: nowrap;
+}
+.h3lv-project-manager-state.state-completed { background: rgba(39,169,101,.18); color: #90efba; }
+.h3lv-project-manager-state.state-failed { background: rgba(219,70,70,.18); color: #ff9c9c; }
+.h3lv-project-manager-state.state-running,
+.h3lv-project-manager-state.state-merging { background: rgba(79,159,232,.18); color: #9fd2ff; }
+.h3lv-project-manager-storage { display: grid; justify-items: end; gap: 2px; font-variant-numeric: tabular-nums; }
+.h3lv-project-manager-storage strong { color: #edf1f7; }
+.h3lv-project-manager-storage span { color: #96a3b3; font-size: 11px; text-align: right; }
+.h3lv-project-manager-footer {
+  display: grid; grid-template-columns: minmax(220px, 1fr) auto; align-items: center; gap: 10px 18px;
+  margin-top: 14px; padding: 14px 18px 18px; border-top: 1px solid #3c4552;
+}
+.h3lv-project-manager-summary { color: #dce4ee; }
+.h3lv-delete-final-option { display: flex; align-items: center; gap: 7px; color: #ffc9cc; cursor: pointer; }
+.h3lv-delete-final-option input { width: 16px; height: 16px; accent-color: #c75159; }
+.h3lv-project-manager-actions { grid-column: 1 / -1; justify-content: flex-end; }
 .h3lv-prompt-editor {
   flex: 1; min-height: 0; width: 100%; box-sizing: border-box; padding: 14px;
   border: 1px solid #566274; border-radius: 7px; resize: none;
@@ -152,6 +218,11 @@
   .h3lv-selected-bar audio { width: 100%; }
   .h3lv-card-body.has-preview { min-height: 0; padding-right: 14px; }
   .h3lv-segment-preview { position: static; width: 100%; margin: 0 0 12px; }
+  .h3lv-project-manager-panel { width: 100vw; max-height: 100vh; border-radius: 0; }
+  .h3lv-project-manager-item { grid-template-columns: 22px 1fr auto; }
+  .h3lv-project-manager-storage { grid-column: 2 / -1; justify-items: start; }
+  .h3lv-project-manager-storage span { text-align: left; }
+  .h3lv-project-manager-footer { grid-template-columns: 1fr; }
 }
 
 .h3lv-timeline-tools { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-bottom:8px; }
