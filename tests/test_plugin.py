@@ -58,6 +58,28 @@ def sample_plan():
 
 
 class CoreTests(unittest.TestCase):
+    def test_new_analysis_enables_material_editor_without_canvas_connections(self):
+        import torch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audio = {"waveform": torch.zeros((1, 1, 1000)), "sample_rate": 100}
+            rows = [{"start_sample": 0, "end_sample": 1000, "energy_db": -30,
+                     "text": ""}]
+            analysis = {"sections": [], "rhythm": {}}
+            rules = {"config": director_rules.default_config(), "revision": "test-rules"}
+            with patch.object(nodes, "data_root", return_value=root), \
+                 patch.object(nodes, "rules_path", return_value=root/"rules"), \
+                 patch.object(nodes.director_rules, "read_rules", return_value=rules), \
+                 patch.object(nodes, "run_asr", return_value={"segments": [], "words": []}), \
+                 patch.object(nodes, "segmentation", return_value=(rows, analysis)):
+                result = nodes.Analyze().analyze(
+                    audio, "speaking", 15, 11, "", "", vocals=audio)
+            plan = core.read_plan(root, result["result"][0])
+        self.assertEqual(plan["materials_version"], 1)
+        self.assertEqual(plan["default_refs"], [])
+        self.assertEqual(plan["default_material_note"], "")
+        self.assertEqual(plan["segments"][0]["reference_source"], "default")
+
     def test_reveal_file_opens_windows_explorer_on_exact_output(self):
         with tempfile.TemporaryDirectory() as directory:
             final = Path(directory)/"final video.mp4"
@@ -1296,8 +1318,12 @@ class ReferenceImageTests(unittest.TestCase):
         self.assertNotIn("画面类型", materials_script)
         self.assertIn("最多 6 张", materials_script)
         self.assertIn(".h3lv-default-materials-header", styles)
-        self.assertIn('element("details", undefined, content, "h3lv-default-materials")', script)
-        self.assertIn('defaultMaterials.open ? "收起" : "展开"', script)
+        self.assertIn('element("section", undefined, content, "h3lv-default-materials")', script)
+        self.assertNotIn('defaultMaterials.open ? "收起" : "展开"', script)
+        self.assertIn("if (!plan.materials_version && !plan.segments.some(row => row.job))", script)
+        self.assertNotIn("owner.outputs?.slice(5).some", script)
+        self.assertIn("addButton.disabled = !referenceLimit", script)
+        self.assertNotIn('throw new Error("当前工作流还没有接出 ref_image 槽位', script)
         self.assertIn('.h3lv-button:disabled.is-inherited', styles)
         self.assertIn('add.classList.toggle("is-inherited"', materials_script)
         self.assertIn(".h3lv-shot-control", styles)

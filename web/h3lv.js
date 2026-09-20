@@ -454,7 +454,7 @@ async function openReview(owner) {
   const selectedAudio = element("audio", undefined, selectedBar);
   selectedAudio.controls = true;
   selectedAudio.preload = "metadata";
-  const defaultMaterials = element("details", undefined, content, "h3lv-default-materials");
+  const defaultMaterials = element("section", undefined, content, "h3lv-default-materials");
   let defaultEditor = null;
   const segmentsBody = element("section", undefined, content, "h3lv-segments");
   let plan = null;
@@ -678,13 +678,11 @@ async function openReview(owner) {
       referenceHeader.append(fileInput);
       const addButton = actionButton(referenceHeader,
         referenceLimit ? `＋ 上传参考图（上限 ${referenceLimit} 张）` : "＋ 上传参考图", async () => {
-          if (!referenceLimit) {
-            throw new Error("当前工作流还没有接出 ref_image 槽位。请先在画布上用“加载图像”节点接到 "
-              + "MiniMax H3 视频参考节点的 ref_image_0、ref_image_1……");
-          }
           if (rowRefs.length >= referenceLimit) throw new Error(`本段最多 ${referenceLimit} 张参考图。`);
           fileInput.click();
         }, "reference-add");
+      addButton.disabled = !referenceLimit;
+      addButton.title = referenceLimit ? "" : "当前画布没有接出 ref_image 槽位";
       actionButton(referenceHeader, "套用到所有分段", async () => {
         if (!await confirmDialog({
           title: "把本段的参考图套用到所有分段？",
@@ -780,21 +778,15 @@ async function openReview(owner) {
       return;
     }
     plan = await request(endpoint());
-    if (!plan.materials_version && !plan.segments.some(row => row.job) && owner.outputs?.slice(5).some(output => output.links?.length)) {
+    if (!plan.materials_version && !plan.segments.some(row => row.job)) {
       plan = await request(endpoint("/edit"), {revision:plan.revision, materials:{refs:[], note:""},
         segments:plan.segments.map(row => ({...row, reference_source:row.refs?.length ? "custom" : "default"}))});
     }
     syncDefaultReferenceControl();
     defaultMaterials.replaceChildren();
-    const defaultHeader = element("summary", undefined, defaultMaterials, "h3lv-default-materials-header");
+    const defaultHeader = element("div", undefined, defaultMaterials, "h3lv-default-materials-header");
     const defaultHeaderText = element("div", undefined, defaultHeader, "h3lv-default-materials-title");
     element("h3", "项目默认参考图", defaultHeaderText);
-    element("span", defaultMaterials.open ? "收起" : "展开", defaultHeader,
-      "h3lv-default-materials-toggle");
-    defaultMaterials.ontoggle = () => {
-      const toggle = defaultHeader.querySelector(".h3lv-default-materials-toggle");
-      if (toggle) toggle.textContent = defaultMaterials.open ? "收起" : "展开";
-    };
     if (plan.materials_version) {
       element("p", "上传一次，所有使用默认的分段自动继承；本段自定义的图片保持独立。",
         defaultHeaderText, "h3lv-help");

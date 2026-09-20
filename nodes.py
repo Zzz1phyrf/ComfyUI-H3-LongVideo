@@ -339,11 +339,12 @@ class Analyze:
             "revision": 1, "created": time.time(),
             "mode": mode, "max_seconds": float(max_seconds), "target_seconds": float(target_seconds),
             "sample_rate": sr, "samples": len(mix), "duration": len(mix)/sr,
+            "materials_version": 1, "default_refs": [], "default_material_note": "",
             "director": {"mode": "rule", "performance_intensity": "auto",
                          "note": "", "rule_config": rules["config"],
                          "schedule_seed": audio_seed, "rule_revision": rules["revision"]},
             "audio_structure": audio_structure,
-            "segments": rows, "approved": False,
+            "segments": [dict(row, reference_source="default") for row in rows], "approved": False,
             "run_status": "draft", "warnings": ["ASR 文字和时间戳未经校对；请试听风险切点。",
             "气口、拖音和无人声段是声学估计；无文字不代表无人声。"]}
         plan = decorate(plan)
