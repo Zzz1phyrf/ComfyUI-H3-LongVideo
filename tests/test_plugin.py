@@ -199,6 +199,7 @@ class CoreTests(unittest.TestCase):
     def test_unified_node_preserves_segment_output_contract(self):
         self.assertIs(nodes.NODE_CLASS_MAPPINGS["H3LVUnified"], nodes.Unified)
         self.assertEqual(set(nodes.NODE_CLASS_MAPPINGS), {"H3LVUnified", "H3LVPromptExpand"})
+        self.assertEqual(nodes.NODE_DISPLAY_NAME_MAPPINGS["H3LVPromptExpand"], "H3 长视频 · 分镜提示词生成器")
         self.assertNotIn("H3LVAnalyze", nodes.NODE_DISPLAY_NAME_MAPPINGS)
         self.assertNotIn("H3LVLoadSegment", nodes.NODE_DISPLAY_NAME_MAPPINGS)
         self.assertEqual(nodes.Unified.RETURN_TYPES, nodes.LoadSegment.RETURN_TYPES)

@@ -1,4 +1,5 @@
 import { api } from "../../scripts/api.js";
+import {insertImageMention, mentionedImageNumbers, remapImageMentions} from "./material_mentions.js";
 
 function el(tag, parent, text) {
   const item = document.createElement(tag);
@@ -22,21 +23,55 @@ export function materialEditor(parent, {projectId, index = 0, refs = [], note = 
   const upload = el("input", box); upload.type = "file"; upload.accept = "image/*"; upload.multiple = true; upload.hidden = true;
   const add = el("button", actions, "＋ 上传图片（最多 6 张）"); add.type = "button"; add.className = "h3lv-button";
   add.onclick = () => upload.click();
+  const mention = el("button", actions, "@ 引用图片"); mention.type = "button"; mention.className = "h3lv-button h3lv-mention-button";
   const textarea = el("textarea", box); textarea.className = "h3lv-material-note"; textarea.value = note;
-  textarea.placeholder = "按顺序说明用途，例如：图1为人物三视图，图2为背景；三视图是同一个人。";
-  const hint = el("p", box, "图片顺序就是扩写与 H3 的图号。更换或排序后请核对用途说明。"); hint.className = "h3lv-help";
+  textarea.placeholder = "输入 @ 选择图片，例如：@图1 为人物三视图，@图2 为背景；三视图是同一个人。";
+  const picker = el("div", box); picker.className = "h3lv-mention-picker"; picker.hidden = true;
+  const hint = el("p", box, "输入 @ 或点击“引用图片”可插入图片引用；图片重排时引用会跟随原图。"); hint.className = "h3lv-help";
   let customNote = note;
   let uploading = false;
-  textarea.oninput = () => {customNote = textarea.value; changed();};
+  let mentionRange = null;
+  const currentNames = () => inherited() ? defaults().refs : value;
+  function closePicker() {picker.hidden = true; mentionRange = null;}
+  function renderPicker() {
+    picker.replaceChildren();
+    currentNames().forEach((name, position) => {
+      const choice = el("button", picker); choice.type = "button"; choice.className = "h3lv-mention-choice";
+      const image = el("img", choice); image.src = api.apiURL(`/h3lv/project/${projectId}/refs/${encodeURIComponent(name)}`); image.alt = `图${position+1}`;
+      el("span", choice, `@图${position+1}`);
+      choice.onclick = () => {
+        const range = mentionRange || {start:textarea.selectionStart, end:textarea.selectionEnd};
+        const inserted = insertImageMention(customNote, range.start, range.end, position+1);
+        customNote = inserted.value; textarea.value = customNote; closePicker(); changed();
+        textarea.focus(); textarea.setSelectionRange(inserted.cursor, inserted.cursor);
+      };
+    });
+  }
+  function openPicker(replaceTypedAt = false) {
+    if (textarea.disabled || !currentNames().length) return;
+    const end = textarea.selectionStart;
+    mentionRange = {start:replaceTypedAt ? Math.max(0, end-1) : end, end:textarea.selectionEnd};
+    renderPicker(); picker.hidden = false;
+  }
+  mention.onclick = () => {textarea.focus(); openPicker(false);};
+  textarea.oninput = () => {
+    customNote = textarea.value; changed();
+    const cursor = textarea.selectionStart;
+    if (cursor > 0 && textarea.value[cursor-1] === "@") openPicker(true);
+    else closePicker();
+  };
+  textarea.onkeydown = event => {if (event.key === "Escape") closePicker();};
   const inherited = () => defaults && sourceSelect.value === "default";
   function render() {
     const linked = inherited();
     const names = linked ? defaults().refs : value;
     textarea.value = linked ? defaults().note : customNote;
-    textarea.disabled = Boolean(linked); add.disabled = Boolean(linked) || uploading;
+    textarea.disabled = Boolean(linked); add.disabled = Boolean(linked) || uploading; mention.disabled = Boolean(linked) || !names.length;
     add.classList.toggle("is-inherited", Boolean(linked));
     add.title = linked ? "选择“本段自定义”后可上传图片" : "";
+    mention.title = linked ? "请在项目默认参考图区编辑默认素材说明" : (!names.length ? "请先上传图片" : "插入当前图片的 @图号引用");
     upload.disabled = Boolean(linked) || uploading;
+    closePicker();
     list.replaceChildren();
     if (!names.length) el("p", list, linked ? "项目默认图尚未上传。" : "请为本段上传参考图。");
     names.forEach((name, position) => {
@@ -49,8 +84,16 @@ export function materialEditor(parent, {projectId, index = 0, refs = [], note = 
         const button = el("button", tools, title); button.type = "button"; button.className = "h3lv-reference-tool";
         button.disabled = step !== 0 && (position+step < 0 || position+step >= value.length);
         button.onclick = () => {
-          if (!step) value.splice(position, 1);
+          const before = [...value];
+          if (!step) {
+            if (mentionedImageNumbers(customNote).has(position+1)) {
+              window.alert(`素材说明正在引用 @图${position+1}，请先删除该引用再移除图片。`);
+              return;
+            }
+            value.splice(position, 1);
+          }
           else [value[position], value[position+step]] = [value[position+step], value[position]];
+          customNote = remapImageMentions(customNote, before, value);
           render(); changed();
         };
       }

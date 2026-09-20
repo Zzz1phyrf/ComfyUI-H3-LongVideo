@@ -83,7 +83,7 @@ def register_routes():
     @endpoint
     async def expansion_preview(request):
         from .materials import packet
-        from .expansion import expand, cache_key, validate_prompt
+        from .expansion import expand, cache_key, cache_source, validate_prompt
         payload = await request.json()
         root, pid = data_root(), request.match_info['project_id']
         with LOCK:
@@ -99,8 +99,9 @@ def register_routes():
         args = (material, payload['mode'], payload['model'], payload['rule'], int(payload.get('expansion_revision', 0)))
         key = cache_key(*args)
         if 'text' not in payload:
+            source = cache_source(material, key, payload['mode'])
             text = await asyncio.to_thread(expand, *args)
-            return web.json_response({'text': text, 'key': key})
+            return web.json_response({'text': text, 'key': key, 'source': source})
         text = validate_prompt(str(payload['text']), len(material['paths']))
         if payload.get('key') != key: raise ValueError('扩写设置已变化，请重新预览。')
         with LOCK:

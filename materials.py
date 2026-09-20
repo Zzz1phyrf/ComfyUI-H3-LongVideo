@@ -17,8 +17,6 @@ def effective(plan, row, directory=None, require=False):
         raise ValueError('画面类型无效。')
     if require and not names:
         raise ValueError('本段没有有效参考图，请上传默认图或本段自定义图。')
-    if require and not str(note).strip():
-        raise ValueError('请填写本段参考图用途说明，图号需与图片顺序一致。')
     return {'refs': names, 'material_note': str(note).strip(), 'visual_type': kind}
 
 

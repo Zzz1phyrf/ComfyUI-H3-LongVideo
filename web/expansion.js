@@ -33,7 +33,7 @@ const options = node => ({mode:widget(node,"mode").value, model:widget(node,"mod
   rule:widget(node,"rule").value, expansion_revision:Number(widget(node,"revision").value)});
 
 async function settingsDialog(node) {
-  const {main, status} = dialog("提示词扩写 · API 设置");
+  const {main, status} = dialog("H3 分镜提示词生成器 · API 设置");
   const profile = await request("/h3lv/expansion/settings");
   element("p", main, "配置仅保存在本机，不随工作流导出。更换服务后请填写对应密钥。");
   const addressLabel = element("label", main, "API 基础地址");
@@ -54,8 +54,8 @@ async function settingsDialog(node) {
   button(main, "使用所选模型", status, async () => {if (!models.value) throw new Error("请先选择模型。"); widget(node,"model").value = models.value; node.setDirtyCanvas(true); status.textContent = `已选择 ${models.value}`;});
 }
 async function previewDialog(node) {
-  const {main, status} = dialog("提示词扩写 · 分段预览与编辑");
-  element("p", main, "先在长视频节点保存素材与镜头简报。首次扩写会调用 API；输入不变时复用缓存。修改后保存会要求重新确认该项目。");
+  const {main, status} = dialog("H3 分镜提示词生成器 · 分段预览与编辑");
+  element("p", main, "先在长视频节点保存素材与镜头简报。当前模型、扩写规则和分段内容完全一致时自动读取缓存，否则调用 API 重新生成。修改后保存会要求重新确认该项目。");
   const projects = element("select", main);
   const list = await request("/h3lv/projects");
   for (const p of list) element("option", projects, `${p.mode} · ${p.count}段 · ${p.id.slice(0,8)}`).value = p.id;
@@ -81,11 +81,14 @@ async function previewDialog(node) {
   }
   projects.onchange = () => load().catch(error => status.textContent = error.message);
   segments.onchange = update;
-  button(main, "扩写 / 读取缓存", status, async () => {
+  button(main, "生成提示词（自动复用缓存）", status, async () => {
     if (!plan?.materials_version) throw new Error("请先在长视频面板启用内置素材管理。");
     previewOptions = options(node);
     const result = await request(`/h3lv/project/${plan.id}/expand`, {revision:plan.revision, index:Number(segments.value), ...previewOptions});
-    text.value = result.text; previewKey = result.key; status.textContent = "扩写完成，可以编辑后保存；未编辑的结果已缓存。";
+    text.value = result.text; previewKey = result.key;
+    status.textContent = result.source === "cache" ? "已读取匹配缓存，可以编辑后保存。" :
+      (result.source === "saved" ? "已读取本段保存过的提示词。" :
+      (result.source === "manual" ? "已读取本段导演简报。" : "已通过 API 生成并写入缓存，可以编辑后保存。"));
   });
   button(main, "保存本段提示词", status, async () => {
     if (!previewKey) throw new Error("请先扩写或读取当前设置的缓存。");
@@ -100,6 +103,12 @@ app.registerExtension({name:"H3LV.PromptExpansion", async beforeRegisterNodeDef(
   const original = nodeType.prototype.onNodeCreated;
   nodeType.prototype.onNodeCreated = function() {
     const result = original?.apply(this, arguments);
+    const ruleWidget = widget(this, "rule");
+    if (ruleWidget) {
+      ruleWidget.label = "扩写规则（指导模型如何反推 H3 提示词）";
+      ruleWidget.options = {...ruleWidget.options,
+        tooltip:"这不是本段最终提示词；它会与内置 H3 规则、导演简报、画面类型、声音关系和参考图一起发给模型，指导模型如何组织结果。"};
+    }
     this.addWidget("button", "API 设置与模型选择", null, () => settingsDialog(this).catch(error => window.alert(error.message))).serialize = false;
     this.addWidget("button", "分段扩写预览 / 编辑", null, () => previewDialog(this).catch(error => window.alert(error.message))).serialize = false;
     this.size[0] = Math.max(this.size[0], 380);

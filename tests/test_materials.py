@@ -39,6 +39,12 @@ class MaterialTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'没有有效参考图'):
             materials.effective(self.plan,row,self.directory,require=True)
 
+    def test_packet_allows_empty_material_note(self):
+        self.plan['default_material_note'] = ''
+        packet = materials.packet(self.plan, self.plan['segments'][0], self.directory)
+        self.assertEqual(packet['material_note'], '')
+        self.assertEqual(len(packet['paths']), 2)
+
     def test_images_remain_ordered_and_individual_sizes(self):
         packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)
         images = materials.images(packet)
@@ -74,6 +80,7 @@ class MaterialTests(unittest.TestCase):
 
     def test_vision_cache_and_context_invalidation(self):
         packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)
+        packet['material_note'] = '@图1是人物，@图2是环境'
         with patch.object(expansion,'public_settings',return_value={'base_url':'https://example.test/v1'}), patch.object(expansion,'call',return_value={'choices':[{'message':{'content':TEXT}}]}) as call:
             self.assertEqual(expansion.expand(packet,'vision','m','r'),TEXT)
             expansion.expand(packet,'vision','m','r')
@@ -81,6 +88,7 @@ class MaterialTests(unittest.TestCase):
             content = call.call_args.args[1]['messages'][1]['content']
             self.assertEqual([c['type'] for c in content],['text','image_url','image_url'])
             context = __import__('json').loads(content[0]['text'])
+            self.assertEqual(context['material_note'], '<Picture 1>是人物，<Picture 2>是环境')
             self.assertEqual(context['generation_frames'], self.plan['segments'][0]['generation_frames'])
             self.assertEqual(context['audio_role'], 'vocal')
             self.assertEqual(context['visual_type'], 'performance')
@@ -95,6 +103,15 @@ class MaterialTests(unittest.TestCase):
             expansion.expand(other,'vision','m','r')
             self.assertEqual(call.call_count,3)
 
+    def test_out_of_range_material_mention_is_rejected_before_api_call(self):
+        packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)
+        packet['material_note'] = '@图3是环境'
+        with patch.object(expansion,'public_settings',return_value={'base_url':'https://example.test/v1'}), \
+             patch.object(expansion,'call') as call:
+            with self.assertRaisesRegex(ValueError, '不存在的 @图3'):
+                expansion.expand(packet,'text','m','r')
+            call.assert_not_called()
+
     def test_failed_request_not_cached_or_retried(self):
         packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)
         with patch.object(expansion,'public_settings',return_value={'base_url':'https://example.test/v1'}), patch.object(expansion,'call',side_effect=ValueError('API unavailable')) as call:
@@ -105,6 +122,17 @@ class MaterialTests(unittest.TestCase):
     def test_bad_picture_reference_rejected(self):
         with self.assertRaisesRegex(ValueError,'不存在的图片'):
             expansion.validate_prompt(TEXT.replace('<Picture 1>','<Picture 9>'),2)
+
+    def test_cache_source_reports_exact_match_only(self):
+        packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)
+        with patch.object(expansion,'public_settings',return_value={'base_url':'https://example.test/v1'}):
+            key = expansion.cache_key(packet,'vision','m','r',0)
+            self.assertEqual(expansion.cache_source(packet,key,'vision'),'api')
+            cache = Path(packet['cache_dir']); cache.mkdir(parents=True)
+            (cache/(key+'.json')).write_text('{"text":"cached"}',encoding='utf-8')
+            self.assertEqual(expansion.cache_source(packet,key,'vision'),'cache')
+            packet.update(expanded_key=key, expanded_prompt=TEXT)
+            self.assertEqual(expansion.cache_source(packet,key,'vision'),'saved')
 
     def test_secret_not_returned_and_host_change_clears_old_key(self):
         with patch.object(expansion,'settings_path',return_value=self.directory/'profile.json'):

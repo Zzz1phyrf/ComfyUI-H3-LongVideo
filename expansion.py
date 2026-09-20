@@ -23,6 +23,16 @@ GUARD += '\nThe final sentence of detailed_description must explicitly state: Ev
 EXPAND_LOCK = threading.Lock()
 
 
+def model_material_note(note, count):
+    """Translate editable UI mentions into H3 reference tokens."""
+    def replace(match):
+        number = int(match.group(1))
+        if not 1 <= number <= count:
+            raise ValueError(f'素材说明引用了不存在的 @图{number}。')
+        return f'<Picture {number}>'
+    return re.sub(r'@图\s*(\d+)', replace, str(note or ''))
+
+
 def settings_path():
     from .nodes import user_data_root
     return user_data_root()/'expansion_api.json'
@@ -92,7 +102,16 @@ def cache_key(material, mode, model, rule, revision):
     context = {k: material[k] for k in (
         'hashes','material_note','visual_type','mode','brief','duration',
         'generation_frames','generation_seconds','audio_role','audio_section','audio_role_reason')}
+    context['material_note'] = model_material_note(context['material_note'], len(material['paths']))
     return hashlib.sha256(json.dumps([context, mode, model, rule, revision, public_settings()['base_url'], GUARD], sort_keys=True).encode()).hexdigest()
+
+
+def cache_source(material, key, mode):
+    if material.get('expanded_key') == key and material.get('expanded_prompt'):
+        return 'saved'
+    if mode != 'manual' and (Path(material['cache_dir'])/(key+'.json')).exists():
+        return 'cache'
+    return 'manual' if mode == 'manual' else 'api'
 
 
 def expand(material, mode, model, rule, revision=0):
@@ -109,6 +128,7 @@ def expand(material, mode, model, rule, revision=0):
         context = {k: material[k] for k in (
             'material_note','visual_type','mode','brief','duration',
             'generation_frames','generation_seconds','audio_role','audio_section','audio_role_reason')}
+        context['material_note'] = model_material_note(context['material_note'], len(material['paths']))
         context['pictures'] = [{'number': i+1} for i in range(len(material['paths']))]
         context['input_mode'] = mode
         content = [{'type':'text','text':json.dumps(context, ensure_ascii=False)}]
