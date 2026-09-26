@@ -1,5 +1,7 @@
 # Development consensus: segment materials and separate prompt expansion
 
+Release authorization (2026-09-26): the user accepted their previous singing multi-image tests and requested documentation/example updates and publication to main. This supersedes the development-only publication restriction below. Anchor-guide experiments and separate RunningHub work remain outside this release.
+
 Approved in the current conversation on 2026-09-19. Implementation is authorized.
 
 Output-contract update (2026-09-20): commit `abf363e` intentionally removed the obsolete `segment_brief` output. The current 13-output order is recorded in `HANDOFF.md`; the controller migrates frozen legacy queue snapshots. The earlier first-five-slot plan below is historical and does not describe the current node surface. The shipped example must use the current output order.
