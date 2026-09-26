@@ -2,6 +2,8 @@
 
 Approved in the current conversation on 2026-09-19. Implementation is authorized.
 
+Output-contract update (2026-09-20): commit `abf363e` intentionally removed the obsolete `segment_brief` output. The current 13-output order is recorded in `HANDOFF.md`; the controller migrates frozen legacy queue snapshots. The earlier first-five-slot plan below is historical and does not describe the current node surface. The shipped example must use the current output order.
+
 - Start from merged 2c1361d; work on feature/segment-materials-expander. Do not publish to main during development.
 - Keep the first five H3LVUnified outputs compatible. Use one current-segment material packet plus six image outputs. Controller removes unused H3 image inputs per submission; do not feed black placeholders.
 - Project default references and material note; per-segment explicit inheritance/custom mode. Custom empty is an error, never an implicit fallback. Preserve older canvas-reference workflows until explicitly migrated.

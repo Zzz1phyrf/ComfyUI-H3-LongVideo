@@ -2,7 +2,7 @@
   "id": "e3f2b845-8f2c-4b5a-9caf-eac1029d3e7e",
   "revision": 0,
   "last_node_id": 253,
-  "last_link_id": 504,
+  "last_link_id": 509,
   "nodes": [
     {
       "id": 123,
@@ -396,78 +396,6 @@
       }
     },
     {
-      "id": 137,
-      "type": "LoadImage",
-      "pos": [
-        -2115.8245501779684,
-        5045.918725447774
-      ],
-      "size": [
-        354.96679209285094,
-        433.6315370079392
-      ],
-      "flags": {},
-      "order": 5,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "图像",
-          "name": "image",
-          "type": "COMBO",
-          "widget": {
-            "name": "image"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "选择文件上传",
-          "name": "upload",
-          "type": "IMAGEUPLOAD",
-          "widget": {
-            "name": "upload"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "图像",
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            458
-          ]
-        },
-        {
-          "localized_name": "遮罩",
-          "name": "MASK",
-          "type": "MASK",
-          "links": []
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.30.1",
-        "Node name for S&R": "LoadImage",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
-      },
-      "widgets_values": [
-        "person.png",
-        "image"
-      ],
-      "widgets_values_named": {
-        "image": "person.png",
-        "upload": "image"
-      },
-      "color": "#9c9ddc",
-      "bgcolor": "#26276c",
-      "textcolor": "#000000"
-    },
-    {
       "id": 115,
       "type": "ResolutionSelector",
       "pos": [
@@ -607,7 +535,7 @@
           "widget": {
             "name": "frame_rate"
           },
-          "link": null
+          "link": 505
         },
         {
           "label": "循环次数",
@@ -929,7 +857,31 @@
           "name": "ref_images.ref_image_2",
           "shape": 7,
           "type": "IMAGE",
-          "link": null
+          "link": 506
+        },
+        {
+          "label": "ref_image_3",
+          "localized_name": "ref_images.ref_image_3",
+          "name": "ref_images.ref_image_3",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 507
+        },
+        {
+          "label": "ref_image_4",
+          "localized_name": "ref_images.ref_image_4",
+          "name": "ref_images.ref_image_4",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 508
+        },
+        {
+          "label": "ref_image_5",
+          "localized_name": "ref_images.ref_image_5",
+          "name": "ref_images.ref_image_5",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 509
         },
         {
           "label": "ref_video_0",
@@ -1121,78 +1073,6 @@
       },
       "color": "#43c3ff",
       "bgcolor": "#003f5c",
-      "textcolor": "#000000"
-    },
-    {
-      "id": 217,
-      "type": "LoadImage",
-      "pos": [
-        -2122.0111132339694,
-        5584.989968590073
-      ],
-      "size": [
-        354.96679209285094,
-        433.6315370079392
-      ],
-      "flags": {},
-      "order": 10,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "图像",
-          "name": "image",
-          "type": "COMBO",
-          "widget": {
-            "name": "image"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "选择文件上传",
-          "name": "upload",
-          "type": "IMAGEUPLOAD",
-          "widget": {
-            "name": "upload"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "图像",
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            448
-          ]
-        },
-        {
-          "localized_name": "遮罩",
-          "name": "MASK",
-          "type": "MASK",
-          "links": []
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.30.1",
-        "Node name for S&R": "LoadImage",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
-      },
-      "widgets_values": [
-        "scene.png",
-        "image"
-      ],
-      "widgets_values_named": {
-        "image": "scene.png",
-        "upload": "image"
-      },
-      "color": "#9c9ddc",
-      "bgcolor": "#26276c",
       "textcolor": "#000000"
     },
     {
@@ -1394,131 +1274,82 @@
     },
     {
       "id": 204,
-      "type": "PromptExpand",
+      "type": "H3LVPromptExpand",
       "pos": [
         -1177.2020924661938,
         5384.546747691107
       ],
       "size": [
-        396.9577260392671,
-        286
+        480,
+        360
       ],
       "flags": {},
       "order": 18,
       "mode": 0,
       "inputs": [
         {
-          "localized_name": "原文输入",
-          "name": "source_text",
-          "shape": 7,
-          "type": "STRING",
+          "localized_name": "material",
+          "name": "material",
+          "type": "H3LV_MATERIAL",
           "link": 502
         },
         {
-          "localized_name": "规则预设",
-          "name": "rule",
+          "localized_name": "mode",
+          "name": "mode",
           "type": "COMBO",
+          "widget": {
+            "name": "mode"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "STRING",
+          "widget": {
+            "name": "model"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "rule",
+          "name": "rule",
+          "type": "STRING",
           "widget": {
             "name": "rule"
           },
           "link": null
         },
         {
-          "localized_name": "自定义规则",
-          "name": "custom_rule",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "custom_rule"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "自定义规则内容",
-          "name": "custom_rule_content",
-          "type": "STRING",
-          "widget": {
-            "name": "custom_rule_content"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "用户提示词",
-          "name": "user_prompt",
-          "type": "STRING",
-          "widget": {
-            "name": "user_prompt"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "LLM服务",
-          "name": "llm_service",
-          "type": "COMBO",
-          "widget": {
-            "name": "llm_service"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "自动释放显存",
-          "name": "ollama_auto_unload",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "ollama_auto_unload"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "随机种子",
-          "name": "seed",
+          "localized_name": "revision",
+          "name": "revision",
           "type": "INT",
           "widget": {
-            "name": "seed"
+            "name": "revision"
           },
           "link": null
         }
       ],
       "outputs": [
         {
-          "localized_name": "提示词输出",
-          "name": "enhanced_text",
+          "localized_name": "h3_prompt",
+          "name": "h3_prompt",
           "type": "STRING",
           "links": [
             503
           ]
         }
       ],
-      "title": "提示词小助手 · 用户提示词填写素材说明",
+      "title": "H3 长视频 · 分镜提示词生成器",
       "properties": {
-        "cnr_id": "prompt-assistant",
-        "ver": "e0587e6d50939ae05e92922f1ed2fce008c7f622",
-        "Node name for S&R": "PromptExpand",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.8"
-        }
+        "Node name for S&R": "H3LVPromptExpand"
       },
       "widgets_values": [
-        "扩写-自然语言",
-        true,
-        "Write one MiniMax H3 Ref2VA video prompt from the user's material description and this segment's Chinese camera brief. This is a text-only formatter; you do not see image pixels. Output only the six English sections below, in this order, without Markdown fences:\nsubject_definitions:\nsummary:\nretention_analysis:\ndetailed_description:\noverall_soundscape:\nnon_diegetic_music:\n\nInput:\n- New briefs contain 模式 (口播/speaking or 唱歌/singing), 镜头方案 and 表演节奏. Also accept the legacy seven-field format: 生成时长, 开场构图, 段内运镜, 结束构图, 入口衔接, 出口运动状态, 表演节奏. The approved camera path and ending motion state are binding. Each output is one independently generated clip, with exactly one [Shot 1].\n- The user-written material description is the authority for reference roles and relationships and actual picture numbering. Use every declared role. A person and environment may come from one image or separate images. Do not infer roles from filenames or invent a missing reference. Omit undeclared details rather than guessing colors, furniture, accessories, sitting/standing posture or actions. This never means removing details visible in an assigned reference.\n- A brief may begin with a 素材说明 line naming what each source picture is, for example 图1是人物，图2是场景。 The plugin attaches pictures per segment and numbers them in the order they are attached, so a per-segment 素材说明 is this clip's authority for reference roles and picture numbering. It overrides any separate global material description, and only the pictures it names are defined for this clip.\n- The brief may already be a complete six-section Ref2VA prompt, or may contain reference and subject tags written by the user. Preserve its meaning and structure; do not renumber, invent or drop references, roles or shots.\n\nCRITICAL TAG SYNTAX:\nEvery subject mention MUST use the literal angle-bracket token <Subject N>, where N is its assigned integer. Every source-image mention MUST use <Picture N>. Bare \"Subject 1\" or \"Picture 1\" is invalid. Before responding, fix any missing angle brackets.\nDefine visible content as Subjects, and cite its source Picture inside its definition. Use the defined SUBJECT tags throughout summary and [Shot 1]; do not refer to a whole source picture as the performer.\nConditional example of syntax only, when the user declares picture 1 as person and picture 2 as environment:\nsubject_definitions:\n<Subject 1> (S1) is the single performer whose facial identity, hair and clothing come from <Picture 1>.\n<Subject 2> is the environment from <Picture 2>.\nThis example is not a fixed picture-role mapping. Adapt IDs to the user's actual declared sources. If one picture supplies person AND environment, define those as two Subjects sourced from that same picture. Several views of the same person still define ONE person Subject.\nUse a standalone <Picture N> definition only when the picture is explicitly a composition, first-frame or keyframe anchor. Person sheets and environment references are content sources, not automatically composition anchors.\n\nCOMBINE REFERENCES IN EVERY SEGMENT:\n- When person and environment are declared, summary and the FIRST sentence after [Shot 1] must show the ONE person Subject physically present within the environment Subject. The scene reference supplies the whole setting, ground and background throughout the clip. The person source supplies identity and appearance only when a separate setting is assigned; its incidental backdrop is not the video setting.\n- A multi-view/three-view character sheet is appearance evidence, not a target image layout. Resolve all its views into ONE complete living performer wearing ONE consistent outfit in ONE continuous scene. Use its facial-detail view for facial identity and complementary clothing views for the outfit. The generated frame contains only that single performer and the assigned environment: no reference-sheet panels, duplicate bodies, floating portrait, layout partitions, masks or placeholders. In [Shot 1], explicitly state the single resolved performer in the scene, not merely that a sheet exists.\n- Preserve the environment Subject's recognizable spatial structure, surfaces, light sources and background from beginning to end and in every segment. Camera movement changes perspective/parallax within that environment, not its identity. Do not replace it with the person's source backdrop. Each clip must define its own reference relationship; never rely on \"same as the previous clip\".\n\nIDENTITY AND CLOTHING — BOTH MODES:\nIn retention_analysis and [Shot 1], explicitly preserve the person's facial identity, hairstyle, garment design, EACH garment's original base color, fabric, patterns and existing worn/held items from its assigned source throughout the clip. Natural lighting may shade fabric but does not recolor or replace the outfit. Repeat this reference-relative requirement in every segment. Only name an exact color/material if the user supplies it; do not guess from the role description.\n\nMODE AND CAMERA:\nSpeaking mode only: preserve the reference composition specified by the brief: person placement/scale, body range, headroom, angle, crop boundaries and background perspective. One locked camera throughout; natural lip articulation, blinking, breathing and restrained gestures. Do not invent a different pose or tighter crop. A separate declared scene still supplies the background. An image is not a pixel-exact first-frame guarantee.\nSinging mode only: visibly execute the brief's physical truck, orbit or dolly, its direction and opening-to-ending shot sizes. Do not turn movement into a fixed shot or tiny breathing drift. Allow natural off-center placement and space in the direction of performance; do not add a compulsory centered position or fixed eye height. Full-body means one complete performer from head to feet, standing on the scene ground when that pose is specified. Close-ups and medium shots retain the same person and environment. Execute only the one approved camera operation, allowing it to remain active to the ending when requested.\n\nSECTION DETAILS:\n- subject_definitions: one line per defined person/environment/content Subject, with its correctly numbered source. The vocal performer has (S1). Use the reference-relative appearance contract without inventing visual details.\n- summary: begin [reference generation], then state mode, one continuous shot, the single person/environment combination and the approved camera path. Omit duration unless explicitly provided in a legacy brief.\n- retention_analysis: use official markers such as fully_preserved or attribute_transfer for each defined Subject WITHIN its assigned role. For a character sheet, identity and wardrobe are preserved, while the sheet layout and incidental backdrop are excluded. Do not mark the entire sheet or picture layout as fully_preserved.\n- detailed_description: exactly one [Shot 1]. Start with the single performer Subject in the environment Subject and the opening framing, then the actual movement, performance and ending. Reaffirm scene continuity and original garment colors. Do not add cuts, extra camera operations, plot or undeclared objects. Keep <Subject N> tags in this body.\n- Audio drives vocal timing, never printed words. Preserve explicitly supplied spoken/sung words in their original language inside <d>[Language] ...</d>, but do not invent or transcribe words. Only declare a numbered <Audio N> when the user establishes its role/number.\n- Inside [Shot 1], include: \"Keep the entire shot free of added subtitles, captions, lyric text, titles, labels, watermarks and graphic overlays.\" Do not add a subtitles/negative_prompt heading or an instruction to preserve scene writing.\n- overall_soundscape: The supplied audio reference guides the visible vocal performance; no additional diegetic sounds are specified.\n- non_diegetic_music: N/A\n\nFinal silent check: six headings in order; every Picture/Subject tag has angle brackets and a defined role; [Shot 1] uses SUBJECT tags for visible entities; one performer in the assigned scene; no sheet layout reproduced; original clothing colors preserved; speaking fixed versus singing moving; no added text overlays. Correct omissions before returning. Keep the complete output under 5000 characters, shortening repeated prose before any of these requirements.\n",
-        "图1是人物，图2是场景。",
-        "阿里云/qwen3.8-max",
-        true,
-        724884049401813,
-        "randomize"
+        "vision",
+        "qwen/qwen3.8-flash",
+        "严格遵循本段导演简报、画面类型、声音关系和素材用途；以多图补足可见细节，保持人物身份、服装原色与环境一致。",
+        0
       ],
-      "widgets_values_named": {
-        "rule": "扩写-自然语言",
-        "custom_rule": true,
-        "custom_rule_content": "Write one MiniMax H3 Ref2VA video prompt from the user's material description and this segment's Chinese camera brief. This is a text-only formatter; you do not see image pixels. Output only the six English sections below, in this order, without Markdown fences:\nsubject_definitions:\nsummary:\nretention_analysis:\ndetailed_description:\noverall_soundscape:\nnon_diegetic_music:\n\nInput:\n- New briefs contain 模式 (口播/speaking or 唱歌/singing), 镜头方案 and 表演节奏. Also accept the legacy seven-field format: 生成时长, 开场构图, 段内运镜, 结束构图, 入口衔接, 出口运动状态, 表演节奏. The approved camera path and ending motion state are binding. Each output is one independently generated clip, with exactly one [Shot 1].\n- The user-written material description is the authority for reference roles and relationships and actual picture numbering. Use every declared role. A person and environment may come from one image or separate images. Do not infer roles from filenames or invent a missing reference. Omit undeclared details rather than guessing colors, furniture, accessories, sitting/standing posture or actions. This never means removing details visible in an assigned reference.\n- A brief may begin with a 素材说明 line naming what each source picture is, for example 图1是人物，图2是场景。 The plugin attaches pictures per segment and numbers them in the order they are attached, so a per-segment 素材说明 is this clip's authority for reference roles and picture numbering. It overrides any separate global material description, and only the pictures it names are defined for this clip.\n- The brief may already be a complete six-section Ref2VA prompt, or may contain reference and subject tags written by the user. Preserve its meaning and structure; do not renumber, invent or drop references, roles or shots.\n\nCRITICAL TAG SYNTAX:\nEvery subject mention MUST use the literal angle-bracket token <Subject N>, where N is its assigned integer. Every source-image mention MUST use <Picture N>. Bare \"Subject 1\" or \"Picture 1\" is invalid. Before responding, fix any missing angle brackets.\nDefine visible content as Subjects, and cite its source Picture inside its definition. Use the defined SUBJECT tags throughout summary and [Shot 1]; do not refer to a whole source picture as the performer.\nConditional example of syntax only, when the user declares picture 1 as person and picture 2 as environment:\nsubject_definitions:\n<Subject 1> (S1) is the single performer whose facial identity, hair and clothing come from <Picture 1>.\n<Subject 2> is the environment from <Picture 2>.\nThis example is not a fixed picture-role mapping. Adapt IDs to the user's actual declared sources. If one picture supplies person AND environment, define those as two Subjects sourced from that same picture. Several views of the same person still define ONE person Subject.\nUse a standalone <Picture N> definition only when the picture is explicitly a composition, first-frame or keyframe anchor. Person sheets and environment references are content sources, not automatically composition anchors.\n\nCOMBINE REFERENCES IN EVERY SEGMENT:\n- When person and environment are declared, summary and the FIRST sentence after [Shot 1] must show the ONE person Subject physically present within the environment Subject. The scene reference supplies the whole setting, ground and background throughout the clip. The person source supplies identity and appearance only when a separate setting is assigned; its incidental backdrop is not the video setting.\n- A multi-view/three-view character sheet is appearance evidence, not a target image layout. Resolve all its views into ONE complete living performer wearing ONE consistent outfit in ONE continuous scene. Use its facial-detail view for facial identity and complementary clothing views for the outfit. The generated frame contains only that single performer and the assigned environment: no reference-sheet panels, duplicate bodies, floating portrait, layout partitions, masks or placeholders. In [Shot 1], explicitly state the single resolved performer in the scene, not merely that a sheet exists.\n- Preserve the environment Subject's recognizable spatial structure, surfaces, light sources and background from beginning to end and in every segment. Camera movement changes perspective/parallax within that environment, not its identity. Do not replace it with the person's source backdrop. Each clip must define its own reference relationship; never rely on \"same as the previous clip\".\n\nIDENTITY AND CLOTHING — BOTH MODES:\nIn retention_analysis and [Shot 1], explicitly preserve the person's facial identity, hairstyle, garment design, EACH garment's original base color, fabric, patterns and existing worn/held items from its assigned source throughout the clip. Natural lighting may shade fabric but does not recolor or replace the outfit. Repeat this reference-relative requirement in every segment. Only name an exact color/material if the user supplies it; do not guess from the role description.\n\nMODE AND CAMERA:\nSpeaking mode only: preserve the reference composition specified by the brief: person placement/scale, body range, headroom, angle, crop boundaries and background perspective. One locked camera throughout; natural lip articulation, blinking, breathing and restrained gestures. Do not invent a different pose or tighter crop. A separate declared scene still supplies the background. An image is not a pixel-exact first-frame guarantee.\nSinging mode only: visibly execute the brief's physical truck, orbit or dolly, its direction and opening-to-ending shot sizes. Do not turn movement into a fixed shot or tiny breathing drift. Allow natural off-center placement and space in the direction of performance; do not add a compulsory centered position or fixed eye height. Full-body means one complete performer from head to feet, standing on the scene ground when that pose is specified. Close-ups and medium shots retain the same person and environment. Execute only the one approved camera operation, allowing it to remain active to the ending when requested.\n\nSECTION DETAILS:\n- subject_definitions: one line per defined person/environment/content Subject, with its correctly numbered source. The vocal performer has (S1). Use the reference-relative appearance contract without inventing visual details.\n- summary: begin [reference generation], then state mode, one continuous shot, the single person/environment combination and the approved camera path. Omit duration unless explicitly provided in a legacy brief.\n- retention_analysis: use official markers such as fully_preserved or attribute_transfer for each defined Subject WITHIN its assigned role. For a character sheet, identity and wardrobe are preserved, while the sheet layout and incidental backdrop are excluded. Do not mark the entire sheet or picture layout as fully_preserved.\n- detailed_description: exactly one [Shot 1]. Start with the single performer Subject in the environment Subject and the opening framing, then the actual movement, performance and ending. Reaffirm scene continuity and original garment colors. Do not add cuts, extra camera operations, plot or undeclared objects. Keep <Subject N> tags in this body.\n- Audio drives vocal timing, never printed words. Preserve explicitly supplied spoken/sung words in their original language inside <d>[Language] ...</d>, but do not invent or transcribe words. Only declare a numbered <Audio N> when the user establishes its role/number.\n- Inside [Shot 1], include: \"Keep the entire shot free of added subtitles, captions, lyric text, titles, labels, watermarks and graphic overlays.\" Do not add a subtitles/negative_prompt heading or an instruction to preserve scene writing.\n- overall_soundscape: The supplied audio reference guides the visible vocal performance; no additional diegetic sounds are specified.\n- non_diegetic_music: N/A\n\nFinal silent check: six headings in order; every Picture/Subject tag has angle brackets and a defined role; [Shot 1] uses SUBJECT tags for visible entities; one performer in the assigned scene; no sheet layout reproduced; original clothing colors preserved; speaking fixed versus singing moving; no added text overlays. Correct omissions before returning. Keep the complete output under 5000 characters, shortening repeated prose before any of these requirements.\n",
-        "user_prompt": "图1是人物，图2是场景。",
-        "llm_service": "阿里云/qwen3.8-max",
-        "ollama_auto_unload": true,
-        "seed": 724884049401813,
-        "control_after_generate": "randomize"
-      },
       "color": "#071f22",
       "bgcolor": "#2ab7cb",
       "textcolor": "#FFFFFF"
@@ -1952,10 +1783,10 @@
       "title": "Markdown注释",
       "properties": {},
       "widgets_values": [
-        "# 需注明上传的图片是什么，如：图1是人物，图2是场景"
+        "# 在分段审核面板上传图片并填写用途，如：图1是人物，图2是场景"
       ],
       "widgets_values_named": {
-        "text": "# 需注明上传的图片是什么，如：图1是人物，图2是场景"
+        "text": "# 在分段审核面板上传图片并填写用途，如：图1是人物，图2是场景"
       },
       "color": "#7a0a00",
       "bgcolor": "#ff6f61",
@@ -1970,7 +1801,7 @@
       ],
       "size": [
         595.6013893254304,
-        306
+        550
       ],
       "flags": {},
       "order": 15,
@@ -2090,14 +1921,6 @@
           ]
         },
         {
-          "localized_name": "segment_brief",
-          "name": "segment_brief",
-          "type": "STRING",
-          "links": [
-            502
-          ]
-        },
-        {
           "localized_name": "generation_frames",
           "name": "generation_frames",
           "type": "INT",
@@ -2111,6 +1934,76 @@
           "type": "STRING",
           "links": [
             437
+          ]
+        },
+        {
+          "localized_name": "segment_material",
+          "name": "segment_material",
+          "type": "H3LV_MATERIAL",
+          "links": [
+            502
+          ]
+        },
+        {
+          "localized_name": "image_1",
+          "name": "image_1",
+          "type": "IMAGE",
+          "links": [
+            458
+          ]
+        },
+        {
+          "localized_name": "image_2",
+          "name": "image_2",
+          "type": "IMAGE",
+          "links": [
+            448
+          ]
+        },
+        {
+          "localized_name": "image_3",
+          "name": "image_3",
+          "type": "IMAGE",
+          "links": [
+            506
+          ]
+        },
+        {
+          "localized_name": "image_4",
+          "name": "image_4",
+          "type": "IMAGE",
+          "links": [
+            507
+          ]
+        },
+        {
+          "localized_name": "image_5",
+          "name": "image_5",
+          "type": "IMAGE",
+          "links": [
+            508
+          ]
+        },
+        {
+          "localized_name": "image_6",
+          "name": "image_6",
+          "type": "IMAGE",
+          "links": [
+            509
+          ]
+        },
+        {
+          "localized_name": "segment_prompt",
+          "name": "segment_prompt",
+          "type": "STRING",
+          "links": []
+        },
+        {
+          "localized_name": "fps",
+          "name": "fps",
+          "type": "FLOAT",
+          "links": [
+            505
           ]
         }
       ],
@@ -2317,7 +2210,7 @@
       115,
       0,
       136,
-      11,
+      14,
       "INT"
     ],
     [
@@ -2325,7 +2218,7 @@
       115,
       1,
       136,
-      12,
+      15,
       "INT"
     ],
     [
@@ -2363,15 +2256,15 @@
     [
       436,
       231,
-      3,
+      2,
       136,
-      13,
+      16,
       "INT"
     ],
     [
       437,
       231,
-      4,
+      3,
       195,
       6,
       "STRING"
@@ -2386,16 +2279,16 @@
     ],
     [
       448,
-      217,
-      0,
+      231,
+      6,
       136,
       4,
       "IMAGE"
     ],
     [
       458,
-      137,
-      0,
+      231,
+      5,
       136,
       3,
       "IMAGE"
@@ -2421,7 +2314,7 @@
       231,
       1,
       136,
-      8,
+      11,
       "AUDIO"
     ],
     [
@@ -2537,14 +2430,6 @@
       "LATENT"
     ],
     [
-      502,
-      231,
-      2,
-      204,
-      0,
-      "STRING"
-    ],
-    [
       503,
       204,
       0,
@@ -2557,8 +2442,56 @@
       253,
       0,
       136,
-      10,
+      13,
       "STRING"
+    ],
+    [
+      502,
+      231,
+      4,
+      204,
+      0,
+      "H3LV_MATERIAL"
+    ],
+    [
+      505,
+      231,
+      12,
+      195,
+      4,
+      "FLOAT"
+    ],
+    [
+      506,
+      231,
+      7,
+      136,
+      5,
+      "IMAGE"
+    ],
+    [
+      507,
+      231,
+      8,
+      136,
+      6,
+      "IMAGE"
+    ],
+    [
+      508,
+      231,
+      9,
+      136,
+      7,
+      "IMAGE"
+    ],
+    [
+      509,
+      231,
+      10,
+      136,
+      8,
+      "IMAGE"
     ]
   ],
   "groups": [
@@ -2609,32 +2542,6 @@
         5305.83982018107,
         1215.2944687193262,
         387.62634680159135
-      ],
-      "color": "#3f789e",
-      "flags": {},
-      "font_size": 20
-    },
-    {
-      "id": 12,
-      "title": "图一",
-      "bounding": [
-        -2129.3816689520677,
-        4981.950126725083,
-        374.96679209285094,
-        511.6315370079392
-      ],
-      "color": "#3f789e",
-      "flags": {},
-      "font_size": 20
-    },
-    {
-      "id": 13,
-      "title": "图二",
-      "bounding": [
-        -2130.706836350133,
-        5519.8356636093595,
-        374.96679209285094,
-        511.6315370079392
       ],
       "color": "#3f789e",
       "flags": {},
