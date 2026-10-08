@@ -347,6 +347,7 @@ class Analyze:
             "mode": mode, "max_seconds": float(max_seconds), "target_seconds": float(target_seconds),
             "sample_rate": sr, "samples": len(mix), "duration": len(mix)/sr,
             "materials_version": 1, "default_refs": [], "default_material_note": "",
+            "default_final_prompt": "",
             "director": {"mode": "rule", "performance_intensity": "auto",
                          "note": "", "rule_config": rules["config"],
                          "schedule_seed": audio_seed, "rule_revision": rules["revision"]},
@@ -412,12 +413,14 @@ class LoadSegment:
             target = math_ceil_samples(row["generation_frames"], sr)
             audio = np.pad(audio, ((0, max(0, target-len(audio))), (0, 0)))
             outputs.append({"waveform": torch.from_numpy(audio.T.copy()).unsqueeze(0), "sample_rate": sr})
-        from .materials import packet, images
-        material = packet(plan, row, directory) if plan.get('materials_version') else {}
+        from .materials import packet, images, final_prompt
+        # 没有上传参考图时不再中止：没有下游读取这些图像输出时，空槽位不会被执行。
+        material = packet(plan, row, directory, require=False) \
+            if plan.get('materials_version') else {}
         pictures = images(material) if material else (None,)*6
         return (*outputs, row["generation_frames"],
                 f"H3LongVideo/projects/{project_id}/takes/seg_{segment_index:04d}", material,
-                *pictures, str(row.get("final_prompt") or ""), 24.0)
+                *pictures, final_prompt(plan, row), 24.0)
 
 
 class Unified:

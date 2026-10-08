@@ -216,6 +216,66 @@ def reference_slots(prompt):
     return sorted(slots)
 
 
+def loader_image_output(link):
+    """Return the 0-based picture index when ``link`` reads a loader picture output."""
+    if not isinstance(link, (list, tuple)) or len(link) < 2:
+        return None
+    if not isinstance(link[1], int) or not 5 <= link[1] <= 10:
+        return None
+    return link[1]-5
+
+
+def reference_slots_from_loader(prompt, loader_id):
+    """ref_image slots the long-video node's own picture outputs currently drive."""
+    _node_id, node = reference_node(prompt)
+    if node is None:
+        return {}
+    loader_id = str(loader_id)
+    driven = {}
+    for key, link in (node.get("inputs") or {}).items():
+        match = REFERENCE_SLOT.match(str(key))
+        index = loader_image_output(link) if match else None
+        if index is None or str(link[0]) != loader_id:
+            continue
+        driven[int(match.group(1))] = index
+    return driven
+
+
+def referenced_image_outputs(prompt, loader_id):
+    """Loader picture outputs consumed outside the reference node, as 0-based indexes.
+
+    Material projects rewrite the reference node's own slots from the uploaded
+    pictures, so those slots never create an upload requirement by themselves.
+    """
+    loader_id = str(loader_id)
+    used = set()
+    for node in (prompt or {}).values():
+        if not isinstance(node, dict) or node.get("class_type") == "MiniMaxH3ReferenceToVideo":
+            continue
+        for value in (node.get("inputs") or {}).values():
+            index = loader_image_output(value)
+            if index is not None and str(value[0]) == loader_id:
+                used.add(index)
+    return used
+
+
+def required_reference_count(plan, row, prompt=None, loader_id=""):
+    """How many uploaded pictures this segment needs before it may run.
+
+    Without a usable graph the legacy rule applies (material projects need one
+    picture). With a graph, only the picture outputs the canvas really reads
+    require uploads, so a canvas that reads none runs without references.
+    """
+    if not plan.get("materials_version"):
+        return 0
+    if not isinstance(prompt, dict) or not loader_id:
+        return 1
+    if reference_slots_from_loader(prompt, loader_id):
+        return 1
+    used = referenced_image_outputs(prompt, loader_id)
+    return (max(used)+1) if used else 0
+
+
 def mirror_reference_images(directory, project_id, names):
     """Copy the project's canonical pictures into ComfyUI's input directory."""
     import folder_paths
@@ -259,9 +319,11 @@ def detach_reference_slots(prompt, node, slots):
 def apply_segment_references(prompt, plan, row, directory):
     """Rewrite one segment's reference pictures into the frozen workflow graph.
 
-    Only the slots the user connected on the canvas exist in the graph, so a
-    segment may never use more pictures than that. The slots a segment does not
-    use are removed from this submission instead of receiving a placeholder image.
+    A segment never needs more pictures than the canvas really reads, and a
+    canvas that reads none of the picture outputs runs without references at all.
+    Without an H3 reference node the uploaded pictures reach the video node
+    through the long-video node's own picture outputs, so the canvas wiring is
+    submitted untouched.
 
     A segment without its own list follows the project default: the first
     ``reference_default_count`` canvas references, where 0 feeds no picture at
@@ -269,11 +331,12 @@ def apply_segment_references(prompt, plan, row, directory):
     """
     if plan.get('materials_version'):
         from .materials import effective
-        value = effective(plan, row, directory, require=True)
+        value = effective(plan, row, directory)
         loaders = [key for key, item in prompt.items() if item.get('class_type') == 'H3LVUnified']
         _, node = reference_node(prompt)
         if len(loaders) != 1 or node is None:
-            raise ValueError('内置素材需要一个长视频节点和一个 H3 参考条件节点。')
+            # 画布没有 H3 参考条件节点：上传的图片经长视频节点的图像输出直接交给下游。
+            return
         inputs = node.setdefault('inputs', {})
         for key in list(inputs):
             if key.startswith('ref_images.ref_image_'):
@@ -290,11 +353,9 @@ def apply_segment_references(prompt, plan, row, directory):
         return
     _node_id, node = reference_node(prompt)
     if node is None:
-        if not names:
-            return
-        raise ValueError("当前工作流没有 MiniMax H3 视频参考节点，无法使用分段参考图。")
+        # 画布没有参考条件节点时保留原接线，不再中断生成。
+        return
     slots = reference_slots(prompt)
-    position_label = int(row.get("index", 0))+1
     if not names:
         if len(slots) <= limit:
             return
@@ -306,47 +367,77 @@ def apply_segment_references(prompt, plan, row, directory):
                                               for _index, key, source_id in slots[limit:]])
         return
     if not slots:
-        raise ValueError(
-            "MiniMax H3 视频参考节点还没有接出 ref_image 槽位。请先在画布上用“加载图像”节点"
-            "依次接到 ref_image_0、ref_image_1……再开始生成。")
-    if len(names) > len(slots):
-        raise ValueError(
-            f"第 {position_label} 段配置了 {len(names)} 张参考图，但工作流只接出了 {len(slots)} 个 "
-            "ref_image 槽位。请在画布上继续接“加载图像”节点补足后重试。")
-    paths = mirror_reference_images(directory, plan["id"], names)
-    detached = []
+        # 没有可写入的槽位时保持画布原样，不再因此中断生成。
+        return
+    used = names[:len(slots)]
+    assignments = []
     for position, (_index, key, source_id) in enumerate(slots):
-        if position < len(paths):
-            source = prompt.get(source_id)
-            if not source or source.get("class_type") != "LoadImage":
-                raise ValueError(
-                    f"第 {position_label} 段有一个 ref_image 槽位没有连接到“加载图像”节点，"
-                    "请把该槽位改接到加载图像节点。")
-            source.setdefault("inputs", {})["image"] = paths[position]
-        else:
-            detached.append((key, source_id))
-    detach_reference_slots(prompt, node, detached)
+        source = prompt.get(source_id)
+        if position >= len(used):
+            if isinstance(source, dict) and source.get("class_type") == "LoadImage":
+                assignments.append((None, key, source_id))
+            continue
+        if not isinstance(source, dict) or source.get("class_type") != "LoadImage":
+            # 该槽位由画布自己的图像来源驱动，保持不动。
+            continue
+        assignments.append((used[position], key, source_id))
+    named = [(name, source_id) for name, _key, source_id in assignments if name is not None]
+    if named:
+        paths = mirror_reference_images(directory, plan["id"],
+                                        [name for name, _source_id in named])
+        for (name, source_id), path in zip(named, paths):
+            prompt[source_id].setdefault("inputs", {})["image"] = path
+    detach_reference_slots(prompt, node, [(_key, source_id)
+                                          for name, _key, source_id in assignments if name is None])
 
 
-def validate_generation_materials(plan, directory, indices=None):
-    """Validate only the segments that are about to be submitted for generation."""
+def validate_generation_materials(plan, directory, indices=None, prompt=None, loader_id=""):
+    """Validate only the segments that are about to be submitted for generation.
+
+    Material projects only need as many uploaded pictures as the frozen graph
+    really reads; a canvas that reads none of the picture outputs runs without
+    references instead of being blocked here.
+    """
     if not plan.get("materials_version"):
         return
     from .materials import effective
     targets = range(len(plan["segments"])) if indices is None else indices
     missing = []
     for index in targets:
+        row = plan["segments"][index]
+        required = required_reference_count(plan, row, prompt, loader_id)
+        if required <= 0:
+            continue
         try:
-            effective(plan, plan["segments"][index], directory, require=True)
+            names = effective(plan, row, directory).get("refs") or []
         except ValueError as exc:
-            if "没有有效参考图" not in str(exc):
-                raise ValueError(f"第 {index + 1} 段：{exc}") from exc
-            missing.append(index + 1)
-    if missing:
-        labels = "、".join(str(index) for index in missing)
+            raise ValueError(f"第 {index + 1} 段：{exc}") from exc
+        if len(names) < required:
+            missing.append((index + 1, required))
+    if not missing:
+        return
+    labels = "、".join(str(index) for index, _required in missing)
+    if not isinstance(prompt, dict) or not loader_id:
         raise ValueError(
             f"第 {labels} 段没有有效参考图。请上传项目默认图，或为这些分段选择"
             "“本段自定义”并上传图片后再开始生成。")
+    needed = max(required for _index, required in missing)
+    raise ValueError(
+        f"第 {labels} 段至少需要 {needed} 张参考图：画布上长视频节点的 image_1–image_{needed} "
+        "已经接到下游。请上传项目默认图，或在分段卡片中选择“本段自定义”并上传图片；"
+        "不需要参考图时，请断开这些图像连线。")
+
+
+def reference_validation_source(payload, current_snapshot):
+    """Pick the graph that decides how many pictures a pending segment needs."""
+    for candidate in (current_snapshot, payload):
+        if not isinstance(candidate, dict):
+            continue
+        prompt = candidate.get("prompt")
+        loader = str(candidate.get("loader_id") or "")
+        if isinstance(prompt, dict) and loader and isinstance(prompt.get(loader), dict):
+            return prompt, loader
+    return None, ""
 
 
 async def execute_project(root, project_id, server):
@@ -428,7 +519,7 @@ async def execute_project(root, project_id, server):
                 record_history_error(history, project_id=project_id, segment_index=index, prompt_id=prompt_id)
                 video = video_from_history(history, snapshot["video_id"], directory, folder_paths.get_output_directory())
                 row["job"].update(status="completed", video=video,
-                                  input_fingerprint=segment_fingerprint(row))
+                                  input_fingerprint=segment_fingerprint(plan, row))
                 final_prompt = final_prompt_from_history(history)
                 if final_prompt:
                     row["job"]["final_prompt"] = final_prompt
@@ -535,7 +626,9 @@ def start(root, project_id, payload, server):
                                   or row.get("needs_regeneration")]
         else:
             generation_indices = [only_segment]
-        validate_generation_materials(plan, directory, generation_indices)
+        reference_prompt, reference_loader = reference_validation_source(payload, current_snapshot)
+        validate_generation_materials(plan, directory, generation_indices,
+                                      reference_prompt, reference_loader)
         if not any(row.get("job") for row in plan["segments"]) or replace_snapshot:
             if current_snapshot is None:
                 prompt = copy.deepcopy(payload.get("prompt", {}))

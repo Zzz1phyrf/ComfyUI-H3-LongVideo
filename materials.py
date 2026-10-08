@@ -20,9 +20,25 @@ def effective(plan, row, directory=None, require=False):
     return {'refs': names, 'material_note': str(note).strip(), 'visual_type': kind}
 
 
-def packet(plan, row, directory):
+def final_prompt_source(plan, row):
+    """Where this segment's handwritten segment_prompt comes from."""
+    source = row.get('final_prompt_source',
+                     'custom' if str(row.get('final_prompt') or '').strip() else 'default')
+    if source not in ('default', 'custom'):
+        raise ValueError('手写提示词来源无效。')
+    return source
+
+
+def final_prompt(plan, row):
+    """Resolve the handwritten prompt the segment_prompt output hands to H3."""
+    if final_prompt_source(plan, row) == 'default':
+        return str(plan.get('default_final_prompt') or '')
+    return str(row.get('final_prompt') or '')
+
+
+def packet(plan, row, directory, require=True):
     from .core import reference_directory, inside
-    value = effective(plan, row, directory, require=True)
+    value = effective(plan, row, directory, require=require)
     paths = [inside(reference_directory(directory), reference_directory(directory)/name) for name in value['refs']]
     return {**value, 'project_id': plan['id'], 'segment_index': row['index'],
             'mode': plan['mode'], 'brief': row['prompt'], 'duration': row['duration'],

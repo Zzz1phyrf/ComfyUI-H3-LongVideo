@@ -23,6 +23,7 @@ controller = importlib.import_module("h3lv_test.controller")
 nodes = importlib.import_module("h3lv_test.nodes")
 director_rules = importlib.import_module("h3lv_test.director_rules")
 routes = importlib.import_module("h3lv_test.routes")
+materials = importlib.import_module("h3lv_test.materials")
 
 
 def wide_rule_config():
@@ -130,8 +131,12 @@ class CoreTests(unittest.TestCase):
         routes_source = (ROOT/"routes.py").read_text(encoding="utf-8")
         self.assertIn('actionButton(promptActions, "编辑本段导演简报"', script)
         self.assertIn('"手写提示词（segment_prompt 直连，可选）"', script)
-        self.assertIn('final_prompt: row.finalPrompt.value', script)
+        self.assertIn('final_prompt: row.getFinalPrompt(), final_prompt_source: row.promptSource.value', script)
         self.assertIn("插件不扩写、不校验、不回退", script)
+        self.assertIn('"项目默认手写提示词（可选）"', script)
+        self.assertIn('["default", "沿用项目默认"], ["custom", "本段自定义"]', script)
+        self.assertIn('"复制默认到本段"', script)
+        self.assertIn('default_final_prompt: defaultDirectPrompt?.get?.() ?? ""', script)
         self.assertNotIn('element("label", "结束时间（秒）", metrics)', script)
         self.assertIn("width: min(1440px, 100%)", styles)
         self.assertIn(
@@ -984,6 +989,45 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(plan["segments"][0]["final_prompt"], "ordinary free-form H3 prompt")
         self.assertNotEqual(core.fingerprint(plan), original)
 
+    def test_project_default_handwritten_prompt_marks_inheriting_segments(self):
+        plan = sample_plan()
+        for index, row in enumerate(plan["segments"]):
+            row["job"] = {"status": "completed", "video": f"take{index}.mp4"}
+        for index in (0, 2):
+            plan["segments"][index]["final_prompt_source"] = "default"
+        plan["segments"][1].update(final_prompt="own text", final_prompt_source="custom")
+        updates = [dict(row) for row in plan["segments"]]
+        core.edit_plan(plan, updates, None, core.UNSET, core.UNSET, "project default text")
+        self.assertEqual(plan["default_final_prompt"], "project default text")
+        self.assertEqual(plan["changed_segments"], [0, 2])
+        self.assertTrue(plan["segments"][0]["needs_regeneration"])
+        self.assertEqual(plan["segments"][0]["regeneration_reason"], "切点或提示词已修改")
+        self.assertTrue(plan["segments"][2]["needs_regeneration"])
+        self.assertFalse(plan["segments"][1].get("needs_regeneration"))
+        self.assertEqual(materials.final_prompt(plan, plan["segments"][0]), "project default text")
+        self.assertEqual(materials.final_prompt(plan, plan["segments"][1]), "own text")
+
+    def test_handwritten_prompt_source_is_validated(self):
+        plan = sample_plan()
+        updates = [dict(row) for row in plan["segments"]]
+        updates[0]["final_prompt_source"] = "bogus"
+        with self.assertRaisesRegex(ValueError, "手写提示词来源无效"):
+            core.edit_plan(plan, updates)
+        plan["segments"][0]["final_prompt_source"] = "bogus"
+        with self.assertRaisesRegex(ValueError, "手写提示词来源无效"):
+            materials.final_prompt(plan, plan["segments"][0])
+
+    def test_legacy_projects_keep_their_previous_handwritten_values(self):
+        plan = sample_plan()
+        plan["segments"][0]["final_prompt"] = "legacy text"
+        before = core.fingerprint(plan)
+        # Old plans have neither a project default nor a source field.
+        self.assertEqual(materials.final_prompt(plan, plan["segments"][0]), "legacy text")
+        self.assertEqual(materials.final_prompt(plan, plan["segments"][1]), "")
+        self.assertEqual(core.fingerprint(plan), before)
+        plan["default_final_prompt"] = ""
+        self.assertEqual(core.fingerprint(plan), before)
+
     def test_existing_two_field_camera_brief_remains_valid(self):
         prompt = "镜头方案：向右环绕人物\n表演节奏：克制的音乐表演\n"
         self.assertEqual(core.validate_segment_brief(prompt), prompt.strip())
@@ -1453,15 +1497,42 @@ class ReferenceImageTests(unittest.TestCase):
             self.assertNotIn("218", prompt)
             self.assertTrue((inputs/"H3LV"/plan["id"]/"a.png").is_file())
 
-    def test_segment_references_never_exceed_the_connected_slots(self):
+    def test_segment_references_are_trimmed_to_the_connected_slots(self):
         with tempfile.TemporaryDirectory() as d:
             plan, root = self.reference_project(d, ("a.png", "b.png", "c.png"))
             plan["segments"][1]["refs"] = ["a.png", "b.png", "c.png"]
             prompt = {"136": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
                 "ref_images.ref_image_0": ["137", 0]}},
                 "137": {"class_type": "LoadImage", "inputs": {"image": "person.png"}}}
-            with self.assertRaisesRegex(ValueError, "只接出了 1 个"):
+            inputs = Path(d)/"input"; inputs.mkdir()
+            with patch.dict(sys.modules, {"folder_paths": types.SimpleNamespace(
+                    get_input_directory=lambda: str(inputs))}):
                 controller.apply_segment_references(prompt, plan, plan["segments"][1], root)
+            self.assertEqual(prompt["136"]["inputs"], {"ref_images.ref_image_0": ["137", 0]})
+            self.assertEqual(prompt["137"]["inputs"]["image"], f"H3LV/{plan['id']}/a.png")
+
+    def test_reference_slots_without_the_plugin_loaders_are_left_alone(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan, root = self.reference_project(d, ("a.png", "b.png"))
+            plan["segments"][0]["refs"] = ["a.png"]
+            prompt = {"136": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
+                "ref_images.ref_image_0": ["99", 0]}},
+                "99": {"class_type": "ImageResizeKJv2", "inputs": {"image": ["98", 0]}},
+                "98": {"class_type": "LoadImage", "inputs": {"image": "mine.png"}}}
+            before = copy.deepcopy(prompt)
+            with patch.dict(sys.modules, {"folder_paths": types.SimpleNamespace(
+                    get_input_directory=lambda: str(Path(d)/"input"))}):
+                controller.apply_segment_references(prompt, plan, plan["segments"][0], root)
+            self.assertEqual(prompt, before)
+
+    def test_segment_without_slots_keeps_the_canvas_wiring(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan, root = self.reference_project(d, ("a.png",))
+            plan["segments"][0]["refs"] = ["a.png"]
+            prompt = {"266": {"class_type": "H3LVUnified", "inputs": {}},
+                      "136": {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {"prompt": "keep"}}}
+            controller.apply_segment_references(prompt, plan, plan["segments"][0], root)
+            self.assertEqual(prompt["136"]["inputs"], {"prompt": "keep"})
 
     def test_segment_without_references_leaves_the_graph_untouched(self):
         with tempfile.TemporaryDirectory() as d:

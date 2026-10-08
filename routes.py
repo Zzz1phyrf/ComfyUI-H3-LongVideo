@@ -336,7 +336,8 @@ def register_routes():
                 raise ValueError("方案已被另一个窗口修改，请刷新。")
             transcript, _ = read_project_transcript(project_path(root, pid), plan)
             plan = edit_plan(plan, payload["segments"], project_path(root, pid),
-                             payload.get("reference_default_count", UNSET), payload.get("materials", UNSET))
+                             payload.get("reference_default_count", UNSET), payload.get("materials", UNSET),
+                             payload.get("default_final_prompt", UNSET))
             for row in plan["segments"]:
                 row["text"] = " / ".join(s["text"] for s in transcript["segments"] if row["start"] <= (s["start"]+s["end"])/2 < row["end"])
             write_plan(root, plan)
