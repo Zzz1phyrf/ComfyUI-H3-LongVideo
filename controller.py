@@ -679,12 +679,14 @@ def assemble(root, project_id):
         size = dimensions
         rate = info["r_frame_rate"].split("/")
         fps = float(rate[0])/float(rate[1])
-        if abs(fps-24) > .001 or int(info["nb_read_frames"]) < row["edit_frames"]:
+        edit_start = int(job.get("edit_start_frame", 0))
+        if edit_start < 0 or abs(fps-24) > .001 or int(info["nb_read_frames"]) < row["edit_frames"] + edit_start:
             raise ValueError("片段必须为 24fps 且有足够帧数，不能靠补帧掩盖缺失内容。")
         stat = path.stat()
         cache_key = hashlib.sha256(json.dumps({
             "path": str(path), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
-            "edit_frames": row["edit_frames"], "width": dimensions[0], "height": dimensions[1],
+            "edit_frames": row["edit_frames"], **({"edit_start_frame": edit_start} if edit_start else {}),
+            "width": dimensions[0], "height": dimensions[1],
             "fps": 24, "codec": "libx264-crf18-yuv420p-v1",
         }, sort_keys=True).encode()).hexdigest()[:16]
         normalized = cache/f"{row['index']:04d}_{cache_key}.mp4"
@@ -693,7 +695,8 @@ def assemble(root, project_id):
             # Normalize timestamps, packet duration and frame count once per take.
             # Later assemblies reuse this clip without re-encoding it.
             command([ffmpeg, "-v", "error", "-n", "-i", str(path), "-an", "-vf",
-                     f"trim=end_frame={row['edit_frames']},setpts=N/(24*TB)", "-r", "24", "-fps_mode", "cfr",
+                     (f"trim=start_frame={edit_start}:end_frame={edit_start+row['edit_frames']},setpts=N/(24*TB)" if edit_start
+                      else f"trim=end_frame={row['edit_frames']},setpts=N/(24*TB)"), "-r", "24", "-fps_mode", "cfr",
                      "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
                      "-video_track_timescale", "24000", "-movie_timescale", "24000", str(temporary)])
             temporary.replace(normalized)

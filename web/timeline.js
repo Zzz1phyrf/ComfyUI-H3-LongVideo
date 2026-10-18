@@ -102,7 +102,7 @@ export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loa
     const key = `${plan.id}:${view.start.toFixed(6)}:${view.span.toFixed(6)}`;
     if (key === detailKey) return;
     detailKey = key; detail = null; clearTimeout(timer); controller?.abort();
-    detailStatus = view.span <= plan.max_seconds+1e-6 ? "局部波形加载中…" : "全曲概览 · 继续放大可查看精细波形";
+    detailStatus = !loadDetail ? "波形概览" : view.span <= plan.max_seconds+1e-6 ? "局部波形加载中…" : "全曲概览 · 继续放大可查看精细波形";
     if (!loadDetail || view.span > plan.max_seconds+1e-6) return;
     const start = view.start, end = Math.min(plan.duration, start+view.span);
     controller = new AbortController();

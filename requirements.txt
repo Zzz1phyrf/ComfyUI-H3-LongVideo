@@ -1,1 +1,3 @@
 faster-whisper==1.2.1
+requests>=2.31
+soundfile>=0.12

@@ -1,3 +1,5 @@
 # Current development instructions
 
 README.md and CHANGELOG.md describe the current public behavior. DEVELOPMENT.md and HANDOFF.md retain historical decisions; their older branch and publication restrictions are superseded by the user's 2026-09-26 authorization to publish the segment-materials feature and example repair to main. Keep unaccepted anchor-guide experiments and separate RunningHub work out of this release. API configuration belongs outside this repository. Do not print secrets. Keep unchanged legacy plans compatible through the controller's snapshot migration; keep the current node outputs and shipped example aligned. No delegation is needed for implementation.
+
+For the isolated talking-head RH node, follow TALKING_RH.md. The user authorized local implementation and a candidate package on 2026-10-19. Keep existing node IDs and MV behavior intact; preserve the main checkout, old RunningHub PoC, installed plugins and workflows. Model generation stays on RH with stock Avatar and the audio zero mask. Preserve task intent, task IDs and accepted output files across interruption. Credentials are process environment only. No delegation is needed.

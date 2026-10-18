@@ -474,3 +474,7 @@ from .expansion import PromptExpand
 
 NODE_CLASS_MAPPINGS = {"H3LVUnified": Unified, "H3LVPromptExpand": PromptExpand}
 NODE_DISPLAY_NAME_MAPPINGS = {"H3LVUnified": "H3 长视频 · 音频分析与顺序生成", "H3LVPromptExpand": "H3 长视频 · 分镜提示词生成器"}
+
+from .talking_rh import TalkingRH
+NODE_CLASS_MAPPINGS["H3LVTalkingRH"] = TalkingRH
+NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingRH"] = "H3 口播 · 本地控制 / RH生成"
