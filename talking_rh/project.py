@@ -178,7 +178,7 @@ def update_cuts(root,pid,seconds):
     rows = clock(plan['samples'],cuts)
     first = next((i for i,(a,b) in enumerate(zip(plan['segments_clock'],rows)) if a!=b),min(len(rows),len(plan['segments'])))
     if any(r.get('job',{}).get('status') not in (None,'completed','failed','rejected') for r in plan['segments'][first:]):
-        raise ValueError('有尚未收集的RH任务，请先继续查询完成后再改切点。')
+        raise ValueError('有尚未收集的生成任务，请先继续查询完成后再改切点。')
     if first<len(plan['segments']):
         history = project_path(root,pid)/'state'/('before-cuts-'+uuid.uuid4().hex+'.json')
         history.write_text(json.dumps(plan,ensure_ascii=False,indent=2),encoding='utf-8')

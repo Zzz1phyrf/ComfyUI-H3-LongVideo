@@ -477,4 +477,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {"H3LVUnified": "H3 长视频 · 音频分析与顺
 
 from .talking_rh import TalkingRH
 NODE_CLASS_MAPPINGS["H3LVTalkingRH"] = TalkingRH
-NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingRH"] = "H3 口播 · 本地控制 / RH生成"
+NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingRH"] = "H3 口播 · 一镜到底"
+from .talking_rh.local import StaticVideoMask
+NODE_CLASS_MAPPINGS["H3LVTalkingVideoMask"] = StaticVideoMask
+NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingVideoMask"] = "H3口播内部静态遮罩"
+from .talking_rh.local_weights import OwnedClipLoader
+NODE_CLASS_MAPPINGS["H3LVTalkingClipLoader"] = OwnedClipLoader
+NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingClipLoader"] = "H3口播内部CLIP读取"

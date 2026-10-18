@@ -8,6 +8,19 @@ TEMPLATE = Path(__file__).resolve().parents[1]/'defaults/talking_rh_graph.json'
 
 def build(plan,row,uploaded,previous=None):
     graph = json.loads(TEMPLATE.read_text(encoding='utf-8'))
+    if plan['config'].get('backend')=='local':
+        graph['9104']['class_type']='H3LVTalkingVideoMask'
+        models=plan['config']['models']
+        for key,field,name in [('127','unet_name','local_model'),('128','clip_name','local_clip'),
+                               ('119','vae_name','local_video_vae'),('120','vae_name','local_audio_vae'),
+                               ('270','upscaler_model','local_upscaler')]:
+            graph[key]['inputs'][field]=models[name]
+        if models.get('local_clip_read')=='内存':
+            graph['128']={'class_type':'H3LVTalkingClipLoader','inputs':{'clip_name':models['local_clip']}}
+        if models.get('local_lora','不使用')!='不使用':
+            graph['9300']={'class_type':'LoraLoaderModelOnly','inputs':{'model':['127',0],
+                           'lora_name':models['local_lora'],'strength_model':1.0}}
+            graph['242']['inputs']['model']=['9300',0]
     graph['115']['inputs']['megapixels'] = plan['config']['megapixels']
     graph['270']['inputs']['seed'] = plan['config']['seed']
     graph['9000']['inputs']['audio'] = uploaded['audio']

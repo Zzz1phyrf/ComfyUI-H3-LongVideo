@@ -1,4 +1,4 @@
-"""Local talking-head controller node; H3 inference runs only on RH."""
+"""Talking-head node with local inference and optional RunningHub execution."""
 import hashlib
 import json
 from pathlib import Path
@@ -10,6 +10,7 @@ from ..core import read_plan
 from . import project
 from .graph import TEMPLATE
 from .remote import validate_config
+from .local import MODEL_FIELDS, NO_LORA, model_choices, validate_models
 
 
 def root():
@@ -23,18 +24,21 @@ class TalkingRH:
         return {'required':{
             'audio':('AUDIO',), 'reference_image':('IMAGE',),
             'person_mask':('MASK',{'tooltip':'白色允许人物活动，黑色保留背景；使用羽化后的运动范围遮罩。尺寸与主图或输出画面相同。'}),
-            'workflow_id':('STRING',{'default':'','tooltip':'你有调用权限的RH工作流ID；海外版或国内版须与服务地址对应。'}),
+            'workflow_id':('STRING',{'default':'','tooltip':'仅RunningHub模式使用。本地生成留空。'}),
             'region':(['海外版','国内版'],), 'instance_type':(['ultra','plus','default'],),
             'megapixels':([1.0,.6],), 'seed':('INT',{'default':999,'min':0,'max':2**63-1,'control_after_generate':False}),
             'first_seconds':('FLOAT',{'default':13.0,'min':2.3334,'max':13.66,'step':.1}),
             'segment_seconds':('FLOAT',{'default':5.667,'min':2.2,'max':12.0,'step':.1}),
             'project_id':('STRING',{'default':''})},
-            'optional':{f'reference_{i}':('IMAGE',) for i in range(2,7)}}
+            'optional':{**{f'reference_{i}':('IMAGE',) for i in range(2,7)},
+                        'backend':(['本地','RunningHub'],),
+                        **{field:(model_choices(field),) for field in [*MODEL_FIELDS,'local_lora']},
+                        'local_clip_read':(['原生','内存'],{'tooltip':'仅本地使用。内存读取避开Windows大CLIP文件映射读取崩溃，可能占用更多系统内存；不改变权重。'})}}
 
     RETURN_TYPES = ('STRING','STRING','INT')
     RETURN_NAMES = ('project_id','final_video','segment_count')
     FUNCTION = 'prepare'
-    CATEGORY = '像素幻想/H3 口播 · RunningHub'
+    CATEGORY = '像素幻想/H3 口播'
     OUTPUT_NODE = True
 
     @classmethod
@@ -42,7 +46,9 @@ class TalkingRH:
         return float('nan')
 
     def prepare(self,audio,reference_image,person_mask,workflow_id,region='海外版',instance_type='ultra',
-                megapixels=1.0,seed=999,first_seconds=13.0,segment_seconds=5.667,project_id='',**references):
+                megapixels=1.0,seed=999,first_seconds=13.0,segment_seconds=5.667,project_id='',
+                backend='RunningHub',local_model='',local_clip='',local_video_vae='',local_audio_vae='',
+                local_upscaler='',local_lora=NO_LORA,local_clip_read='原生',**references):
         from ..nodes import audio_array
         wave,sr = audio_array(audio)
         pictures=[]
@@ -63,7 +69,20 @@ class TalkingRH:
                 'workflow_id':str(workflow_id).strip(),'instance_type':instance_type,
                 'megapixels':float(megapixels),'seed':int(seed),'first_seconds':float(first_seconds),
                 'segment_seconds':float(segment_seconds),'template_sha256':project.digest(TEMPLATE)}
-        validate_config(config)
+        if backend=='本地':
+            config={k:config[k] for k in ('megapixels','seed','first_seconds','segment_seconds','template_sha256')}
+            config.update(backend='local',models={'local_model':local_model,'local_clip':local_clip,
+                          'local_video_vae':local_video_vae,'local_audio_vae':local_audio_vae,
+                          'local_upscaler':local_upscaler,'local_lora':local_lora})
+            if local_clip_read not in ('原生','内存'):raise ValueError('本地CLIP读取方式无效。')
+            if local_clip_read=='内存':config['models']['local_clip_read']='内存'
+            validate_models(config)
+        elif backend=='RunningHub':
+            # Keep old RH project fingerprints readable. Missing backend in an
+            # older API submission retains RH; newly created UI nodes default local.
+            validate_config(config)
+        else:
+            raise ValueError('请选择本地或RunningHub生成后端。')
         if not 2.333<=first_seconds<=13.667 or not 2.2<=segment_seconds<=12:
             raise ValueError('分段目标时长超出支持范围。')
         signature.update(json.dumps(config,sort_keys=True).encode())

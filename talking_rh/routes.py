@@ -15,7 +15,8 @@ WEB = Path(__file__).resolve().parents[1]/'web'
 def public(plan):
     value=json.loads(json.dumps(plan))
     value['controller_active']=runner.busy(root(),plan['id'])
-    value['credential_configured']=bool(os.environ.get('RUNNINGHUB_API_KEY','').strip())
+    value['credential_required']=plan['config'].get('backend')!='local'
+    value['credential_configured']=not value['credential_required'] or bool(os.environ.get('RUNNINGHUB_API_KEY','').strip())
     return value
 
 

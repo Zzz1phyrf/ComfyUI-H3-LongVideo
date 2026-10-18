@@ -1,14 +1,14 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>H3口播 · 分段审核</title>
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>H3口播 · 一镜到底</title>
 <style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{font:15px/1.6 system-ui;margin:0;background:#111923;color:#e4eaf1}main{max-width:1200px;margin:auto;padding:26px}h1{font-size:24px;margin:0 0 8px}button,input{font:inherit}button{cursor:pointer;background:#29415d;color:#fff;border:1px solid #526980;border-radius:5px;padding:6px 12px}button:disabled{opacity:.4;cursor:default}input{background:#172838;color:#fff;border:1px solid #526980;border-radius:4px;padding:4px;width:115px}section{background:#1a2634;padding:18px;border-radius:8px;margin:16px 0}audio{width:100%}video{max-width:100%;max-height:700px}canvas{width:100%;height:220px;background:#111923}.controls{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;border-bottom:1px solid #3b4c60}.notice{color:#b9cadc}.error{color:#ffb1a5;white-space:pre-wrap}#cuts .selected{background:#29415d}.pictures{display:flex;gap:18px}.pictures img{max-height:350px;max-width:46%}.h3lv-timeline-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.h3lv-timeline-navigation{width:100%}.h3lv-help{color:#a9bdd2;font-size:13px}#state{font-weight:600;color:#91d6bb}
 </style>
-<main><h1>H3口播 · 本地控制 / RH生成</h1><p id="summary">正在读取项目…</p><p id="state"></p><p class="error" id="error"></p>
+<main><h1>H3口播 · 一镜到底</h1><p id="summary">正在读取项目…</p><p id="state"></p><p class="error" id="error"></p>
 <section><h2>分段试听与调整</h2><audio id="audio" controls preload="metadata"></audio><canvas id="timeline"></canvas>
-<p class="notice">先试听，再调整切点。保存会对齐续接所需的实际时间并刷新表格，请确认实际落点后开始生成。每段独立提交RH，GPU计算在云端完成。</p>
+<p class="notice">先试听，再调整切点。保存会对齐续接所需的实际时间并刷新表格，请确认实际落点后开始生成。</p>
 <div class="controls"><button id="add" disabled>在当前播放位置增加切点</button><button id="save" disabled>保存切点</button><button id="approve" disabled>确认分段</button><button id="run" disabled>开始 / 继续生成</button><button id="pause" disabled>暂停后续生成</button><button id="assemble" disabled>仅重新合并</button></div>
-<table><thead><tr><th>段</th><th>开始（秒）</th><th>结束（秒）</th><th>试听</th><th>RH状态</th><th>调整</th></tr></thead><tbody id="cuts"></tbody></table>
+<table><thead><tr><th>段</th><th>开始（秒）</th><th>结束（秒）</th><th>试听</th><th>任务状态</th><th>调整</th></tr></thead><tbody id="cuts"></tbody></table>
 <p class="notice" id="dirty"></p></section>
 <section><details><summary>主参考图与人物活动遮罩</summary><p>白色为允许人物活动区域，黑色为保留背景。首版使用输入的手动运动范围遮罩。</p><div class="pictures"><img id="reference" alt="主参考图"><img id="mask" alt="人物活动遮罩"></div></details></section>
 <section id="result" hidden><h2>完整成片</h2><p id="result-note"></p><video id="video" controls preload="metadata"></video></section>
-<section><details><summary>异常任务恢复</summary><p>仅创建结果未知时，先到RH任务列表核实，再填写对应任务ID；此操作不会创建新任务。</p><input id="recover-index" type="number" min="1" value="1" aria-label="恢复段号"><input id="recover-id" placeholder="RH任务ID" aria-label="RH任务ID" style="width:260px"><button id="recover">绑定任务ID</button><p id="project-path" class="notice"></p></details></section>
+<section id="cloud-recovery"><details><summary>RH异常任务恢复</summary><p>仅创建结果未知时，先到RH任务列表核实，再填写对应任务ID；此操作不会创建新任务。</p><input id="recover-index" type="number" min="1" value="1" aria-label="恢复段号"><input id="recover-id" placeholder="RH任务ID" aria-label="RH任务ID" style="width:260px"><button id="recover">绑定任务ID</button><p id="project-path" class="notice"></p></details></section>
 </main><script type="module" src="/h3talk/assets/talking_panel.js"></script></html>

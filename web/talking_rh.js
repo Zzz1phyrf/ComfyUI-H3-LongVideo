@@ -30,6 +30,16 @@ app.registerExtension({
         alert("已切换到新项目。运行节点后生成新的音频分段，旧项目和成片会保留。");
       });
     };
+    const configured = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function(info) {
+      configured?.apply(this,arguments);
+      // The original candidate had eight widgets and only supported RH.
+      // Preserve that backend when loading its canvas, without changing new nodes.
+      if (info.widgets_values?.length===8) {
+        const backend=this.widgets.find(w=>w.name==="backend");
+        if (backend) backend.value="RunningHub";
+      }
+    };
     const executed = nodeType.prototype.onExecuted;
     nodeType.prototype.onExecuted = function(message) {
       executed?.apply(this,arguments);

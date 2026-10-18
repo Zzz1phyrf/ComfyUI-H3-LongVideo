@@ -5,7 +5,7 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
   const base = `/h3talk/project/${pid}`;
   const $ = id => document.getElementById(id);
   let plan, rows = [], selected = 0, analysis, dirty = false, pending = false, stopAt = null, timeline, actionError = "";
-  const labels = {draft:"等待确认分段",running:"RH逐段生成中",pausing:"等待当前段完成后暂停",paused:"已暂停后续生成",failed:"运行中断，可按已有任务继续",merging:"正在本地合并",completed:"完整片已完成"};
+  const labels = {draft:"等待确认分段",running:"逐段生成中",pausing:"等待当前段完成后暂停",paused:"已暂停后续生成",failed:"运行中断，可按已有任务继续",merging:"正在合并",completed:"完整片已完成"};
   async function request(action, body) {
     const response = await fetch(base+(action ? "/"+action : ""),body === undefined ? {} : {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const value = await response.json(); if (!response.ok) throw new Error(value.error || "请求失败"); return value;
@@ -33,7 +33,9 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
   }
   function apply(value, force = false) {
     plan = value;
-    $("summary").textContent = `${plan.duration.toFixed(3)}秒 · ${plan.segments.length}段 · ${plan.config.megapixels} MP · seed ${plan.config.seed} · RH ${plan.config.instance_type}`;
+    const local = plan.config.backend === "local";
+    $("summary").textContent = `${plan.duration.toFixed(3)}秒 · ${plan.segments.length}段 · ${plan.config.megapixels} MP · seed ${plan.config.seed} · ${local ? "本地生成" : "RunningHub / "+plan.config.instance_type}`;
+    $("cloud-recovery").hidden = local;
     $("state").textContent = `${labels[plan.run_status] || plan.run_status} · 已完成 ${plan.segments.filter(r=>r.job?.status==="completed").length}/${plan.segments.length}${plan.approved ? " · 分段已确认" : ""}`;
     if (!plan.controller_active && ["running","pausing","merging"].includes(plan.run_status)) $("state").textContent += " · 本地控制已中断，可继续恢复已有任务";
     $("error").textContent = actionError || plan.error || (!plan.credential_configured ? "未配置RUNNINGHUB_API_KEY；请在启动本地ComfyUI的进程环境中设置后重启。" : "");
