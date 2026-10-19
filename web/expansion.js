@@ -81,7 +81,7 @@ async function settingsDialog(node) {
 }
 async function previewDialog(node) {
   const {main, status} = dialog("MiniMax H3 · MV Prompt Expander — 分段预览与编辑");
-  element("p", main, "先在长视频节点保存素材与镜头简报。当前模型、扩写规则和分段内容完全一致时自动读取缓存，否则调用 API 重新生成。修改后保存会要求重新确认该项目。");
+  element("p", main, "先在 MV Generator 节点保存素材与镜头简报。当前模型、扩写规则和分段内容完全一致时自动读取缓存，否则调用 API 重新生成。修改后保存会要求重新确认该项目。");
   const projects = element("select", main);
   const list = await request("/h3lv/projects");
   for (const p of list) element("option", projects, `${p.mode} · ${p.count}段 · ${p.id.slice(0,8)}`).value = p.id;
@@ -108,7 +108,7 @@ async function previewDialog(node) {
   projects.onchange = () => load().catch(error => status.textContent = error.message);
   segments.onchange = update;
   button(main, "生成提示词（自动复用缓存）", status, async () => {
-    if (!plan?.materials_version) throw new Error("请先在长视频面板启用内置素材管理。");
+    if (!plan?.materials_version) throw new Error("请先在 MV Generator 面板启用内置素材管理。");
     previewOptions = options(node);
     const result = await request(`/h3lv/project/${plan.id}/expand`, {revision:plan.revision, index:Number(segments.value), ...previewOptions});
     text.value = result.text; previewKey = result.key;
@@ -120,7 +120,7 @@ async function previewDialog(node) {
     if (!previewKey) throw new Error("请先扩写或读取当前设置的缓存。");
     if (JSON.stringify(options(node)) !== JSON.stringify(previewOptions)) throw new Error("节点设置已变化，请重新扩写。");
     const result = await request(`/h3lv/project/${plan.id}/expand`, {revision:plan.revision, index:Number(segments.value), ...previewOptions, key:previewKey, text:text.value});
-    plan.revision = result.revision; status.textContent = "已保存。请在长视频面板刷新并确认后生成。";
+    plan.revision = result.revision; status.textContent = "已保存。请在 MV Generator 面板刷新并确认后生成。";
   });
   await load();
 }

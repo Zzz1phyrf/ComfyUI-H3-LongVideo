@@ -985,7 +985,7 @@ async function openReview(owner) {
       }, "prompt-edit");
       const directPrompt = element("details", undefined, inner, "h3lv-direct-prompt");
       element("summary", "手写提示词（segment_prompt 直连，可选）", directPrompt);
-      element("p", "此处文字由长视频节点的 segment_prompt 原样输出。默认多图扩写接法不读取这里；只有手动把 segment_prompt 接到 H3 的 prompt 时才使用。",
+      element("p", "此处文字由 MV Generator 节点的 segment_prompt 原样输出。默认多图扩写接法不读取这里；只有手动把 segment_prompt 接到 H3 的 prompt 时才使用。",
         directPrompt, "h3lv-help");
       const finalPrompt = element("textarea", undefined, directPrompt, "h3lv-direct-prompt-editor");
       finalPrompt.value = row.final_prompt || "";

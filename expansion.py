@@ -308,7 +308,7 @@ def cache_source(material, key, mode):
 @logged("prompt_expansion")
 def expand(material, mode, model, rule, revision=0):
     if not material or not material.get('paths'):
-        raise ValueError('请先在长视频审核面板启用内置素材并上传参考图。')
+        raise ValueError('请先在 MV Generator 审核面板启用内置素材并上传参考图。')
     if mode not in ('vision', 'text', 'manual'): raise ValueError('扩写方式无效。')
     profile = public_settings()
     key = cache_key(material, mode, model, rule, revision, profile)
