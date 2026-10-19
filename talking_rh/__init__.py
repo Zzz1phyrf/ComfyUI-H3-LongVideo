@@ -19,6 +19,7 @@ def root():
 
 
 class TalkingRH:
+    DESCRIPTION = "口播数字人的分段、人工微调、动作续接与合并。默认本地生成，可选RunningHub；采样使用原版SelfLift-Avatar。"
     @classmethod
     def INPUT_TYPES(cls):
         return {'required':{
@@ -26,7 +27,7 @@ class TalkingRH:
             'person_mask':('MASK',{'tooltip':'白色允许人物活动，黑色保留背景；使用羽化后的运动范围遮罩。尺寸与主图或输出画面相同。'}),
             'workflow_id':('STRING',{'default':'','tooltip':'仅RunningHub模式使用。本地生成留空。'}),
             'region':(['海外版','国内版'],), 'instance_type':(['ultra','plus','default'],),
-            'megapixels':([1.0,.6],), 'seed':('INT',{'default':999,'min':0,'max':2**63-1,'control_after_generate':False}),
+            'megapixels':([1.0,.8,.6],), 'seed':('INT',{'default':999,'min':0,'max':2**63-1,'control_after_generate':False}),
             'first_seconds':('FLOAT',{'default':13.0,'min':2.3334,'max':13.66,'step':.1}),
             'segment_seconds':('FLOAT',{'default':5.667,'min':2.2,'max':12.0,'step':.1}),
             'project_id':('STRING',{'default':''})},
@@ -38,7 +39,7 @@ class TalkingRH:
     RETURN_TYPES = ('STRING','STRING','INT')
     RETURN_NAMES = ('project_id','final_video','segment_count')
     FUNCTION = 'prepare'
-    CATEGORY = '像素幻想/H3 口播'
+    CATEGORY = 'MiniMax H3'
     OUTPUT_NODE = True
 
     @classmethod

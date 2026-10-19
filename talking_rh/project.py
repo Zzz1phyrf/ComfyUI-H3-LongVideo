@@ -25,8 +25,8 @@ def digest(path):
 
 
 def dimensions(megapixels):
-    if float(megapixels) not in (.6, 1.0):
-        raise ValueError('首版支持0.6或1.0 MP。')
+    if float(megapixels) not in (.6, .8, 1.0):
+        raise ValueError('支持0.6、0.8或1.0 MP。')
     scale = math.sqrt(float(megapixels)*1024*1024/(9*16))
     return round(9*scale/32)*32, round(16*scale/32)*32
 

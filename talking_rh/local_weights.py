@@ -3,6 +3,12 @@ import json
 import math
 from pathlib import Path
 import struct
+import threading
+
+
+_clip_lock=threading.RLock()
+_clip_key=None
+_clip_instance=None
 
 
 def read_tensors(path):
@@ -35,21 +41,25 @@ def read_tensors(path):
     return tensors,header.get('__metadata__',{})
 
 
-def load_clip(clip_name):
+def load_clip(clip_name,disable_dynamic=False):
     import comfy.sd
     import comfy.utils
     import folder_paths
     path=folder_paths.get_full_path_or_raise('text_encoders',clip_name)
     tensors,metadata=read_tensors(path)
     tensors,_=comfy.utils.convert_old_quants(tensors,model_prefix='',metadata=metadata)
-    clip=comfy.sd.load_text_encoder_state_dicts([tensors],embedding_directory=folder_paths.get_folder_paths('embeddings'),
-                                              clip_type=comfy.sd.CLIPType.MINIMAX,model_options={})
+    options={'embedding_directory':folder_paths.get_folder_paths('embeddings'),
+             'clip_type':comfy.sd.CLIPType.MINIMAX,'model_options':{}}
+    if disable_dynamic:options['disable_dynamic']=True
+    clip=comfy.sd.load_text_encoder_state_dicts([tensors],**options)
     clip.patcher.cached_patcher_init=(reload_patcher,(clip_name,))
     return clip
 
 
-def reload_patcher(clip_name):
-    return load_clip(clip_name).patcher
+def reload_patcher(clip_name,disable_dynamic=False):
+    # A native reinitialization explicitly requests a fresh patcher, not the
+    # instance reused by ordinary queue nodes.
+    return load_clip(clip_name,disable_dynamic=disable_dynamic).patcher
 
 
 class OwnedClipLoader:
@@ -62,4 +72,16 @@ class OwnedClipLoader:
     CATEGORY='像素幻想/H3 口播/内部'
     DEPRECATED=True
 
-    def load(self,clip_name):return (load_clip(clip_name),)
+    def load(self,clip_name):
+        import folder_paths
+        global _clip_key,_clip_instance
+        path=Path(folder_paths.get_full_path_or_raise('text_encoders',clip_name)).resolve()
+        stat=path.stat();key=(str(path),stat.st_size,stat.st_mtime_ns)
+        with _clip_lock:
+            # A preparation-only prompt evicts ComfyUI's graph cache. Keep one
+            # owned CLIP across projects instead of duplicating a 32B quantized
+            # encoder while the old one is still managed by GPU offloading.
+            if key!=_clip_key or _clip_instance is None:
+                _clip_instance=None;_clip_key=None
+                _clip_instance=load_clip(clip_name);_clip_key=key
+            return (_clip_instance,)

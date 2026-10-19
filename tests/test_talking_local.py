@@ -26,6 +26,16 @@ class Queue:
 
 
 class LocalBackendTests(unittest.TestCase):
+    def test_native_reloaded_white_stays_fully_generative(self):
+        import torch
+        # Native VideoFromFile decodes 8-bit white to 65280 / 65535 locally.
+        masks=torch.tensor([[[0.,.5],[65280/65535,65280/65535]]])
+        latent={'samples':torch.zeros(1,24,2,2,2,dtype=torch.bfloat16)}
+        output=local.StaticVideoMask().apply(latent,masks)[0]['noise_mask']
+        self.assertEqual(float(output[0,0,0,1,1]),1.)
+        self.assertEqual(float(output[0,0,0,0,0]),0.)
+        self.assertEqual(float(output[0,0,0,0,1]),.5)
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.base=Path(self.temp.name);self.loop=asyncio.new_event_loop()

@@ -492,6 +492,8 @@ def start(root, project_id, payload, server):
         if project_id in TASKS:
             raise ValueError("该项目已经在生成中。")
         plan = read_plan(root, project_id)
+        from .nodes import require_mv_mode
+        require_mv_mode(plan.get("mode"))
         if not plan.get("approved") or plan.get("approved_fingerprint") != fingerprint(plan):
             raise ValueError("请先保存并确认分段方案。")
         directory = project_path(root, project_id)

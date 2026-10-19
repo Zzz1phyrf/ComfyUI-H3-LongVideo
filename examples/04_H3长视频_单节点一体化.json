@@ -1340,7 +1340,7 @@
           ]
         }
       ],
-      "title": "H3 长视频 · 分镜提示词生成器",
+      "title": "MiniMax H3 · MV Prompt Expander",
       "properties": {
         "Node name for S&R": "H3LVPromptExpand"
       },
@@ -2037,7 +2037,8 @@
         "director_mode": "本地规则",
         "project_id": "",
         "segment_index": 0
-      }
+      },
+      "title": "MiniMax H3 · MV Generator"
     },
     {
       "id": 253,

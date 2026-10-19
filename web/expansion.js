@@ -36,7 +36,7 @@ const options = node => ({mode:widget(node,"mode").value, model:widget(node,"mod
   rule:widget(node,"rule").value, expansion_revision:Number(widget(node,"revision").value)});
 
 async function settingsDialog(node) {
-  const {main, status} = dialog("H3 分镜提示词生成器 · API 设置");
+  const {main, status} = dialog("MiniMax H3 · MV Prompt Expander — API 设置");
   const profile = await request("/h3lv/expansion/settings");
   element("p", main, "配置仅保存在本机，不随工作流导出。更换服务后请填写对应密钥。");
   const addressLabel = element("label", main, "API 基础地址");
@@ -80,7 +80,7 @@ async function settingsDialog(node) {
   button(main, "使用所选模型", status, async () => {if (!models.value) throw new Error("请先选择模型。"); widget(node,"model").value = models.value; node.setDirtyCanvas(true); status.textContent = `已选择 ${models.value}`;});
 }
 async function previewDialog(node) {
-  const {main, status} = dialog("H3 分镜提示词生成器 · 分段预览与编辑");
+  const {main, status} = dialog("MiniMax H3 · MV Prompt Expander — 分段预览与编辑");
   element("p", main, "先在长视频节点保存素材与镜头简报。当前模型、扩写规则和分段内容完全一致时自动读取缓存，否则调用 API 重新生成。修改后保存会要求重新确认该项目。");
   const projects = element("select", main);
   const list = await request("/h3lv/projects");

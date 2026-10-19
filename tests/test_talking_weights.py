@@ -53,9 +53,30 @@ class WeightReadTests(unittest.TestCase):
             fn,args=clip.patcher.cached_patcher_init
             self.assertIs(fn,weights.reload_patcher)
             self.assertEqual(args,('clip.safetensors',))
-            self.assertIsNotNone(fn(*args))
+            self.assertIsNotNone(fn(*args,disable_dynamic=True))
+            self.assertTrue(sd.load_text_encoder_state_dicts.call_args.kwargs['disable_dynamic'])
         self.assertEqual(sd.load_text_encoder_state_dicts.call_count,2)
         self.utils.load_torch_file.assert_not_called()
+
+    def test_distinct_queue_node_instances_reuse_one_owned_clip(self):
+        folders=types.SimpleNamespace(get_full_path_or_raise=lambda *_:str(self.path))
+        factory=Mock(side_effect=lambda _:object())
+        with patch.dict('sys.modules',{'folder_paths':folders}),patch.object(weights,'load_clip',factory):
+            first=weights.OwnedClipLoader().load('clip.safetensors')[0]
+            second=weights.OwnedClipLoader().load('clip.safetensors')[0]
+        self.assertIs(first,second)
+        factory.assert_called_once()
+
+    def test_replaced_clip_file_invalidates_owned_instance(self):
+        import os
+        folders=types.SimpleNamespace(get_full_path_or_raise=lambda *_:str(self.path))
+        factory=Mock(side_effect=lambda _:object())
+        with patch.dict('sys.modules',{'folder_paths':folders}),patch.object(weights,'load_clip',factory):
+            first=weights.OwnedClipLoader().load('clip.safetensors')[0]
+            stat=self.path.stat();os.utime(self.path,ns=(stat.st_atime_ns,stat.st_mtime_ns+1_000_000_000))
+            second=weights.OwnedClipLoader().load('clip.safetensors')[0]
+        self.assertIsNot(first,second)
+        self.assertEqual(factory.call_count,2)
 
     def test_memory_read_graph_keeps_avatar_and_audio_zero_mask(self):
         config={'backend':'local','megapixels':1.0,'seed':999,'models':{

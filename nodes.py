@@ -287,7 +287,8 @@ def run_asr(project):
 class Analyze:
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"audio": ("AUDIO",), "mode": (["singing", "speaking"],),
+        # Keep the serialized slot for existing singing workflows; hidden in UI.
+        return {"required": {"audio": ("AUDIO",), "mode": (["singing"],),
             "max_seconds": ("FLOAT", {"default": 15, "min": 5, "max": 15, "step": .1}),
             "target_seconds": ("FLOAT", {"default": 11, "min": 5, "max": 15, "step": .1}),
             "asr_python": ("STRING", {"default": ""}), "asr_model": ("STRING", {"default": ""}),
@@ -298,7 +299,7 @@ class Analyze:
     RETURN_TYPES = ("STRING", "INT")
     RETURN_NAMES = ("project_id", "segment_count")
     FUNCTION = "analyze"
-    CATEGORY = "像素幻想/H3 长视频"
+    CATEGORY = "MiniMax H3"
     OUTPUT_NODE = True
 
     @classmethod
@@ -308,6 +309,7 @@ class Analyze:
     @logged("audio_analysis")
     def analyze(self, audio, mode, max_seconds, target_seconds, asr_python, asr_model,
                 asr_device="auto", director_mode="本地规则", vocals=None):
+        require_mv_mode(mode)
         import soundfile as sf
         import numpy as np
         mix, sr = audio_array(audio)
@@ -318,7 +320,7 @@ class Analyze:
             if vsr != sr or len(voice) != len(mix):
                 raise ValueError("原曲与人声必须采样率、样本数一致；请提供同版本未裁切的人声。")
         else:
-            voice = separate(mix, sr) if mode=="singing" else mix.copy()
+            voice = separate(mix, sr)
         project_id = uuid.uuid4().hex
         root = data_root()
         directory = project_path(root, project_id)
@@ -378,7 +380,7 @@ class LoadSegment:
                     "filename_prefix", "segment_material") + tuple(f"image_{i+1}" for i in range(6)) \
                    + ("segment_prompt", "fps")
     FUNCTION = "load"
-    CATEGORY = "像素幻想/H3 长视频"
+    CATEGORY = "MiniMax H3"
 
     @classmethod
     def IS_CHANGED(cls, project_id, segment_index):
@@ -396,6 +398,7 @@ class LoadSegment:
         if not str(project_id).strip():
             raise ValueError("尚未分析音频。请先运行 H3 音频分析节点并确认分段。")
         plan = read_plan(data_root(), project_id)
+        require_mv_mode(plan.get("mode"))
         if not plan.get("approved"):
             raise ValueError("音频已经分析，但分段尚未确认。请先在分段审核界面点击“保存并确认”。")
         if not 0 <= segment_index < len(plan["segments"]):
@@ -422,6 +425,7 @@ class LoadSegment:
 
 class Unified:
     """Analyze on native partial execution; load one approved segment during controller runs."""
+    DESCRIPTION = "歌曲MV的音频分析、分段审核和顺序生成。连接MV Prompt Expander及H3采样图；口播请使用Talking Avatar。"
     @classmethod
     def INPUT_TYPES(cls):
         analyze = Analyze.INPUT_TYPES()
@@ -433,7 +437,7 @@ class Unified:
     RETURN_TYPES = LoadSegment.RETURN_TYPES
     RETURN_NAMES = LoadSegment.RETURN_NAMES
     FUNCTION = "process"
-    CATEGORY = "像素幻想/H3 长视频"
+    CATEGORY = "MiniMax H3"
     OUTPUT_NODE = True
 
     @classmethod
@@ -451,6 +455,7 @@ class Unified:
     def process(self, audio, mode, max_seconds, target_seconds, asr_python, asr_model,
                 asr_device="auto", director_mode="本地规则", project_id="", segment_index=0,
                 vocals=None):
+        require_mv_mode(mode)
         if str(project_id).strip():
             try:
                 plan = read_plan(data_root(), project_id)
@@ -472,12 +477,18 @@ def math_ceil_samples(frames, sr):
 
 from .expansion import PromptExpand
 
+
+def require_mv_mode(mode):
+    if mode != "singing":
+        raise ValueError("MV Generator 仅用于歌曲视频。口播请使用 MiniMax H3 · Talking Avatar；旧口播项目和文件保留。")
+
+
 NODE_CLASS_MAPPINGS = {"H3LVUnified": Unified, "H3LVPromptExpand": PromptExpand}
-NODE_DISPLAY_NAME_MAPPINGS = {"H3LVUnified": "H3 长视频 · 音频分析与顺序生成", "H3LVPromptExpand": "H3 长视频 · 分镜提示词生成器"}
+NODE_DISPLAY_NAME_MAPPINGS = {"H3LVUnified": "MiniMax H3 · MV Generator", "H3LVPromptExpand": "MiniMax H3 · MV Prompt Expander"}
 
 from .talking_rh import TalkingRH
 NODE_CLASS_MAPPINGS["H3LVTalkingRH"] = TalkingRH
-NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingRH"] = "H3 口播 · 一镜到底"
+NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingRH"] = "MiniMax H3 · Talking Avatar"
 from .talking_rh.local import StaticVideoMask
 NODE_CLASS_MAPPINGS["H3LVTalkingVideoMask"] = StaticVideoMask
 NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingVideoMask"] = "H3口播内部静态遮罩"

@@ -1,8 +1,8 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>H3口播 · 一镜到底</title>
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>MiniMax H3 · Talking Avatar</title>
 <style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{font:15px/1.6 system-ui;margin:0;background:#111923;color:#e4eaf1}main{max-width:1200px;margin:auto;padding:26px}h1{font-size:24px;margin:0 0 8px}button,input{font:inherit}button{cursor:pointer;background:#29415d;color:#fff;border:1px solid #526980;border-radius:5px;padding:6px 12px}button:disabled{opacity:.4;cursor:default}input{background:#172838;color:#fff;border:1px solid #526980;border-radius:4px;padding:4px;width:115px}section{background:#1a2634;padding:18px;border-radius:8px;margin:16px 0}audio{width:100%}video{max-width:100%;max-height:700px}canvas{width:100%;height:220px;background:#111923}.controls{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;border-bottom:1px solid #3b4c60}.notice{color:#b9cadc}.error{color:#ffb1a5;white-space:pre-wrap}#cuts .selected{background:#29415d}.pictures{display:flex;gap:18px}.pictures img{max-height:350px;max-width:46%}.h3lv-timeline-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.h3lv-timeline-navigation{width:100%}.h3lv-help{color:#a9bdd2;font-size:13px}#state{font-weight:600;color:#91d6bb}
 </style>
-<main><h1>H3口播 · 一镜到底</h1><p id="summary">正在读取项目…</p><p id="state"></p><p class="error" id="error"></p>
+<main><h1>MiniMax H3 · Talking Avatar</h1><p id="summary">正在读取项目…</p><p id="state"></p><p class="error" id="error"></p>
 <section><h2>分段试听与调整</h2><audio id="audio" controls preload="metadata"></audio><canvas id="timeline"></canvas>
 <p class="notice">先试听，再调整切点。保存会对齐续接所需的实际时间并刷新表格，请确认实际落点后开始生成。</p>
 <div class="controls"><button id="add" disabled>在当前播放位置增加切点</button><button id="save" disabled>保存切点</button><button id="approve" disabled>确认分段</button><button id="run" disabled>开始 / 继续生成</button><button id="pause" disabled>暂停后续生成</button><button id="assemble" disabled>仅重新合并</button></div>

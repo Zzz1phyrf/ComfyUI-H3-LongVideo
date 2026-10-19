@@ -153,6 +153,11 @@ class StaticVideoMask:
         video=samples['samples']
         if video.ndim!=5 or masks.ndim!=3 or len(masks)!=1:
             raise ValueError('口播内部遮罩需要BCTHW视频latent和单张静态MASK。')
-        spatial=torch.nn.functional.interpolate(masks[:,None].float(),size=video.shape[-2:],mode='bilinear',align_corners=False)
+        # Reloading the prepared PNG can turn white back into 65280/65535 on
+        # native media readers. Reapply the project's endpoint convention before
+        # dtype conversion/interpolation; retain the intentional feather ramp.
+        masks=masks.float()
+        masks=torch.where(masks>=.99,1.,torch.where(masks<=.001,0.,masks))
+        spatial=torch.nn.functional.interpolate(masks[:,None],size=video.shape[-2:],mode='bilinear',align_corners=False)
         mask=spatial[:,:,None].to(video).expand(video.shape[0],1,video.shape[2],*video.shape[-2:]).clone()
         return ({**samples,'noise_mask':mask},)

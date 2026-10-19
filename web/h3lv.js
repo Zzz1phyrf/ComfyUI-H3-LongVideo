@@ -329,9 +329,12 @@ async function startApprovedSequence(owner, plan) {
 }
 
 async function analyzeOnly(owner) {
+  if (owner.widgets?.find(item => item.name === "mode")?.value === "speaking") {
+    throw new Error("此旧工作流使用口播模式。请改用 MiniMax H3 · Talking Avatar；原项目和视频保留。");
+  }
   const snapshot = await app.graphToPrompt();
   const promptNode = snapshot.output?.[String(owner.id)];
-  if (!promptNode) throw new Error("没有在执行图中找到 H3 一体化节点。");
+  if (!promptNode) throw new Error("没有在执行图中找到 MV Generator 节点。");
   promptNode.inputs.project_id = "";
   promptNode.inputs.segment_index = 0;
   await api.queuePrompt(0, snapshot, {partialExecutionTargets: [String(owner.id)]});
@@ -365,9 +368,8 @@ async function reanalyzeProject(owner, {ask = true} = {}) {
 }
 
 async function openDirectorRules(owner) {
-  const nodeMode = owner?.widgets?.find(item => item.name === "mode")?.value;
-  const selectedMode = nodeMode === "speaking" ? "speaking" : "singing";
-  const modeLabel = selectedMode === "speaking" ? "口播" : "唱歌";
+  const selectedMode = "singing";
+  const modeLabel = "MV";
   document.getElementById("h3lv-rules")?.remove();
   const shade = element("div", undefined, document.body, "h3lv-shade h3lv-settings-shade");
   shade.id = "h3lv-rules";
@@ -375,9 +377,7 @@ async function openDirectorRules(owner) {
   const title = element("div", undefined, panel, "h3lv-title-row");
   element("h2", `${modeLabel}运镜规则`, title);
   actionButton(title, "关闭", () => shade.remove(), "h3lv-close");
-  const explanation = selectedMode === "speaking"
-    ? "当前节点选择了 speaking。这里只编辑口播规则：连续固定机位和跨段一致构图。"
-    : "唱歌景别由 allowed_framings 控制，运镜由各能量级别的 energy_movements 控制。这里也可以调整机位角度及相邻运动关系。";
+  const explanation = "歌曲视频的景别由 allowed_framings 控制，运镜由各能量级别的 energy_movements 控制。这里也可以调整机位角度及相邻运动关系。";
   element("p", `${explanation} 规则不判断图片内容，也不决定音频被切成几段；保存后只用于重新分析的新项目。`, panel, "h3lv-help");
   const rules = await request("/h3lv/rules");
   let fullConfig = JSON.parse(rules.config_text);
@@ -386,7 +386,7 @@ async function openDirectorRules(owner) {
   const configLabel = element("label", `${modeLabel}运镜配置（JSON）`, form);
   const config = element("textarea", undefined, configLabel, "h3lv-rule-editor h3lv-rule-config");
   config.value = JSON.stringify(fullConfig[selectedMode], null, 2);
-  config.rows = selectedMode === "speaking" ? 10 : 28;
+  config.rows = 28;
   const buttons = element("div", undefined, panel, "h3lv-actions");
   actionButton(buttons, "保存并校验", async () => {
     try {
@@ -400,12 +400,12 @@ async function openDirectorRules(owner) {
     fullConfig = JSON.parse(saved.config_text);
     config.value = JSON.stringify(fullConfig[selectedMode], null, 2);
     location.textContent = `当前模式：${modeLabel} · 保存位置：${saved.directory} · 版本 ${saved.revision}`;
-    await messageDialog({title: `${modeLabel}规则已保存`, message: `另一套模式的规则没有改变。重新分析音频后，新项目会使用这套${modeLabel}规则。`});
+    await messageDialog({title: `${modeLabel}规则已保存`, message: "重新分析音频后，新项目会使用这套MV规则。"});
   }, "primary");
   actionButton(buttons, `恢复${modeLabel}默认规则`, async () => {
     if (!await confirmDialog({
       title: `恢复${modeLabel}默认规则？`,
-      message: `只覆盖${modeLabel}规则，另一套模式和已经生成的项目不会改变。`,
+      message: "恢复MV默认规则，已经生成的项目保留原规则。",
       confirmText: "恢复默认",
       tone: "warning",
     })) return;
@@ -563,11 +563,11 @@ async function openReview(owner) {
   shade.id = "h3lv-panel";
   shade.setAttribute("role", "dialog");
   shade.setAttribute("aria-modal", "true");
-  shade.setAttribute("aria-label", "H3 长视频分段审核");
+  shade.setAttribute("aria-label", "MiniMax H3 · MV Generator");
   const panel = element("div", undefined, shade, "h3lv-panel");
   const header = element("header", undefined, panel, "h3lv-header");
   const titleRow = element("div", undefined, header, "h3lv-title-row");
-  element("h2", "H3 长视频 · 音频切分审核", titleRow);
+  element("h2", "MiniMax H3 · MV Generator", titleRow);
   actionButton(titleRow, "关闭", async () => {
     if (dirty) {
       const decision = await confirmDialog({
@@ -1303,7 +1303,7 @@ app.registerExtension({
       for (const item of this.widgets || []) {
         if (directorLabels[item.name]) item.label = directorLabels[item.name];
       }
-      for (const name of ["director_mode", "project_id", "segment_index"]) {
+      for (const name of ["mode", "director_mode", "project_id", "segment_index"]) {
         const internal = this.widgets?.find(item => item.name === name);
         setWidgetHidden(internal, true);
       }

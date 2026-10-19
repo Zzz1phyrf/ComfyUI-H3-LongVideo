@@ -100,7 +100,7 @@ class CoreTests(unittest.TestCase):
                  patch.object(nodes, "run_asr", return_value={"segments": [], "words": []}), \
                  patch.object(nodes, "segmentation", return_value=(rows, analysis)):
                 result = nodes.Analyze().analyze(
-                    audio, "speaking", 15, 11, "", "", vocals=audio)
+                    audio, "singing", 15, 11, "", "", vocals=audio)
             plan = core.read_plan(root, result["result"][0])
         self.assertEqual(plan["materials_version"], 1)
         self.assertEqual(plan["default_refs"], [])
@@ -173,7 +173,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn('title: "无法重新分析分段"', script)
         self.assertNotIn('请在提示词小助手的“用户提示词”中填写素材说明', script)
         self.assertIn("async function openDirectorRules(owner)", script)
-        self.assertIn('const selectedMode = nodeMode === "speaking"', script)
+        self.assertIn('const selectedMode = "singing"', script)
         self.assertIn('fullConfig[selectedMode] = JSON.parse(config.value)', script)
         self.assertIn('{mode: selectedMode}', script)
         self.assertNotIn("formatters.length", script)
@@ -257,7 +257,7 @@ class CoreTests(unittest.TestCase):
     def test_unified_node_preserves_segment_output_contract(self):
         self.assertIs(nodes.NODE_CLASS_MAPPINGS["H3LVUnified"], nodes.Unified)
         self.assertEqual(set(nodes.NODE_CLASS_MAPPINGS), {"H3LVUnified", "H3LVPromptExpand", "H3LVTalkingRH", "H3LVTalkingVideoMask", "H3LVTalkingClipLoader"})
-        self.assertEqual(nodes.NODE_DISPLAY_NAME_MAPPINGS["H3LVPromptExpand"], "H3 长视频 · 分镜提示词生成器")
+        self.assertEqual(nodes.NODE_DISPLAY_NAME_MAPPINGS["H3LVPromptExpand"], "MiniMax H3 · MV Prompt Expander")
         self.assertNotIn("H3LVAnalyze", nodes.NODE_DISPLAY_NAME_MAPPINGS)
         self.assertNotIn("H3LVLoadSegment", nodes.NODE_DISPLAY_NAME_MAPPINGS)
         self.assertEqual(nodes.Unified.RETURN_TYPES, nodes.LoadSegment.RETURN_TYPES)
@@ -467,7 +467,7 @@ class CoreTests(unittest.TestCase):
 
     def test_optional_ref2va_template_contract(self):
         expected = (ROOT/"ref2va_performance_rule.txt").read_text(encoding="utf-8")
-        self.assertIn("模式 (口播/speaking or 唱歌/singing)", expected)
+        self.assertIn("模式 (唱歌/singing)", expected)
         self.assertIn("镜头方案 and 表演节奏", expected)
         self.assertIn("user-written material description", expected)
         self.assertIn("legacy seven-field format", expected)
@@ -475,8 +475,8 @@ class CoreTests(unittest.TestCase):
         for forbidden in ("final assembly", "FFmpeg"):
             self.assertNotIn(forbidden, expected)
 
-    def test_generation_preserves_prompt_assistant_rules_in_both_modes(self):
-        for mode in ("singing", "speaking"):
+    def test_mv_generation_preserves_prompt_assistant_rules(self):
+        for mode in ("singing",):
             for custom in (False, True):
                 with self.subTest(mode=mode, custom=custom), tempfile.TemporaryDirectory() as root:
                     plan = sample_plan()
@@ -1123,10 +1123,10 @@ class CoreTests(unittest.TestCase):
     def test_ref2va_rule_maps_the_versioned_brief_without_redirection(self):
         rule = (ROOT/"ref2va_performance_rule.txt").read_text(encoding="utf-8")
         self.assertNotIn("H3LV_CAMERA_V1", rule)
-        self.assertIn("模式 (口播/speaking or 唱歌/singing)", rule)
-        self.assertIn("Speaking mode only:", rule)
-        self.assertIn("Singing mode only:", rule)
-        self.assertIn("not a pixel-exact first-frame guarantee", rule)
+        self.assertIn("模式 (唱歌/singing)", rule)
+        self.assertNotIn("Speaking mode only:", rule)
+        self.assertIn("Singing MV:", rule)
+        self.assertIn("approved camera path", rule)
         self.assertIn("镜头方案 and 表演节奏", rule)
         self.assertIn("legacy seven-field format", rule)
         self.assertIn("user-written material description", rule)
