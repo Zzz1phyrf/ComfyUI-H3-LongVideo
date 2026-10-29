@@ -216,15 +216,27 @@ def register():
             return web.FileResponse(path)
         return await endpoint(request,action)
 
+    @routes.post('/h3talk/project/{pid}/reveal-final')
+    async def reveal_final(request):
+        async def action():
+            from ..controller import reveal_file
+            plan=read_plan(root(),request.match_info['pid'])
+            if not plan.get('final_video'):raise ValueError('完整片尚未生成。')
+            path=final_file(root(),plan['final_video'])
+            revealed=await asyncio.to_thread(reveal_file,path)
+            return web.json_response({'path':revealed})
+        return await endpoint(request,action)
+
     @routes.post('/h3talk/project/{pid}/{action}')
     async def post(request):
         async def action():
             pid=request.match_info['pid'];name=request.match_info['action'];data=await request.json()
             with LOCK:
                 plan=read_plan(root(),pid)
-                if name=='pause':
-                    plan['pause_requested']=True
-                    if plan['run_status']=='running':plan['run_status']='pausing'
+                if name in ('pause','stop'):
+                    plan[name+'_requested']=True
+                    if plan['run_status'] in ('running','pausing','stopping'):
+                        plan['run_status']='stopping' if plan.get('stop_requested') else 'pausing'
                     write_plan(root(),plan)
                 elif name=='run':
                     client_id=str(data.get('client_id') or '')[:128]

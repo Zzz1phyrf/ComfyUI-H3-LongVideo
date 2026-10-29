@@ -253,24 +253,48 @@ def call(path, payload=None):
         raise ValueError(f'扩写 API 读取连接中断（{context()}）：{safe_error(error, c)}；没有自动重试。') from None
 
 
-def validate_prompt(text, count):
-    # Normalize presentation only; do not invent missing sections or references.
-    text = text.strip()
+def prompt_sections(text):
+    markers = list(re.finditer(r'(?m)^(' + '|'.join(HEADINGS) + r'):\n', text))
+    return {match[1]: text[match.end():markers[i+1].start() if i+1 < len(markers) else len(text)].strip()
+            for i, match in enumerate(markers)}
+
+
+def join_sections(sections):
+    return '\n'.join(name + ':\n' + sections[name] for name in HEADINGS)
+
+
+def validate_prompt(text, count, complete_sound=False):
+    # Normalize presentation; visual content and reference roles stay explicit.
+    if not isinstance(text, str): raise ValueError('扩写正文必须是文本。')
+    text = text.replace('\r\n', '\n').strip()
     if text.startswith('```') and text.endswith('```'):
+        if '\n' not in text:raise ValueError('扩写结果缺少 H3 六段结构，请重新扩写或修正后保存。')
         text = text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
     for heading in HEADINGS:
-        text = re.sub(r'(?m)^\s*(?:#{1,6}\s*)?(?:\*\*|__)?' + heading + r'(?:\*\*|__)?\s*[:：](?:\*\*|__)?\s*', heading + ':\n', text)
-    positions = [text.find(h+':') for h in HEADINGS]
-    if any(p < 0 for p in positions) or positions != sorted(positions):
+        text = re.sub(r'(?im)^[ \t]*(?:#{1,6}[ \t]*)?(?:\d+[.)][ \t]*)?(?:\*\*|__)?' + heading + r'(?:\*\*|__)?[ \t]*[:：](?:\*\*|__)?[ \t]*\n?', heading + ':\n', text)
+    markers = re.findall(r'(?m)^(' + '|'.join(HEADINGS) + r'):\n', text)
+    if len(markers) != len(set(markers)):
+        raise ValueError('扩写结果包含重复字段，请修正后保存。')
+    if complete_sound:
+        for heading in HEADINGS[-2:]:
+            if heading not in markers:
+                field = heading + ':\nN/A\n'
+                next_field = re.search(r'(?m)^non_diegetic_music:\n', text) if heading=='overall_soundscape' else None
+                if next_field:text = text[:next_field.start()] + field + text[next_field.start():]
+                else:text += '\n' + field.rstrip()
+    positions = [re.search(r'(?m)^' + h + r':\n', text) for h in HEADINGS]
+    if any(p is None for p in positions) or [p.start() for p in positions] != sorted(p.start() for p in positions):
         raise ValueError('扩写结果缺少 H3 六段结构，请重新扩写或修正后保存。')
+    text = re.sub(r'<\s*(Picture|Audio|Subject)\s*(\d+)\s*>',
+                  lambda match: '<' + match[1].capitalize() + ' ' + str(int(match[2])) + '>', text, flags=re.I)
     if any(not 1 <= int(n) <= count for n in re.findall(r'<Picture\s+(\d+)>', text)):
         raise ValueError('扩写结果引用了不存在的图片。')
     marker = 'detailed_description:\n'
     if text.count(marker) != 1:
         raise ValueError('每段扩写必须只有 [Shot 1]。')
-    detail_index = HEADINGS.index('detailed_description')
-    detail_start = positions[detail_index]
-    detail_end = positions[detail_index + 1]
+    # Recompute offsets after reference token normalization.
+    detail_start = re.search(r'(?m)^detailed_description:\n', text).start()
+    detail_end = re.search(r'(?m)^overall_soundscape:\n', text).start()
     prefix, detail, suffix = text[:detail_start], text[detail_start:detail_end], text[detail_end:]
     shot_labels = SHOT_LABEL_RE.findall(text)
     detail_labels = SHOT_LABEL_RE.findall(detail)
@@ -289,6 +313,8 @@ def validate_prompt(text, count):
         detail_body = SHOT_LABEL_TOKEN_RE.sub('', detail)[len(marker):].lstrip()
         detail = marker + '[Shot 1]' + ((' ' + detail_body) if detail_body else '')
     text = prefix + detail + suffix
+    if not SHOT_LABEL_TOKEN_RE.sub('', prompt_sections(text)['detailed_description']).strip():
+        raise ValueError('扩写结果缺少具体画面描述。')
     if SHOT_LABEL_RE.findall(text) != ['1'] or text.count('[Shot 1]') != 1:
         raise ValueError('每段扩写必须只有 [Shot 1]。')
     if len(text) > 20000: raise ValueError('扩写结果过长。')
@@ -323,11 +349,13 @@ def intent_context(material):
 
 
 def validate_result(text, material):
-    text = validate_prompt(text, len(material['paths']))
-    if material.get('contract_version', 1) < 2:
+    modern = material.get('contract_version', 1) >= 2
+    text = validate_prompt(text, len(material['paths']), complete_sound=modern)
+    if not modern:
         return text
-    definitions = text.split('summary:', 1)[0]
-    retention = text.split('retention_analysis:', 1)[1].split('detailed_description:', 1)[0]
+    sections = prompt_sections(text)
+    definitions = sections['subject_definitions']
+    retention = sections['retention_analysis']
     defined = set(re.findall(r'<Picture\s+(\d+)>', definitions, re.I))
     expected = {str(i+1) for i in range(len(material['paths']))}
     missing = expected - defined
@@ -339,12 +367,12 @@ def validate_result(text, material):
         recovered = set(re.findall(r'<Picture\s+(\d+)>', '\n'.join(source_lines), re.I))
         missing -= recovered
         if source_lines:
-            text = text.replace('summary:', '\n'.join(source_lines) + '\nsummary:', 1)
+            sections['subject_definitions'] += '\n' + '\n'.join(source_lines)
         if missing and len(material['paths']) == 1:
             # The source is unambiguous for one supplied image. Bind it without
             # inventing identities, actions or another paid expansion request.
-            anchor = 'The visual subjects and setting described here use <Picture 1> as their reference.\n'
-            text = text.replace('summary:', anchor + '\nsummary:', 1)
+            anchor = 'The visual subjects and setting described here use <Picture 1> as their reference.'
+            sections['subject_definitions'] += '\n' + anchor
         elif missing:
             labels = '、'.join(f'<Picture {n}>' for n in sorted(missing, key=int))
             raise ValueError(f'多图扩写缺少参考图来源定义：{labels}。请在主体定义或保留关系中说明各图用途；尚未提交视频生成。')
@@ -356,15 +384,17 @@ def validate_result(text, material):
             raise ValueError(f'扩写正文引用了未接入的音频：{labels}；本段演唱只提供 <Audio 1>，尚未提交视频生成。')
         # This MV contract supplies one segment vocal stream. Its fixed binding
         # belongs to the workflow, not to probabilistic model phrasing.
-        definitions = text.split('summary:', 1)[0]
-        summary = text.split('summary:', 1)[1].split('retention_analysis:', 1)[0]
+        definitions = sections['subject_definitions']
+        summary = sections['summary']
         if not re.search(r'<Audio\s+1>', definitions, re.I):
-            text = text.replace('summary:', '<Audio 1> is the supplied vocal timing reference for this segment, including articulation and pauses.\nsummary:', 1)
+            sections['subject_definitions'] += '\n<Audio 1> is the supplied vocal timing reference for this segment, including articulation and pauses.'
         if not re.search(r'<Audio\s+1>', summary, re.I):
-            text = text.replace('retention_analysis:', 'The performer follows <Audio 1> for vocal timing, articulation and pauses.\nretention_analysis:', 1)
+            sections['summary'] += '\nThe performer follows <Audio 1> for vocal timing, articulation and pauses.'
     elif audio_refs:
         raise ValueError('人物剧情或空镜扩写误用了人声参考，请重新扩写；尚未提交视频生成。')
-    return text
+    # Validate references before replacing workflow-owned audio descriptions.
+    sections.update(overall_soundscape='N/A', non_diegetic_music='N/A')
+    return validate_prompt(join_sections(sections), len(material['paths']))
 
 
 def store_prompt(path, text, model):
@@ -387,7 +417,11 @@ def expand(material, mode, model, rule, revision=0):
         return '\n\n'.join(text for text in (material.get('material_note', ''), material.get('shot_intent', '')) if text.strip()) or material['brief']
     cache = Path(material['cache_dir']); path = cache/(key+'.json')
     with EXPAND_LOCK:
-        if path.exists(): return validate_result(json.loads(path.read_text(encoding='utf-8'))['text'], material)
+        if path.exists():
+            try:
+                return validate_result(json.loads(path.read_text(encoding='utf-8'))['text'], material)
+            except (ValueError, KeyError, TypeError):
+                pass  # Explicit retry may replace corrupt data only after success.
         invalid = path.with_suffix('.invalid.txt')
         if invalid.is_file():
             try:

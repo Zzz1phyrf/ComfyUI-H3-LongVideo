@@ -1,7 +1,7 @@
 export function talkingStatus(plan, now=Date.now()/1000) {
   const rows=plan.segments || [], done=rows.filter(r=>r.job?.status==='completed').length;
-  const labels={draft:'待确认',ready:'待生成',paused:'已暂停',failed:'失败，请打开面板查看原因',generated:'各段完成，待合并',completed:'已完成',merging:'正在合并',pausing:'当前段完成后暂停'};
-  const active=['running','pausing','merging'].includes(plan.run_status);
+  const labels={draft:'待确认',ready:'待生成',paused:'已暂停',stopped:'已停止',failed:'失败，请打开面板查看原因',generated:'各段完成，待合并',completed:'已完成',merging:'正在合并',pausing:'当前段完成后暂停',stopping:'当前段完成后停止'};
+  const active=['running','pausing','stopping','merging'].includes(plan.run_status);
   let text=plan.run_status==='draft' && plan.approved ? '待生成' : labels[plan.run_status] || '生成中';
   if (active && plan.controller_active===false) text='控制进程已中断，请打开面板继续恢复';
   else if (active && plan.run_status!=='merging') {
@@ -16,6 +16,7 @@ export function talkingStatus(plan, now=Date.now()/1000) {
     if (p.since) text+=` · ${Math.max(0,Math.floor(now-p.since))}秒`;
     if (job?.task_id && ['querying','queued','running','download','validate','seams'].includes(p.stage)) text+=` · 任务 ${job.task_id}`;
     if (plan.run_status==='pausing') text+=' · 本段完成后暂停';
+    if (plan.run_status==='stopping') text+=' · 本段完成后停止';
   }
   return `${text} · ${done}/${rows.length} 段完成`;
 }

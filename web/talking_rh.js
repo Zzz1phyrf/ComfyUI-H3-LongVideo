@@ -3,6 +3,8 @@ import {api} from "../../scripts/api.js";
 import {syncHiddenWidgetConnections} from "./widget_visibility.js";
 import {talkingStatus} from './talking_status.js';
 import {setTalkingStatus} from './talking_progress.js';
+import {alignProjectNode} from './node_ui.js';
+import {downloadErrorLog,reportUiError} from './diagnostics.js';
 
 const projectId=node=>node.widgets?.find(w=>w.name==='project_id')?.value;
 const validId=id=>/^[0-9a-f]{32}$/.test(id || '');
@@ -44,10 +46,14 @@ function button(node,label,action) {
   const widget=node.addWidget('button',label,null,async()=>{
     if(widget.disabled)return;
     widget.disabled=true;node.setDirtyCanvas?.(true,true);
-    try{await action();}catch(error){status(node,error.message);alert(error.message);}
+    try{await action();}catch(error){status(node,error.message);void reportUiError(error,{source:'talking_node',action:label,node_id:String(node.id)});await showMessage({title:label+'失败',message:error.message,tone:'error'});}
     finally{widget.disabled=false;node.setDirtyCanvas?.(true,true);}
   });
   widget.serialize=false;return widget;
+}
+function showMessage(options) {
+  if(app.h3lvMessageDialog)return app.h3lvMessageDialog(options);
+  alert(options.message);
 }
 async function checkRH(node) {
   const value=name=>node.widgets.find(w=>w.name===name)?.value;
@@ -55,15 +61,17 @@ async function checkRH(node) {
   const result=await request('/h3talk/rh-check',{workflow_id:value('workflow_id'),region:value('region'),instance_type:value('instance_type'),
     independent:node.comfyClass==='H3LVTalkingAvatar' || value('continuation_mode')==='独立窗口（自然动作）'});
   status(node,`RH配置检查通过 · ${result.workflow_id}`);
-  alert(`RH配置检查通过\n工作流 ${result.workflow_id} 可读取，Ref2VA、人声参考、音频零遮罩及采样链路检查通过。\n没有上传素材或提交生成。实际模型加载、额度及生成效果仍需运行验证。`);
+  await showMessage({title:'RH配置检查通过',message:`工作流 ${result.workflow_id} 可读取，Ref2VA、人声参考、音频零遮罩及采样链路检查通过。\n没有上传素材或提交生成。实际模型加载、额度及生成效果仍需运行验证。`});
 }
-async function analyze(node) {
+async function analyze(node,{ask=true}={}) {
   if(node.__talkingPreparing)throw new Error('正在准备分段，请等待节点执行完成。');
   const id=projectId(node);
   if(validId(id)) {
     const plan=await request(`/h3talk/project/${id}`);
     if(plan.controller_active)throw new Error('当前项目仍在生成，请等待完成或暂停后再重新分析。');
   }
+  if(ask && app.h3lvConfirmDialog && !await app.h3lvConfirmDialog({title:'重新分析并分段？',
+    message:'将按节点当前设置创建一个新的分段项目；现有项目和已生成文件不会删除。',confirmText:'重新分析并分段'}))return false;
   const snapshot=await app.graphToPrompt();
   const target=snapshot.output?.[String(node.id)];
   if(!target)throw new Error('执行图中没有找到口播节点，请检查输入连线。');
@@ -152,12 +160,16 @@ function updateMode(node) {
     widget.computeSize=widget.hidden ? (()=>[0,-4]) : originalSizes.get(widget);
   }
   syncHiddenWidgetConnections(node);
+  alignProjectNode(node);
 }
 
 async function showPanel(node) {
-  const pid = node.widgets?.find(w => w.name === "project_id")?.value;
-  if (!validId(pid)) { await analyze(node); return; }
+  let pid = node.widgets?.find(w => w.name === "project_id")?.value;
   let projects=await request('/h3talk/projects');
+  if(!validId(pid) && projects.length) {
+    pid=projects[0].id;node.widgets.find(w=>w.name==='project_id').value=pid;
+  }
+  if(!validId(pid)){await analyze(node,{ask:false});return;}
   document.getElementById("h3talk-modal")?.remove();
   const overlay = document.createElement("div"); overlay.id = "h3talk-modal";
   overlay.className='h3lv-shade';
@@ -184,13 +196,13 @@ async function showPanel(node) {
   frame.__h3talkAnalyze=()=>analyze(node);
   Object.assign(frame.style,{width:"100%",height:"calc(100% - 48px)",border:0,borderRadius:"12px"});
   select.onchange=()=>{
-  if(frame.contentWindow?.h3talkHasUnsavedChanges?.()) {select.value=projectId(node);alert('请先保存切点或提示词修改，再切换项目。');return;}
+  if(frame.contentWindow?.h3talkHasUnsavedChanges?.()) {select.value=projectId(node);void showMessage({title:'尚有未保存的修改',message:'请先保存切点或提示词修改，再切换项目。'});return;}
     node.widgets.find(w=>w.name==='project_id').value=select.value;
     frame.src=`/h3talk/project/${select.value}/panel?client_id=${encodeURIComponent(api.clientId || '')}`;
     void refreshStatus(node);
   };
   manage.onclick=async()=>{
-    if(frame.contentWindow?.h3talkHasUnsavedChanges?.()){alert('请先保存当前切点或提示词修改，再管理项目。');return;}
+    if(frame.contentWindow?.h3talkHasUnsavedChanges?.()){await showMessage({title:'尚有未保存的修改',message:'请先保存当前切点或提示词修改，再管理项目。'});return;}
     manage.disabled=true;
     try {
       if(typeof app.h3lvProjectManager!=='function')throw new Error('项目管理尚未加载，请刷新页面。');
@@ -206,7 +218,7 @@ async function showPanel(node) {
         overlay.remove();app.graph.setDirtyCanvas(true,true);return;
       }
       projects=await request('/h3talk/projects');populateProjects();
-    } catch(error){alert(error.message);}finally{manage.disabled=false;}
+    } catch(error){await showMessage({title:'项目管理失败',message:error.message,tone:'error'});}finally{manage.disabled=false;}
   };
   toolbar.append(label,select,manage,close);content.append(toolbar,frame); overlay.append(content); document.body.append(overlay);
 }
@@ -282,7 +294,9 @@ app.registerExtension({
       button(this,'检查 RH 配置（不生成）',()=>checkRH(this));
       button(this,'重新分析并分段',()=>analyze(this));
       button(this,'打开分段与生成控制',()=>showPanel(this));
+      button(this,'下载错误日志',()=>downloadErrorLog());
       status(this,'尚未准备项目 · 请先重新分析并分段');
+      alignProjectNode(this);
     };
     const configured = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function(info) {
@@ -329,7 +343,7 @@ app.registerExtension({
       this.widgets.find(w => w.name === "project_id").value = pid;
       app.graph.setDirtyCanvas(true,true);
       void refreshStatus(this);
-      if (message.talking_rh_open_review?.[0]!==false) showPanel(this).catch(error=>alert(error.message));
+      if (message.talking_rh_open_review?.[0]!==false) showPanel(this).catch(error=>showMessage({title:'无法打开分段审核',message:error.message,tone:'error'}));
     };
   },
 });

@@ -15,7 +15,7 @@ function dialog() {
   const source=script.slice(script.indexOf('function formatBytes'),script.indexOf('function chooseVideoOutput')).replace(/^export /gm,'');
   const projects=[{id:'current',created:1,duration:7,count:1,status:'completed',mode:'speaking',active:false,project_bytes:100,final_bytes:50,has_final:true},
     {id:'active',created:1,duration:7,count:1,status:'running',mode:'speaking',active:true,project_bytes:100,final_bytes:0}];
-  const open=vm.runInNewContext(source+'\nprojectManagerDialog',{app:{},element,document:{body:{append(){}}},
+  const open=vm.runInNewContext(source+'\nprojectManagerDialog',{app:{},messageDialog(){},element,document:{body:{append(){}}},
     window:{addEventListener(){},removeEventListener(){}},queueMicrotask:fn=>fn(),toast(){},confirmDialog:async()=>false,
     request:async(path,body)=>{calls.push({path,body});return projects;},
     actionButton(parent,label,action,className=''){const node=element('button',label,parent,className);node.onclick=action;return node;}});

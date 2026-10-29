@@ -27,7 +27,7 @@ class CandidatePackageTests(unittest.TestCase):
         required = {
             'FRIEND_TESTING.md','talking_rh/management.py','storage.py',
             'scripts/migrate_talking_resolution.py','scripts/migrate_talking_sampler.py',
-            'rh_credentials.py', 'web/rh_settings.js', 'web/widget_visibility.js',
+            'rh_credentials.py', 'web/rh_settings.js', 'web/widget_visibility.js','web/node_ui.js',
             'mv_rh.py', 'MV_RUNNINGHUB.md', 'TALKING_CANVAS.md',
             'examples/06_H3口播_本地完整工作流.json',
             'examples/07_H3MV_本地与RH.json',
@@ -83,6 +83,7 @@ class CandidatePackageTests(unittest.TestCase):
         self.assertIn('/h3talk/project/{pid}/{action}', paths)
         self.assertIn('/h3talk/projects/manage',paths)
         self.assertIn('/h3talk/projects/delete',paths)
+        self.assertIn('/h3talk/project/{pid}/reveal-final',paths)
 
 
 if __name__ == '__main__':

@@ -1,5 +1,6 @@
 import {app} from "../../scripts/app.js";
 import {api} from "../../scripts/api.js";
+import {alignProjectNode} from './node_ui.js';
 
 async function rhSettingsRequest(baseUrl, values) {
   const response=await api.fetchApi('/h3lv/rh/settings'+(values ? '' : '?base_url='+encodeURIComponent(baseUrl)),
@@ -50,6 +51,7 @@ app.registerExtension({
     nodeType.prototype.onNodeCreated=function() {
       created?.apply(this,arguments);
       this.addWidget('button','RH API 设置',null,()=>showRHSettings(this),{serialize:false});
+      alignProjectNode(this);
     };
   },
 });

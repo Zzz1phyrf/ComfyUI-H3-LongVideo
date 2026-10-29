@@ -79,7 +79,7 @@ test("long-video node exposes a non-serialized download widget without changing 
   const script = fs.readFileSync(new URL("../web/h3lv.js", import.meta.url), "utf8")
     .replace(/^import .*;\r?\n/gm, "")
     .replace('new URL("./h3lv.css", import.meta.url).href', '"h3lv.css"');
-  vm.runInNewContext(script, {syncHiddenWidgetConnections,app, document: {querySelector: () => ({})},
+  vm.runInNewContext(script, {alignProjectNode,syncHiddenWidgetConnections,app, document: {querySelector: () => ({})},
     setTimeout: callback => callback(), downloadErrorLog: async () => {downloads++;}});
   function Node() {}
   await extension.beforeRegisterNodeDef(Node, {name: "H3LVUnified"});
@@ -103,7 +103,7 @@ test("unrelated workflow queue errors are not collected by the plugin", async ()
   const script = fs.readFileSync(new URL("../web/h3lv.js", import.meta.url), "utf8")
     .replace(/^import .*;\r?\n/gm, "")
     .replace('new URL("./h3lv.css", import.meta.url).href', '"h3lv.css"');
-  vm.runInNewContext(script, {syncHiddenWidgetConnections,app, api: {addEventListener() {}},
+  vm.runInNewContext(script, {alignProjectNode,syncHiddenWidgetConnections,app, api: {addEventListener() {}},
     document: {querySelector: () => ({})}, withUiLogging() {wrapped++;}});
   await extension.setup();
   await assert.rejects(app.queuePrompt(1), error => error === failure);
@@ -127,3 +127,4 @@ test("failure card shows node causes, hides raw details, locates and copies safe
   await nodes.find(n=>n.textContent==="复制诊断").onclick(); assert.equal(JSON.parse(copied).summary,info.summary);
   render(parent,null); assert.equal(parent.hidden,true);assert.equal(parent.children.length,0);
 });
+import {alignProjectNode} from '../web/node_ui.js';

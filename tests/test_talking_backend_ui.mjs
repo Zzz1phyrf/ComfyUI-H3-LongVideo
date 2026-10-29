@@ -1,3 +1,4 @@
+import {alignProjectNode} from '../web/node_ui.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,7 +10,7 @@ function setup(name='H3LVTalkingRH') {
   const app={registerExtension:value=>extension=value,graph:{setDirtyCanvas(){}}};
   const source=fs.readFileSync(new URL('../web/talking_rh.js',import.meta.url),'utf8').replace(/^import[^\n]*\n/gm,'');
   const progress=fs.readFileSync(new URL('../web/talking_progress.js',import.meta.url),'utf8').replace(/^export /gm,'');
-  vm.runInNewContext(progress+'\n'+source,{syncHiddenWidgetConnections,app,api:{clientId:'test-client'},
+  vm.runInNewContext(progress+'\n'+source,{alignProjectNode,syncHiddenWidgetConnections,app,api:{clientId:'test-client'},
     document:{createElement:()=>({style:{},setAttribute(){}})},setInterval(){return 1;},clearInterval(){}});
   function Node(){this.widgets=[{name:'project_id',value:''},{name:'backend',value:'本地'}];this.inputs=[{name:'audio',link:null},{name:'reference_image',link:null},{name:'person_mask',link:null}];}
   Node.prototype.removeInput=function(index){this.inputs.splice(index,1);};

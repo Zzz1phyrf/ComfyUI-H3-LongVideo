@@ -1,3 +1,4 @@
+import {alignProjectNode} from '../web/node_ui.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,7 +8,7 @@ const {syncHiddenWidgetConnections}=await import('data:text/javascript,'+encodeU
 test('loading an old MV graph removes vocals through the native slot-removal method',async()=>{
  let extension;
  const script=fs.readFileSync(new URL('../web/h3lv.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace('new URL("./h3lv.css", import.meta.url).href','"h3lv.css"');
- vm.runInNewContext(script,{app:{registerExtension:e=>extension=e},document:{querySelector:()=>({})},syncHiddenWidgetConnections});
+ vm.runInNewContext(script,{alignProjectNode,app:{registerExtension:e=>extension=e},document:{querySelector:()=>({})},syncHiddenWidgetConnections});
  function Node(){this.inputs=[{name:'audio',link:10},{name:'vocals',link:11},{name:'mode',widget:{},link:null}];this.widgets=[];this.removed=[];}
  Node.prototype.removeInput=function(index){this.removed.push(this.inputs[index]);this.inputs.splice(index,1);};
  Node.prototype.onConfigure=function(){return 'configured';};

@@ -212,7 +212,7 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     $('approve').disabled=active || pending || regenerating || promptDirty || dirty && !validCutDraft();
     $('reset-cuts').hidden=!dirty;$('reset-cuts').disabled=active || pending;
     $('run').disabled=active || pending || dirty || promptDirty || !plan.approved || !plan.credential_configured;
-    $('pause').disabled=!active;$('refresh').disabled=pending;
+    $('pause').disabled=!active || plan.run_status==='merging' || pending;$('stop').disabled=!active || plan.run_status==='merging' || pending;$('refresh').disabled=pending;
     $('assemble').hidden=false;$('assemble').disabled=active || pending || dirty || promptDirty || !plan.approved || plan.segments.some(r=>r.job?.status!=='completed');
     $('reanalyze').disabled=active || pending || dirty || promptDirty || regenerating;
     $('restore').hidden=!regenerating;$('restore').disabled=active || pending || dirty || promptDirty || !plan.regeneration_can_restore;
@@ -233,6 +233,7 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     const frozen=plan.sampling_summary;
     $('summary').textContent=`seed ${plan.config.seed} · ${(frozen?.models || []).join('，')}`+(frozen?`\n${frozen.loras.map(l=>`${l.name} × ${l.strength}`).join('，')}`:'');
     $('project-path').textContent=`项目ID：${plan.id}`;$('cloud-recovery').hidden=local;$('recover').disabled=active || pending || dirty || promptDirty;
+    $('result').hidden=!plan.final_video;$('reveal-final').disabled=!plan.final_video || pending;$('final-path').textContent=plan.final_video || '';
     if(plan.final_video){$('result').hidden=false;$('result-note').textContent=plan.final_stale?'这是修改前的成片，待新分段生成后重新合并。':'完整成片';const url=base+'/file/final?version='+encodeURIComponent(plan.final_video);if($('video').dataset.version!==url){$('video').src=url;$('video').dataset.version=url;}}
     timeline?.drawTimeline();
   }
@@ -257,7 +258,13 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
   $('audio').src=base+'/file/audio';$('reference').src=base+'/file/reference';
   $('approve').onclick=saveCuts;
   $('reset-cuts').onclick=()=>{dirty=false;actionError='';apply(plan,true);};
-  $('run').onclick=()=>perform('run',{client_id:new URLSearchParams(location.search).get('client_id') || ''});$('pause').onclick=()=>perform('pause');$('assemble').onclick=()=>perform('assemble');$('restore').onclick=()=>perform('restore');
+  $('run').onclick=()=>perform('run',{client_id:new URLSearchParams(location.search).get('client_id') || ''});$('pause').onclick=()=>perform('pause');$('stop').onclick=async()=>{
+    const confirm=window.parent?.comfyAPI?.app?.app?.h3lvConfirmDialog;
+    const options={title:'停止提交后续片段？',message:'当前正在生成的片段会正常完成，完成后不再提交新的片段。',confirmText:'停止后续生成',confirmClass:'stop',tone:'warning'};
+    if(confirm?!await confirm(options):!window.confirm(options.message))return;
+    return perform('stop');
+  };$('assemble').onclick=()=>perform('assemble');$('restore').onclick=()=>perform('restore');
+  $('reveal-final').onclick=async()=>{try{const value=await request('reveal-final',{});$('final-path').textContent=value.path;}catch(error){fail(error);}};
   $('recover').onclick=()=>perform('recover',{index:Number($('recover-index').value)-1,task_id:$('recover-id').value});
   $('refresh').onclick=async()=>{await refresh();await loadPrompts();};
   try {

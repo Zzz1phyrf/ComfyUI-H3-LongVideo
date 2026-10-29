@@ -96,7 +96,7 @@ def node(graph, source, expected):
     return key
 
 
-def binding(graph):
+def binding(graph, vocal_reference=True):
     def single(kind):
         keys = [key for key, value in graph.items() if value.get('class_type') == kind]
         if len(keys) != 1:
@@ -109,14 +109,18 @@ def binding(graph):
     reference, sampler, output = single('MiniMaxH3ReferenceToVideo'), single('SelfLiftAvatarH3Sampler'), single('SaveVideo')
     creator = node(graph, graph[output]['inputs'].get('video'), 'CreateVideo')
     original = node(graph, graph[creator]['inputs'].get('audio'), 'LoadAudio')
-    vocals = node(graph, graph[reference]['inputs'].get('ref_audios.ref_audio_0'), 'LoadAudio')
-    if original == vocals:
-        raise ValueError('RH模板的原曲与分离人声必须使用两个LoadAudio输入。')
     combined = node(graph, graph[sampler]['inputs'].get('latent_image'), 'LTXVConcatAVLatent')
     mask = node(graph, graph[combined]['inputs'].get('audio_latent'), 'SetLatentNoiseMask')
     zero = node(graph, graph[mask]['inputs'].get('mask'), 'SolidMask')
     encode = node(graph, graph[mask]['inputs'].get('samples'), 'LTXVAudioVAEEncode')
-    if graph[zero]['inputs'].get('value') != 0 or graph[encode]['inputs'].get('audio') != [vocals,0]:
+    vocals = node(graph, graph[encode]['inputs'].get('audio'), 'LoadAudio')
+    if original == vocals:
+        raise ValueError('RH模板的原曲与分离人声必须使用两个LoadAudio输入。')
+    references = {k:v for k,v in graph[reference]['inputs'].items() if k.startswith('ref_audios.')}
+    if (vocal_reference and references.get('ref_audios.ref_audio_0') != [vocals,0]
+            or not vocal_reference and references):
+        raise ValueError('RH模板的人声参考与本段画面类型不一致。')
+    if graph[zero]['inputs'].get('value') != 0:
         raise ValueError('RH模板必须保留分离人声的音频latent零噪声遮罩。')
     decode = node(graph, graph[creator]['inputs'].get('images'), 'VAEDecode')
     video = node(graph, graph[combined]['inputs'].get('video_latent'), 'LTXVSeparateAVLatent')
@@ -272,8 +276,10 @@ def build_segment(root,pid,index,snapshot,client,folder):
         graph[mapping[key]]['inputs']['audio'] = client.upload(path)
     ref = graph[mapping['reference']]['inputs']
     for name in list(ref):
-        if name.startswith('ref_images.'):
+        if name.startswith(('ref_images.', 'ref_audios.')):
             ref.pop(name)
+    if material['visual_type'] == 'performance':
+        ref['ref_audios.ref_audio_0'] = [mapping['vocals'],0]
     for key,value in list(graph.items()):
         if value['class_type'] == 'LoadImage':
             graph.pop(key)
@@ -301,7 +307,10 @@ def validate_output(path,graph,row,mapping):
                 any(actual[k]['inputs'].get(field) != value for field,value in n['inputs'].items())
                 for k,n in graph.items()):
             raise ValueError
-        binding(actual)
+        # Existing paid tasks are checked against their immutable submission,
+        # including historical non-performance submissions with silent audio.
+        submitted_ref = graph[mapping['reference']]['inputs']
+        binding(actual, vocal_reference='ref_audios.ref_audio_0' in submitted_ref)
     except (KeyError,TypeError,ValueError):
         raise ValueError('RH原片的实际执行图与本段提交不一致；已保留任务和文件，停止后续生成。') from None
     save(path.with_name('actual_graph.json'),actual)

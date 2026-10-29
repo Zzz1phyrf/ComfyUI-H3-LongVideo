@@ -127,6 +127,30 @@ class LifecycleTests(unittest.TestCase):
         self.client.after_query=None;runner.change(self.root,self.pid,lambda p:p.update(pause_requested=False))
         self.run_project();self.assertEqual(len(self.client.created),2)
 
+    def test_stop_finishes_current_without_submitting_next_then_resumes(self):
+        self.client.after_query=lambda _:runner.change(self.root,self.pid,lambda p:p.update(stop_requested=True))
+        self.run_project();stopped=project.read_plan(self.root,self.pid)
+        self.assertEqual(stopped['run_status'],'stopped')
+        self.assertEqual(len(self.client.created),1)
+        first=stopped['segments'][0]['job'].copy()
+        self.assertEqual(first['status'],'completed')
+        self.client.after_query=None
+        runner.change(self.root,self.pid,lambda p:p.update(stop_requested=False))
+        self.run_project();resumed=project.read_plan(self.root,self.pid)
+        self.assertEqual(len(self.client.created),2)
+        self.assertEqual(resumed['segments'][0]['job'],first)
+        self.assertEqual(resumed['run_status'],'completed')
+
+    def test_stop_during_upload_prevents_task_submission(self):
+        upload=self.client.upload
+        def stop_upload(path,**kwargs):
+            runner.change(self.root,self.pid,lambda p:p.update(stop_requested=True))
+            return upload(path,**kwargs)
+        self.client.upload=stop_upload
+        self.run_project()
+        self.assertEqual(self.client.created,[])
+        self.assertEqual(project.read_plan(self.root,self.pid)['run_status'],'stopped')
+
     def test_changed_upstream_preserves_files_and_invalidates_dependents(self):
         self.run_project();old=project.read_plan(self.root,self.pid)
         p=project.update_cuts(self.root,self.pid,[158/24])

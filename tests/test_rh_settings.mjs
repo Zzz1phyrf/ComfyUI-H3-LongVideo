@@ -1,3 +1,4 @@
+import {alignProjectNode} from '../web/node_ui.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,7 +11,7 @@ function setup() {
   const dialog={style:{},innerHTML:'',querySelector:s=>controls[s.slice(6,-1)],querySelectorAll:()=>[controls.save,controls.clear,controls.close],addEventListener(){},showModal(){},close(){},remove(){}};
   const document={getElementById:()=>null,createElement:()=>dialog,body:{append(){}}};
   const api={async fetchApi(path,options){calls.push({path,options});return {ok:true,json:async()=>({configured:true,source:'local'})};}};
-  const funcs=vm.runInNewContext(source+'\n({showRHSettings})',{document,api,app:{registerExtension:e=>extension=e}});
+  const funcs=vm.runInNewContext(source+'\n({showRHSettings})',{alignProjectNode,document,api,app:{registerExtension:e=>extension=e}});
   return {extension,calls,controls,dialog,funcs};
 }
 

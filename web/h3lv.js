@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import {alignProjectNode} from './node_ui.js';
 import { materialEditor } from "./materials.js";
 import { createTimeline, pcmWavePeaks } from "./timeline.js";
 import { generationOutputs } from "./video_outputs.js";
@@ -242,6 +243,8 @@ async function projectManagerDialog(currentId, basePath="/h3lv") {
 
 // Both node panels use this plugin-owned dialog without importing an extension twice.
 app.h3lvProjectManager=projectManagerDialog;
+app.h3lvMessageDialog=messageDialog;
+app.h3lvConfirmDialog=confirmDialog;
 
 function chooseVideoOutput(outputs) {
   return new Promise(resolve => {
@@ -1142,7 +1145,7 @@ async function openReview(owner) {
     status.classList.remove("is-dirty");
     const failedIndex = plan.segments.findIndex(row => row.job?.status === "failed");
     runButton.textContent = failedIndex >= 0 ? `▶ 重试第 ${failedIndex+1} 段并继续` :
-      (["paused", "stopped"].includes(plan.run_status) ? "▶ 继续顺序生成" : "▶ 开始顺序生成");
+      "开始 / 继续生成";
     runButton.disabled=busy(plan);
     runButton.dataset.busy=String(busy(plan));
     notice.textContent = analysis.available === false ? analysis.reason :
@@ -1216,7 +1219,7 @@ async function openReview(owner) {
   actionButton(controls, "重新分析分段", async () => {
     await reanalyzeProject(owner);
   });
-  const runButton = actionButton(controls, "▶ 开始顺序生成", async () => {
+  const runButton = actionButton(controls, "开始 / 继续生成", async () => {
     if (dirty) throw new Error("请先保存修改并重新确认。");
     if (!plan?.approved) throw new Error("请先确认分段。");
     status.textContent='正在准备提交请求，尚未确认生成任务接收';
@@ -1248,7 +1251,7 @@ async function openReview(owner) {
   actionButton(controls, "当前段完成后暂停", async () => {
     await request(endpoint("/pause"), {}); await load();
   }, "pause");
-  actionButton(controls, "■ 停止后续生成", async () => {
+  actionButton(controls, "停止后续生成", async () => {
     if (!await confirmDialog({
       title: "停止提交后续片段？",
       message: "当前正在生成的片段会正常完成，完成后不再提交新的片段。",
@@ -1258,7 +1261,7 @@ async function openReview(owner) {
     })) return;
     await request(endpoint("/stop"), {}); await load();
   }, "stop");
-  actionButton(controls, "仅重新合成", async () => {
+  actionButton(controls, "仅重新合并", async () => {
     status.textContent='已发出合并请求，正在等待处理结果；原成片保留。';
     canvasProgress(owner,status.textContent);
     await request(endpoint("/assemble"), {}); await load();
@@ -1407,6 +1410,7 @@ app.registerExtension({
       const vocalsIndex = this.inputs?.findIndex(input => input.name === "vocals");
       if (vocalsIndex >= 0) this.removeInput(vocalsIndex);
       syncHiddenWidgetConnections(this);
+      alignProjectNode(this);
       return result;
     };
     const oldCreated = nodeType.prototype.onNodeCreated;
@@ -1455,7 +1459,8 @@ app.registerExtension({
       this.addWidget("button", "下载错误日志", null,
         () => downloadErrorLog().catch(error => messageDialog({
           title: "无法下载错误日志", message: error.message, tone: "error"}))).serialize = false;
-      setTimeout(() => resizeNodeToVisibleWidgets(this), 0);
+      canvasProgress(this,'尚未准备项目 · 请先重新分析并分段');
+      setTimeout(() => {alignProjectNode(this);resizeNodeToVisibleWidgets(this);}, 0);
       return result;
     };
     const oldExecuted = nodeType.prototype.onExecuted;

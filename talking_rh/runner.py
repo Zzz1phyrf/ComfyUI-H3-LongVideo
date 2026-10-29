@@ -125,6 +125,13 @@ def validate_prefix(previous,current,tail):
     return {'bit_exact':True,'previous_tail_start':tail,'prefix_tokens':PREFIX_TOKENS}
 
 
+def halt_requested(root,pid):
+    plan=read_plan(root,pid)
+    state='stopped' if plan.get('stop_requested') else 'paused' if plan.get('pause_requested') else None
+    if state:change(root,pid,lambda p:p.update(run_status=state))
+    return state
+
+
 def run_project(root,pid,client,*,validate=validate_outputs,assemble=None,sleep=time.sleep):
     directory = project_path(root,pid)
     plan = read_plan(root,pid)
@@ -133,9 +140,7 @@ def run_project(root,pid,client,*,validate=validate_outputs,assemble=None,sleep=
         raise ValueError('请先保存并确认分段。')
     for index in range(len(plan['segments'])):
         plan = read_plan(root,pid)
-        if plan.get('pause_requested'):
-            change(root,pid,lambda p:p.update(run_status='paused'))
-            return
+        if halt_requested(root,pid):return
         row = plan['segments'][index]
         job = row.get('job')
         if job and job.get('status')=='completed':
@@ -163,9 +168,7 @@ def run_project(root,pid,client,*,validate=validate_outputs,assemble=None,sleep=
                 uploaded['previous_latent'] = client.upload(previous['job']['latent'])
             graph = build(plan,row,uploaded,previous)
             (folder/'submitted_graph.json').write_text(json.dumps(graph,ensure_ascii=False,indent=2),encoding='utf-8')
-            if read_plan(root,pid).get('pause_requested'):
-                change(root,pid,lambda p:p.update(run_status='paused'))
-                return
+            if halt_requested(root,pid):return
             job = {'status':'creating_unknown','directory':str(folder),'created':time.time()}
             if plan['config'].get('backend')=='local':job['task_id']=client.reserve()
             change(root,pid,lambda p:p['segments'][index].update(job=job))
@@ -244,9 +247,7 @@ def run_project(root,pid,client,*,validate=validate_outputs,assemble=None,sleep=
         if overlap.enabled(plan):
             report(root,pid,'seams',index)
             with LOCK:overlap.resolve(root,read_plan(root,pid))
-    if read_plan(root,pid).get('pause_requested'):
-        change(root,pid,lambda p:p.update(run_status='paused'))
-        return
+    if halt_requested(root,pid):return
     change(root,pid,lambda p:p.update(run_status='merging'))
     report(root,pid,'merge',len(plan['segments'])-1)
     # start() already owns the run claim; the manual entry claims it separately.
@@ -268,7 +269,7 @@ def start(root,pid,client_factory=make_client,client_id=None):
             if plan.get('run_status')=='completed' and not plan.get('final_stale') and Path(plan.get('final_video','')).is_file():
                 handle.close()
                 return
-            plan.update(pause_requested=False,run_status='running',error='')
+            plan.update(pause_requested=False,stop_requested=False,run_status='running',error='')
             plan['progress']={'stage':'accepted','since':time.time()}
             write_plan(root,plan)
         except Exception:

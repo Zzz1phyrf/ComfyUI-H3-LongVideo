@@ -302,7 +302,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             for i,value in enumerate(created):
                 row = p['segments'][i];ref = value['136']['inputs']
                 self.assertEqual(ref['prompt'],f'Approved segment {i}')
-                self.assertEqual(ref['length'],row['generation_frames']);remote.binding(value)
+                self.assertEqual(ref['length'],row['generation_frames']);remote.binding(value,vocal_reference=i!=1)
                 self.assertEqual(len([n for n in value.values() if n['class_type']=='LoadImage']),1 if i==1 else 2)
                 original = uploads[value['9000']['inputs']['audio']];vocals = uploads[value['9001']['inputs']['audio']]
                 count = row['end_sample']-row['start_sample']

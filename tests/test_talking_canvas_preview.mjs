@@ -7,7 +7,7 @@ function setup(nodes=[]) {
   const events=[];
   let extension;
   const source=fs.readFileSync(new URL('../web/talking_rh.js',import.meta.url),'utf8').replace(/^import[^\n]*\n/gm,'');
-  const context={app:{graph:{_nodes:nodes},registerExtension(value){extension=value;}},syncHiddenWidgetConnections(){},
+  const context={alignProjectNode,app:{graph:{_nodes:nodes},registerExtension(value){extension=value;}},syncHiddenWidgetConnections(){},
     api:{dispatchCustomEvent:(name,event)=>events.push({name,event})}};
   vm.runInNewContext(source+'\nglobalThis.sync=syncTalkingVideo;globalThis.prepare=preparePublicCanvas;',context);
   return {...context,events,extension};
@@ -51,3 +51,4 @@ test('legacy ports migrate before core configuration, and late widget loading pr
   assert.equal(loaded.widgets[0].value,'本地');assert.equal(loaded.widgets[1].value,'saved-project');
   assert.equal(loaded.widgets[2].value,'prompt');
 });
+import {alignProjectNode} from '../web/node_ui.js';
