@@ -287,6 +287,10 @@ def validate_prompt(text, count, complete_sound=False):
         raise ValueError('扩写结果缺少 H3 六段结构，请重新扩写或修正后保存。')
     text = re.sub(r'<\s*(Picture|Audio|Subject)\s*(\d+)\s*>',
                   lambda match: '<' + match[1].capitalize() + ' ' + str(int(match[2])) + '>', text, flags=re.I)
+    # Explicit prose labels carry the same provenance; restore H3 punctuation
+    # without inventing picture roles or deriving references from filenames.
+    text = re.sub(r'(?i)(?<![\w</\\])\b(Picture|Audio|Subject)\s+(\d+)\b(?!\s*>)(?!\.(?:png|jpe?g|webp|gif|bmp|tiff?|wav|mp3|flac)\b)',
+                  lambda match: '<' + match[1].capitalize() + ' ' + str(int(match[2])) + '>', text)
     if any(not 1 <= int(n) <= count for n in re.findall(r'<Picture\s+(\d+)>', text)):
         raise ValueError('扩写结果引用了不存在的图片。')
     marker = 'detailed_description:\n'
