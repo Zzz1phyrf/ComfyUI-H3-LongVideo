@@ -70,8 +70,8 @@ def failure_report(error, stage='', index=None, plan=None):
         category, action = '显存不足', '降低分辨率或单段时长，或选择显存更大的实例后重试失败段。'
     elif any(word in combined for word in ('H3LVPromptExpand', '扩写', 'PromptExpand')):
         category, action = '提示词扩写', '检查扩写服务的模型、额度和网络；修复后重试失败段。'
-        if any(word in combined for word in ('参考图来源定义', '不存在的图片', 'H3 六段结构', '[Shot 1]', 'Audio 1', '误用了人声')):
-            action = '扩写正文的格式或参考图引用未通过校验；核对各图编号与用途，修正或重新扩写后重试失败段，已完成段保留。'
+        if any(word in combined for word in ('参考图来源定义', '不存在的图片', 'H3 六段结构', '[Shot 1]', 'Audio', '误用了人声')):
+            action = '扩写正文结构或素材引用未通过校验；核对参考图和音频的编号与用途，修正或重新扩写后重试失败段，已完成段保留。'
     elif '下载' in combined:
         category, action = '结果下载', '检查网络和磁盘空间；有任务 ID 时继续查询/下载同一个任务，不要重复生成。'
     elif stage == 'video_assembly':

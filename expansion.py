@@ -327,7 +327,6 @@ def validate_result(text, material):
     if material.get('contract_version', 1) < 2:
         return text
     definitions = text.split('summary:', 1)[0]
-    summary = text.split('summary:', 1)[1].split('retention_analysis:', 1)[0]
     retention = text.split('retention_analysis:', 1)[1].split('detailed_description:', 1)[0]
     defined = set(re.findall(r'<Picture\s+(\d+)>', definitions, re.I))
     expected = {str(i+1) for i in range(len(material['paths']))}
@@ -351,12 +350,28 @@ def validate_result(text, material):
             raise ValueError(f'多图扩写缺少参考图来源定义：{labels}。请在主体定义或保留关系中说明各图用途；尚未提交视频生成。')
     audio_refs = re.findall(r'<Audio\s+(\d+)>', text, re.I)
     if material['visual_type'] == 'performance':
-        if (set(audio_refs) != {'1'} or not re.search(r'<Audio\s+1>', definitions, re.I)
-                or not re.search(r'<Audio\s+1>', summary, re.I)):
-            raise ValueError('演唱扩写缺少 Audio 1 人声定义或摘要引用；尚未提交视频生成，请重新扩写。')
+        unexpected = set(audio_refs)-{'1'}
+        if unexpected:
+            labels = '、'.join(f'<Audio {n}>' for n in sorted(unexpected, key=int))
+            raise ValueError(f'扩写正文引用了未接入的音频：{labels}；本段演唱只提供 <Audio 1>，尚未提交视频生成。')
+        # This MV contract supplies one segment vocal stream. Its fixed binding
+        # belongs to the workflow, not to probabilistic model phrasing.
+        definitions = text.split('summary:', 1)[0]
+        summary = text.split('summary:', 1)[1].split('retention_analysis:', 1)[0]
+        if not re.search(r'<Audio\s+1>', definitions, re.I):
+            text = text.replace('summary:', '<Audio 1> is the supplied vocal timing reference for this segment, including articulation and pauses.\nsummary:', 1)
+        if not re.search(r'<Audio\s+1>', summary, re.I):
+            text = text.replace('retention_analysis:', 'The performer follows <Audio 1> for vocal timing, articulation and pauses.\nretention_analysis:', 1)
     elif audio_refs:
         raise ValueError('人物剧情或空镜扩写误用了人声参考，请重新扩写；尚未提交视频生成。')
     return text
+
+
+def store_prompt(path, text, model):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps({'text':text, 'model':model}, ensure_ascii=False), encoding='utf-8')
+    temporary.replace(path)
 
 
 @logged("prompt_expansion")
@@ -373,6 +388,15 @@ def expand(material, mode, model, rule, revision=0):
     cache = Path(material['cache_dir']); path = cache/(key+'.json')
     with EXPAND_LOCK:
         if path.exists(): return validate_result(json.loads(path.read_text(encoding='utf-8'))['text'], material)
+        invalid = path.with_suffix('.invalid.txt')
+        if invalid.is_file():
+            try:
+                recovered = validate_result(invalid.read_text(encoding='utf-8'), material)
+            except ValueError:
+                pass  # An explicit retry may request one new answer for unrepaired content.
+            else:
+                store_prompt(path, recovered, model)
+                return recovered
         context = {k: material[k] for k in (
             'material_note','visual_type','mode','brief','duration',
             'generation_frames','generation_seconds','audio_role','audio_section','audio_role_reason')}
@@ -407,8 +431,7 @@ def expand(material, mode, model, rule, revision=0):
                 path.with_suffix('.invalid.txt').write_text(answer, encoding='utf-8')
                 raise
         except (KeyError, IndexError, TypeError, AttributeError): raise ValueError('扩写 API 未返回有效文本。') from None
-        cache.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix('.tmp'); tmp.write_text(json.dumps({'text':text, 'model':model},ensure_ascii=False),encoding='utf-8'); tmp.replace(path)
+        store_prompt(path, text, model)
         return text
 
 

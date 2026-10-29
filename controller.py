@@ -289,9 +289,10 @@ def apply_segment_references(prompt, plan, row, directory):
                 inputs.pop(key)
         for i in range(len(value['refs'])):
             inputs[f'ref_images.ref_image_{i}'] = [loaders[0], 5+i]
-        if value['visual_type'] in {'atmosphere', 'environment'}:
-            for key in list(inputs):
-                if key.startswith('ref_audios.ref_audio_'): inputs.pop(key)
+        for key in list(inputs):
+            if key.startswith('ref_audios.ref_audio_'): inputs.pop(key)
+        if value['visual_type'] == 'performance':
+            inputs['ref_audios.ref_audio_0'] = [loaders[0], 1]
         return
     names = list(row.get("refs") or [])
     limit = plan.get("reference_default_count")

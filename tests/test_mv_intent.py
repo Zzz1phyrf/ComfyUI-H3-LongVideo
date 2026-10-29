@@ -81,10 +81,10 @@ class IntentTests(unittest.TestCase):
         self.assertEqual(row['job']['video'],'old.mp4')
         self.assertTrue(row['needs_regeneration'])
 
-    def test_contract_rejects_missing_audio_and_environment_audio(self):
+    def test_contract_completes_performance_audio_and_rejects_environment_audio(self):
         packet=materials.packet(self.plan,self.plan['segments'][0],self.directory)
         no_audio=TEXT.replace('<Audio 1> is singing.','').replace('follows <Audio 1>.','.')
-        with self.assertRaisesRegex(ValueError,'Audio 1'): expansion.validate_result(no_audio,packet)
+        self.assertIn('<Audio 1>', expansion.validate_result(no_audio,packet))
         packet['visual_type']='environment'
         with self.assertRaisesRegex(ValueError,'误用了人声'): expansion.validate_result(TEXT+' <Audio 1>',packet)
 
