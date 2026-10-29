@@ -3,6 +3,25 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 
+test("preview options distinguish CLI settings and preserve old node defaults", () => {
+  const source = fs.readFileSync(new URL("../web/expansion.js", import.meta.url), "utf8")
+    .replace(/^import .*;\r?\n/gm, "");
+  const context = {app: {registerExtension() {}}, api: {}, reportUiError() {}, withUiLogging: x => x};
+  vm.runInNewContext(source+"\nglobalThis.readOptions = options;", context);
+  const widgets = Object.entries({mode: "vision", model: "api-model", rule: "rule", revision: 2})
+    .map(([name,value]) => ({name,value}));
+  const legacy = JSON.parse(JSON.stringify(context.readOptions({widgets})));
+  assert.equal(legacy.provider, "api");
+  assert.equal(legacy.codex_model, "");
+  widgets.push(...Object.entries({provider: "codex_cli", codex_model: "gpt-fixture",
+    codex_reasoning: "high", codex_timeout: 600}).map(([name,value]) => ({name,value})));
+  const current = JSON.parse(JSON.stringify(context.readOptions({widgets})));
+  assert.equal(current.provider, "codex_cli");
+  assert.equal(current.codex_model, "gpt-fixture");
+  assert.equal(current.codex_reasoning, "high");
+  assert.equal(current.codex_timeout, 600);
+});
+
 test("API settings UI preserves legacy profiles and sends new options without serializing widgets", async () => {
   const elements = [], requests = [];
   const document = {body: {append() {}}, createElement(tag) {

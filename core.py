@@ -1477,6 +1477,38 @@ def request_regeneration(row, reason):
     row.pop("regeneration_reason", None)
 
 
+def apply_expansion_results(plan, candidates):
+    """Apply validated candidates as one revision, retaining prior edited text/takes."""
+    updated = copy.deepcopy(plan)
+    changed, seen = [], set()
+    for candidate in candidates:
+        index = candidate['index']
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(updated['segments']) or index in seen:
+            raise ValueError('批量保存的分段编号无效或重复。')
+        seen.add(index)
+        row = updated['segments'][index]
+        text = candidate['text']
+        if row.get('final_prompt'):
+            raise ValueError('本段已有手写直通提示词，请先在审核面板处理后再应用扩写结果。')
+        if row.get('expanded_prompt', '') == text:
+            continue
+        if row.get('expanded_prompt'):
+            row.setdefault('expanded_history', []).append({
+                'text': row['expanded_prompt'], 'key': row.get('expanded_key'),
+                'source': row.get('expanded_source', 'legacy'), 'batch_id': candidate.get('batch_id')})
+        row.update(expanded_prompt=text, expanded_key=candidate['key'],
+                   expanded_source='edited' if candidate.get('edited') else 'generated',
+                   expanded_generated_hash=hashlib.sha256(candidate.get('generated_text', text).encode('utf-8')).hexdigest())
+        request_regeneration(row, '批量扩写提示词已修改')
+        changed.append(index)
+    if changed:
+        updated.update(revision=updated.get('revision', 0)+1, approved=False,
+                       run_status='draft', changed_segments=changed)
+        if updated.get('final_video'):
+            updated['final_stale'] = True
+    return updated, changed
+
+
 def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, materials=UNSET, split_time=UNSET, remove_cut=UNSET):
     if remove_cut is not UNSET:
         if split_time is not UNSET:

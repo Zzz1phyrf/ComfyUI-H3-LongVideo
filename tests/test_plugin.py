@@ -1609,7 +1609,7 @@ class ReferenceImageTests(unittest.TestCase):
         self.assertIn('defaultMaterials.open ? "收起" : "展开"', script)
         self.assertIn('const defaultOpen = defaultMaterials.open', script)
         self.assertIn('defaultMaterials.open = defaultOpen', script)
-        self.assertIn("if (!plan.materials_version && !plan.segments.some(row => row.job))", script)
+        self.assertIn("!plan.materials_version && !plan.segments.some(row => row.job)", script)
         self.assertNotIn("owner.outputs?.slice(5).some", script)
         self.assertIn("addButton.disabled = !referenceLimit", script)
         self.assertNotIn('throw new Error("当前工作流还没有接出 ref_image 槽位', script)

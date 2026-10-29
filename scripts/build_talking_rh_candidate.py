@@ -9,7 +9,8 @@ import zipfile
 def build(output):
     root=Path(__file__).resolve().parents[1]
     names=['__init__.py','nodes.py','core.py','storage.py','controller.py','routes.py','director_rules.py',
-           'materials.py','diagnostics.py','workflow_errors.py','expansion.py','progress.py','worker.py','mv_rh.py','rh_credentials.py','requirements.txt',
+           'materials.py','asset_library.py','diagnostics.py','workflow_errors.py','expansion.py',
+           'codex_cli.py','expansion_jobs.py','h3_prompt_rules.py','progress.py','worker.py','mv_rh.py','rh_credentials.py','requirements.txt',
            'README.md','README_TALKING_RH.md','FRIEND_TESTING.md','MV_RUNNINGHUB.md','TALKING_CANVAS.md','TALKING_OVERLAP.md',
            'scripts/migrate_talking_resolution.py','scripts/migrate_talking_sampler.py',
            'CHANGELOG.md','ref2va_performance_rule.txt',
