@@ -1,0 +1,50 @@
+# 朋友测试说明 · 2026-10-29
+
+这是当前MV与口播功能测试包。包含插件运行代码、前端、示例工作流及说明；模型、第三方节点、用户音频/图片/视频、项目记录和API Key需使用测试者自己的配置。
+
+本次是完整包，已包含此前所有修复，不必再安装单独的补丁。旧版升级可直接合并覆盖同名插件文件夹；不要删除用户目录、output 或原项目。
+
+## 安装
+
+1. 将ZIP中的整个 `ComfyUI-H3-LongVideo` 文件夹放入 `ComfyUI/custom_nodes/`。确认文件夹内直接有 `__init__.py`，避免多套一层目录。升级时保留单份该插件，避免重复节点注册。
+2. 在ComfyUI实际使用的Python环境安装该文件夹中的 `requirements.txt`。便携版使用其自带Python；虚拟环境先激活对应环境。
+3. 准备 `ffmpeg` 和 `ffprobe`，确保ComfyUI进程可以找到。
+4. 重启ComfyUI并刷新浏览器。启动失败先保留控制台完整错误信息。
+
+## 从哪张工作流开始
+
+| 用途 | 导入文件 | 额外节点 |
+|---|---|---|
+| 歌曲MV | `examples/07_H3MV_本地与RH.json` | `ComfyUI-KJNodes`（MiniMaxChunkFeedForward、MiniMaxLowVRAMAttention）、`selflift-Avatar`（SelfLiftAvatarH3Sampler）、`ComfyUI-YCNodes-MiniMax-H3`（H3SigmaRefiner） |
+| 口播数字人 | `examples/13_H3口播_独立窗口_本地展开.json` | `audio-separation-nodes-comfyui`（AudioSeparation） |
+
+上述归属依据打包时本机实际节点注册信息。ComfyUI本身须提供MiniMaxH3ReferenceToVideo、ResolutionSelector、CreateVideo/SaveVideo及相关音视频latent节点。缺失节点时，按节点名检查其所属包或ComfyUI版本。旧版兼容示例04/05/06/09/10/11不作为本次测试入口。
+
+所有模型/LoRA/CLIP/VAE加载节点，都要重新选择自己机器上实际存在的文件名；示例文件名只是参考。口播使用人物连场景的一张图片和原声。MV在分段面板上传参考图。音频分离需要HDEMUCS；MV语音识别还需要Faster-Whisper模型缓存，首次准备可能需要下载对应模型。
+
+MV示例的Prompt Expander需配置测试者自己的扩写API；也可使用已有完整H3提示词，将MV节点的 `segment_prompt` 连接到Ref2VA的prompt。API Key通过节点设置填写，不写入工作流。
+
+## 基本测试流程
+
+1. 上传自己的音频；口播再上传参考图。先检查模型节点、外部分辨率和采样参数。本地模式无需RH Key。
+2. 普通“运行”先准备分段和项目；试听，拖动/增加/删除切点，检查每段4–15秒的范围，再保存并确认。
+3. 从分段面板“开始 / 继续生成”。记录首段速度、显存、口型/人物/构图；测试暂停及继续时是否复用已完成段。
+4. 口播每段提示词可内嵌编辑；保存文本本身不生成，加入重做后再开始才提交。改变全局模型、种子或尺寸时创建新项目。
+5. 最后一段完成后自动合并；失败时可点“仅重新合并”复用已有片段。口播画布唯一视频输出会从分段原片切换为完整成片，无需额外Talking Merge分支。
+6. 两类面板的项目下拉旁都有“管理项目”。支持筛选、批量选择、空间统计；“同时删除最终合成视频”默认未勾选，删除前会再次确认。
+
+口播种子直接在标准K采样器设置为fixed；分辨率用外部ResolutionSelector（倍数32）。模型、LoRA、条件、采样与解码均在画布上。
+
+使用RH时，在自己账户导入08 MV或15口播计算模板，填写自己的工作流ID与Key。云端生成可能产生费用；本包不代填共享账户。14仅为可选精简口播控制示例。
+
+## 成片位置与已知问题
+
+- 旧版的 `output/H3TalkingRH/projects` 口播与 `output/H3LongVideo/projects` MV 项目可原地继续、预览和管理，旧成片与任务记录不会搬迁或删除。新项目及补合并成片使用下列分类目录。
+- 若扩写失败停在某段，修正后只重试该段并继续，已完成的前段保留；双图应说明两张 Picture 的用途，Subject 数量按实际主体确定。
+- 口播：`ComfyUI/output/H3LongVideo/口播/final_videos/`。
+- MV：`ComfyUI/output/H3LongVideo/MV/final_videos/`。
+- 本机RTX5070/12GB已跑通口播1.0MP（768×1376）与MV0.7MP（1152×640）完整流程。MV本次按1.0→0.9→0.8→0.7逐级测试，前三档发生OOM。这个结果不代表其他设备的显存上限。
+- 口播画质尚未通过：部分段会变近景，出现异常手部/叠影及接缝跳变。质感LoRA为0的完整对照也未解决全部问题，示例未将其设为默认。
+- 本包已做CPU/模拟后端、前端与解压导入检查；朋友的实际环境仍需测试，不将接口或回归通过等同于画质通过。
+
+反馈请附：GPU和显存、ComfyUI/Python版本、工作流文件、后端、模型/LoRA及分辨率、复现步骤、原始报错和异常片段。不要发送API Key；测试素材请使用可分享的内容。

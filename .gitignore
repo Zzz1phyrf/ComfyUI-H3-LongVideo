@@ -11,3 +11,5 @@ settings.json
 output/
 input/
 models/
+
+runninghub_api.json

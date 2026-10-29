@@ -50,7 +50,7 @@ class ClockTests(unittest.TestCase):
 
 class FakeClient:
     def __init__(self):self.created=[];self.downloads=[];self.fail_create=False;self.fail_download=False;self.after_query=None
-    def upload(self,path):return 'uploaded_'+project.digest(path)
+    def upload(self,path,*,attempt=''):return 'uploaded_'+project.digest(path)+('_'+attempt if attempt else '')
     def create(self,value):
         self.created.append(value)
         if self.fail_create:raise remote.RemoteError('Unconfirmed creation')

@@ -1,11 +1,12 @@
 """Single RH task transport. Credentials and result URLs are never persisted."""
-import os
 import json
+import logging
 from pathlib import Path
 from urllib.parse import urlsplit
 import uuid
 
 import requests
+from ..rh_credentials import api_key
 
 
 class RemoteError(RuntimeError):
@@ -29,9 +30,9 @@ class Client:
     def __init__(self,config):
         validate_config(config)
         self.config = config
-        self.key = os.environ.get('RUNNINGHUB_API_KEY','').strip()
+        self.key = api_key(config['base_url'])
         if not self.key:
-            raise RemoteError('未配置RUNNINGHUB_API_KEY。请在启动本地ComfyUI的进程环境中设置后重启。')
+            raise RemoteError('未配置RH API Key。请点击节点上的“RH API 设置”，选择对应站点并保存，然后重新检查配置。')
         self.headers = {'Authorization':'Bearer '+self.key}
 
     def _post(self,path,body,timeout=60):
@@ -57,9 +58,11 @@ class Client:
             raise RemoteError('素材上传失败，尚未提交新的生成任务。请检查网络后继续。') from None
 
     def create(self,graph):
+        seed_node=str(self.config.get('seed_node','270'))
+        seed_field='noise_seed' if graph.get(seed_node,{}).get('class_type')=='SamplerCustom' else 'seed'
         data = self._post('/task/openapi/create',{
             'workflowId':self.config['workflow_id'],'workflow':json.dumps(graph,ensure_ascii=False),
-            'nodeInfoList':[{'nodeId':'270','fieldName':'seed','fieldValue':self.config['seed']}],
+            'nodeInfoList':[{'nodeId':seed_node,'fieldName':seed_field,'fieldValue':self.config['seed']}],
             'instanceType':self.config['instance_type'],'addMetadata':True,'apiKey':self.key},120)
         task_id = str((data.get('data') or {}).get('taskId') or '')
         if data.get('code')!=0:
@@ -67,6 +70,17 @@ class Client:
         if not task_id.isdigit():
             raise RemoteError('RH没有返回有效任务ID，创建结果未知；请到RH任务列表核对后绑定任务ID。')
         return task_id
+
+    def workflow(self):
+        data = self._post('/api/openapi/getJsonApiFormat',
+            {'apiKey':self.key,'workflowId':self.config['workflow_id']})
+        value = (data.get('data') or {}).get('prompt')
+        if data.get('code') != 0 or not isinstance(value,(str,dict)):
+            raise RemoteError('无法读取RH工作流，请检查ID、区域及访问权限。尚未提交生成任务。')
+        try:
+            return json.loads(value) if isinstance(value,str) else value
+        except ValueError:
+            raise RemoteError('RH工作流不是有效API图；尚未提交生成任务。') from None
 
     def query(self,task_id):
         return self._post('/openapi/v2/query',{'taskId':str(task_id)})
@@ -78,12 +92,20 @@ class Client:
         if target.is_file():
             return
         partial = target.with_name('.'+target.name+'.'+uuid.uuid4().hex+'.part')
+        created = False
         try:
             with requests.get(url,stream=True,timeout=180) as response:
                 response.raise_for_status()
                 with partial.open('xb') as stream:
+                    created = True
                     for block in response.iter_content(1024*1024):
                         stream.write(block)
             partial.replace(target)
         except requests.RequestException:
             raise RemoteError('RH结果下载失败。已保存任务ID，继续时只下载同一任务，不重复生成。') from None
+        finally:
+            if created:
+                try:
+                    partial.unlink(missing_ok=True)
+                except OSError as exc:
+                    logging.warning('[H3LongVideo] 无法清理本次下载残片（%s）：%s', type(exc).__name__, partial)

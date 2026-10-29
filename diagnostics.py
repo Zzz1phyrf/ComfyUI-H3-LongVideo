@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import threading
 import traceback
+from .storage import MV_PREFIX, output_path
 
 MAX_BYTES = 2 * 1024 * 1024
 BACKUP_COUNT = 2
@@ -24,8 +25,7 @@ class ErrorFileHandler(RotatingFileHandler):
 
 
 def error_log_path():
-    import folder_paths
-    return Path(folder_paths.get_output_directory()) / "H3LongVideo" / "logs" / "errors.log"
+    return output_path(MV_PREFIX) / "logs" / "errors.log"
 
 
 def configured_key():
@@ -38,6 +38,8 @@ def configured_key():
 
 def redact(value, key="", limit=12000):
     text = str(value)[:131072]
+    from .rh_credentials import redact_keys
+    text = redact_keys(text)
     if key:
         text = text.replace(key, "[REDACTED]")
     text = re.sub(r"(?i)\bBearer\s+[^\s\"'<>]+", "Bearer [REDACTED]", text)

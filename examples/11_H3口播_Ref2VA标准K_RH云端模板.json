@@ -1,0 +1,1538 @@
+{
+  "revision": 0,
+  "last_node_id": 10009,
+  "last_link_id": 35,
+  "nodes": [
+    {
+      "id": 115,
+      "type": "ResolutionSelector",
+      "pos": [
+        100,
+        130
+      ],
+      "size": [
+        270,
+        126
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "preview",
+          "name": "preview",
+          "shape": 7,
+          "type": "RESOLUTION_PREVIEW",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "width",
+          "name": "width",
+          "type": "INT",
+          "links": [
+            12
+          ]
+        },
+        {
+          "label": "height",
+          "name": "height",
+          "type": "INT",
+          "links": [
+            13
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "ResolutionSelector"
+      },
+      "widgets_values": [
+        "9:16 (Portrait Widescreen)",
+        1,
+        32
+      ]
+    },
+    {
+      "id": 122,
+      "type": "VAEDecode",
+      "pos": [
+        3000.603271484375,
+        130
+      ],
+      "size": [
+        140,
+        46
+      ],
+      "flags": {},
+      "order": 23,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "Latent",
+          "name": "samples",
+          "type": "LATENT",
+          "link": 1
+        },
+        {
+          "label": "VAE",
+          "name": "vae",
+          "type": "VAE",
+          "link": 2
+        }
+      ],
+      "outputs": [
+        {
+          "label": "图像",
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            24
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "VAEDecode"
+      }
+    },
+    {
+      "id": 246,
+      "type": "LTXVConcatAVLatent",
+      "pos": [
+        2120.94482421875,
+        130
+      ],
+      "size": [
+        148.59823608398438,
+        46
+      ],
+      "flags": {},
+      "order": 20,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "video_latent",
+          "name": "video_latent",
+          "type": "LATENT",
+          "link": 3
+        },
+        {
+          "label": "audio_latent",
+          "name": "audio_latent",
+          "type": "LATENT",
+          "link": 4
+        }
+      ],
+      "outputs": [
+        {
+          "label": "latent",
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            23
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "LTXVConcatAVLatent"
+      }
+    },
+    {
+      "id": 248,
+      "type": "LTXVAudioVAEEncode",
+      "pos": [
+        470,
+        426
+      ],
+      "size": [
+        195.80722045898438,
+        46
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "audio",
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 5
+        },
+        {
+          "label": "audio_vae",
+          "name": "audio_vae",
+          "type": "VAE",
+          "link": 6
+        }
+      ],
+      "outputs": [
+        {
+          "label": "Audio Latent",
+          "name": "Audio Latent",
+          "type": "LATENT",
+          "links": [
+            7
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "LTXVAudioVAEEncode"
+      }
+    },
+    {
+      "id": 249,
+      "type": "SolidMask",
+      "pos": [
+        100,
+        386
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "label": "遮罩",
+          "name": "MASK",
+          "type": "MASK",
+          "links": [
+            8
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "SolidMask"
+      },
+      "widgets_values": [
+        0,
+        64,
+        64
+      ]
+    },
+    {
+      "id": 250,
+      "type": "SetLatentNoiseMask",
+      "pos": [
+        840,
+        624
+      ],
+      "size": [
+        162.82382202148438,
+        46
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "Latent",
+          "name": "samples",
+          "type": "LATENT",
+          "link": 7
+        },
+        {
+          "label": "遮罩",
+          "name": "mask",
+          "type": "MASK",
+          "link": 8
+        }
+      ],
+      "outputs": [
+        {
+          "label": "Latent",
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "SetLatentNoiseMask"
+      }
+    },
+    {
+      "id": 251,
+      "type": "LTXVSeparateAVLatent",
+      "pos": [
+        2739.543212890625,
+        130
+      ],
+      "size": [
+        161.06015014648438,
+        46
+      ],
+      "flags": {},
+      "order": 22,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "av_latent",
+          "name": "av_latent",
+          "type": "LATENT",
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "label": "video_latent",
+          "name": "video_latent",
+          "type": "LATENT",
+          "links": [
+            1,
+            30
+          ]
+        },
+        {
+          "label": "audio_latent",
+          "name": "audio_latent",
+          "type": "LATENT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "LTXVSeparateAVLatent"
+      }
+    },
+    {
+      "id": 268,
+      "type": "MiniMaxH3ReferenceToVideo",
+      "pos": [
+        840,
+        130
+      ],
+      "size": [
+        400,
+        364
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "clip",
+          "name": "clip",
+          "type": "CLIP",
+          "link": 10
+        },
+        {
+          "label": "vae",
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": 11
+        },
+        {
+          "label": "audio_vae",
+          "name": "audio_vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": 16
+        },
+        {
+          "label": "ref_images.ref_image_0",
+          "name": "ref_images.ref_image_0",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 14
+        },
+        {
+          "label": "ref_image_1",
+          "name": "ref_images.ref_image_1",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 15
+        },
+        {
+          "label": "ref_image_2",
+          "name": "ref_images.ref_image_2",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "label": "ref_videos.ref_video_0",
+          "name": "ref_videos.ref_video_0",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "label": "ref_video_audios.ref_video_audio_0",
+          "name": "ref_video_audios.ref_video_audio_0",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "label": "ref_audios.ref_audio_0",
+          "name": "ref_audios.ref_audio_0",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 17
+        },
+        {
+          "label": "ref_audio_1",
+          "name": "ref_audios.ref_audio_1",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "label": "width",
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": 12
+        },
+        {
+          "label": "height",
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": 13
+        }
+      ],
+      "outputs": [
+        {
+          "label": "positive",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            19,
+            35
+          ]
+        },
+        {
+          "label": "LATENT",
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            27
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "MiniMaxH3ReferenceToVideo"
+      },
+      "widgets_values": [
+        "How the reference image is aligned with the target video - Image 1 (from Shot 1) is aligned with the 0.00 second mark of the target video; Image 2 (from Shot 1) is aligned with the last frame mark of the target video.\n\nIntegrated_multimodal_description: [Shot 1] A live-action, cinematic, still shot of a portrait composition starting with the precise pose, hand placement, framing, lighting, and color identified in Figure 1. The camera remains completely still - no pan, tilt, push, zoom, truck, roll or handheld movement - background objects, walls, lights and composition never move or change. The character's lip movements are synchronized with <Audio 1>. His eyes remain on the camera, natural blinks and slight changes in expression passing over his face. His head remains level and centered at the same angle and in the same position, with only barely noticeable slight adjustments, never turning, tilting, nodding, or tilting. Keep hands below chin, relaxed and half-open, never grasping, pointing, holding objects, crossing or covering face. His movements then narrow and stabilize, and by the end of the shot he has achieved the exact sitting position, hand position, mouth shape, gaze, framing, lighting, and color identified in Figure 2.",
+        1344,
+        768,
+        175,
+        "match"
+      ]
+    },
+    {
+      "id": 270,
+      "type": "SamplerCustom",
+      "pos": [
+        2369.543212890625,
+        130
+      ],
+      "size": [
+        270,
+        230
+      ],
+      "flags": {},
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "link": 18
+        },
+        {
+          "label": "正面条件",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 19
+        },
+        {
+          "label": "负面条件",
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 20
+        },
+        {
+          "label": "采样器",
+          "name": "sampler",
+          "type": "SAMPLER",
+          "link": 21
+        },
+        {
+          "label": "Sigmas",
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "link": 22
+        },
+        {
+          "label": "Latent",
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 23
+        }
+      ],
+      "outputs": [
+        {
+          "label": "输出",
+          "name": "output",
+          "type": "LATENT",
+          "links": [
+            9
+          ]
+        },
+        {
+          "label": "降噪输出",
+          "name": "denoised_output",
+          "type": "LATENT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "SamplerCustom"
+      },
+      "widgets_values": [
+        true,
+        999,
+        "fixed",
+        1
+      ]
+    },
+    {
+      "id": 272,
+      "type": "CreateVideo",
+      "pos": [
+        3370.603271484375,
+        130
+      ],
+      "size": [
+        270,
+        150
+      ],
+      "flags": {},
+      "order": 25,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 24
+        },
+        {
+          "label": "audio",
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 25
+        }
+      ],
+      "outputs": [
+        {
+          "label": "VIDEO",
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            26
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "CreateVideo"
+      },
+      "widgets_values": [
+        24,
+        8,
+        "sRGB",
+        "none"
+      ]
+    },
+    {
+      "id": 273,
+      "type": "SaveVideo",
+      "pos": [
+        3740.603271484375,
+        130
+      ],
+      "size": [
+        210,
+        204
+      ],
+      "flags": {},
+      "order": 26,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "video",
+          "name": "video",
+          "type": "VIDEO",
+          "link": 26
+        }
+      ],
+      "outputs": [
+        {
+          "label": "video_url",
+          "name": "video_url",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "label": "video",
+          "name": "video",
+          "type": "VIDEO",
+          "links": null
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "SaveVideo"
+      },
+      "widgets_values": [
+        "H3LongVideo/口播/RH_K/video",
+        "auto",
+        "auto",
+        "auto"
+      ]
+    },
+    {
+      "id": 9000,
+      "type": "LoadAudio",
+      "pos": [
+        100,
+        622
+      ],
+      "size": [
+        270,
+        136
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "label": "音频",
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            5,
+            25,
+            33
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "LoadAudio"
+      },
+      "widgets_values": [
+        "speech.wav",
+        null,
+        ""
+      ]
+    },
+    {
+      "id": 9001,
+      "type": "LoadImage",
+      "pos": [
+        100,
+        888
+      ],
+      "size": [
+        270,
+        102
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "label": "图像",
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            14,
+            15
+          ]
+        },
+        {
+          "label": "遮罩",
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "reference.png",
+        "image"
+      ]
+    },
+    {
+      "id": 9101,
+      "type": "LTXVSeparateAVLatent",
+      "pos": [
+        1340,
+        286
+      ],
+      "size": [
+        161.06015014648438,
+        46
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "av_latent",
+          "name": "av_latent",
+          "type": "LATENT",
+          "link": 27
+        }
+      ],
+      "outputs": [
+        {
+          "label": "video_latent",
+          "name": "video_latent",
+          "type": "LATENT",
+          "links": [
+            28
+          ]
+        },
+        {
+          "label": "audio_latent",
+          "name": "audio_latent",
+          "type": "LATENT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "LTXVSeparateAVLatent"
+      }
+    },
+    {
+      "id": 9103,
+      "type": "SolidMask",
+      "pos": [
+        100,
+        1120
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "label": "遮罩",
+          "name": "MASK",
+          "type": "MASK",
+          "links": [
+            29
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "SolidMask"
+      },
+      "widgets_values": [
+        1,
+        64,
+        64
+      ]
+    },
+    {
+      "id": 9104,
+      "type": "LTXVSetVideoLatentNoiseMasks",
+      "pos": [
+        1710,
+        130
+      ],
+      "size": [
+        310.9449157714844,
+        46
+      ],
+      "flags": {},
+      "order": 19,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "samples",
+          "name": "samples",
+          "type": "LATENT",
+          "link": 28
+        },
+        {
+          "label": "masks",
+          "name": "masks",
+          "type": "MASK",
+          "link": 29
+        }
+      ],
+      "outputs": [
+        {
+          "label": "LATENT",
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            3
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "LTXVSetVideoLatentNoiseMasks"
+      }
+    },
+    {
+      "id": 9200,
+      "type": "SaveLatent",
+      "pos": [
+        3000.603271484375,
+        306
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 24,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "Latent",
+          "name": "samples",
+          "type": "LATENT",
+          "link": 30
+        }
+      ],
+      "outputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "SaveLatent"
+      },
+      "widgets_values": [
+        "H3LongVideo/口播/RH_K/latent"
+      ]
+    },
+    {
+      "id": 10000,
+      "type": "ModelAttentionBackend",
+      "pos": [
+        470,
+        602
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "model",
+          "name": "model",
+          "type": "MODEL",
+          "link": 31
+        }
+      ],
+      "outputs": [
+        {
+          "label": "model",
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            32
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "ModelAttentionBackend"
+      },
+      "widgets_values": [
+        "comfy kitchen attention"
+      ]
+    },
+    {
+      "id": 10001,
+      "type": "CLIPLoader",
+      "pos": [
+        100,
+        1356
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "label": "CLIP",
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "CLIPLoader"
+      },
+      "widgets_values": [
+        "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+        "minimax",
+        "default"
+      ]
+    },
+    {
+      "id": 10002,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        840,
+        800
+      ],
+      "size": [
+        270,
+        82
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "link": 32
+        }
+      ],
+      "outputs": [
+        {
+          "label": "模型",
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            18,
+            34
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "LoraLoaderModelOnly"
+      },
+      "widgets_values": [
+        "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+        1.0000000000000002
+      ]
+    },
+    {
+      "id": 10003,
+      "type": "VAELoader",
+      "pos": [
+        100,
+        1592
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            2,
+            11
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "VAELoader"
+      },
+      "widgets_values": [
+        "minimax_h3_video_vae_int8_convrot.safetensors"
+      ]
+    },
+    {
+      "id": 10004,
+      "type": "VAELoader",
+      "pos": [
+        100,
+        1780
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            6,
+            16
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "VAELoader"
+      },
+      "widgets_values": [
+        "minimax_h3_audio_vae_fp32.safetensors"
+      ]
+    },
+    {
+      "id": 10005,
+      "type": "UNETLoader",
+      "pos": [
+        100,
+        1968
+      ],
+      "size": [
+        270,
+        82
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "label": "模型",
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            31
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "UNETLoader"
+      },
+      "widgets_values": [
+        "minimax_h3_ref2va_pruned_bf16.safetensors",
+        "default"
+      ]
+    },
+    {
+      "id": 10006,
+      "type": "AudioSeparation",
+      "pos": [
+        470,
+        130
+      ],
+      "size": [
+        270,
+        166
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "audio",
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 33
+        }
+      ],
+      "outputs": [
+        {
+          "label": "Bass",
+          "name": "Bass",
+          "type": "AUDIO",
+          "links": null
+        },
+        {
+          "label": "Drums",
+          "name": "Drums",
+          "type": "AUDIO",
+          "links": null
+        },
+        {
+          "label": "Other",
+          "name": "Other",
+          "type": "AUDIO",
+          "links": null
+        },
+        {
+          "label": "Vocals",
+          "name": "Vocals",
+          "type": "AUDIO",
+          "links": [
+            17
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "AudioSeparation"
+      },
+      "widgets_values": [
+        "linear",
+        10,
+        0.1
+      ]
+    },
+    {
+      "id": 10007,
+      "type": "KSamplerSelect",
+      "pos": [
+        100,
+        2180
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "label": "采样器",
+          "name": "SAMPLER",
+          "type": "SAMPLER",
+          "links": [
+            21
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "KSamplerSelect"
+      },
+      "widgets_values": [
+        "res_multistep"
+      ]
+    },
+    {
+      "id": 10008,
+      "type": "BasicScheduler",
+      "pos": [
+        1340,
+        462
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "link": 34
+        }
+      ],
+      "outputs": [
+        {
+          "label": "Sigmas",
+          "name": "SIGMAS",
+          "type": "SIGMAS",
+          "links": [
+            22
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "BasicScheduler"
+      },
+      "widgets_values": [
+        "simple",
+        4,
+        1
+      ]
+    },
+    {
+      "id": 10009,
+      "type": "ConditioningZeroOut",
+      "pos": [
+        1340,
+        130
+      ],
+      "size": [
+        140,
+        26
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "条件",
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "link": 35
+        }
+      ],
+      "outputs": [
+        {
+          "label": "条件",
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            20
+          ]
+        }
+      ],
+      "properties": {
+        "widget_ue_connectable": {},
+        "Node name for S&R": "ConditioningZeroOut"
+      }
+    }
+  ],
+  "links": [
+    [
+      1,
+      251,
+      0,
+      122,
+      0,
+      "LATENT"
+    ],
+    [
+      2,
+      10003,
+      0,
+      122,
+      1,
+      "VAE"
+    ],
+    [
+      3,
+      9104,
+      0,
+      246,
+      0,
+      "LATENT"
+    ],
+    [
+      4,
+      250,
+      0,
+      246,
+      1,
+      "LATENT"
+    ],
+    [
+      5,
+      9000,
+      0,
+      248,
+      0,
+      "AUDIO"
+    ],
+    [
+      6,
+      10004,
+      0,
+      248,
+      1,
+      "VAE"
+    ],
+    [
+      7,
+      248,
+      0,
+      250,
+      0,
+      "LATENT"
+    ],
+    [
+      8,
+      249,
+      0,
+      250,
+      1,
+      "MASK"
+    ],
+    [
+      9,
+      270,
+      0,
+      251,
+      0,
+      "LATENT"
+    ],
+    [
+      10,
+      10001,
+      0,
+      268,
+      0,
+      "CLIP"
+    ],
+    [
+      11,
+      10003,
+      0,
+      268,
+      1,
+      "VAE"
+    ],
+    [
+      12,
+      115,
+      0,
+      268,
+      10,
+      "INT"
+    ],
+    [
+      13,
+      115,
+      1,
+      268,
+      11,
+      "INT"
+    ],
+    [
+      14,
+      9001,
+      0,
+      268,
+      3,
+      "IMAGE"
+    ],
+    [
+      15,
+      9001,
+      0,
+      268,
+      4,
+      "IMAGE"
+    ],
+    [
+      16,
+      10004,
+      0,
+      268,
+      2,
+      "VAE"
+    ],
+    [
+      17,
+      10006,
+      3,
+      268,
+      8,
+      "AUDIO"
+    ],
+    [
+      18,
+      10002,
+      0,
+      270,
+      0,
+      "MODEL"
+    ],
+    [
+      19,
+      268,
+      0,
+      270,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      20,
+      10009,
+      0,
+      270,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      21,
+      10007,
+      0,
+      270,
+      3,
+      "SAMPLER"
+    ],
+    [
+      22,
+      10008,
+      0,
+      270,
+      4,
+      "SIGMAS"
+    ],
+    [
+      23,
+      246,
+      0,
+      270,
+      5,
+      "LATENT"
+    ],
+    [
+      24,
+      122,
+      0,
+      272,
+      0,
+      "IMAGE"
+    ],
+    [
+      25,
+      9000,
+      0,
+      272,
+      1,
+      "AUDIO"
+    ],
+    [
+      26,
+      272,
+      0,
+      273,
+      0,
+      "VIDEO"
+    ],
+    [
+      27,
+      268,
+      1,
+      9101,
+      0,
+      "LATENT"
+    ],
+    [
+      28,
+      9101,
+      0,
+      9104,
+      0,
+      "LATENT"
+    ],
+    [
+      29,
+      9103,
+      0,
+      9104,
+      1,
+      "MASK"
+    ],
+    [
+      30,
+      251,
+      0,
+      9200,
+      0,
+      "LATENT"
+    ],
+    [
+      31,
+      10005,
+      0,
+      10000,
+      0,
+      "MODEL"
+    ],
+    [
+      32,
+      10000,
+      0,
+      10002,
+      0,
+      "MODEL"
+    ],
+    [
+      33,
+      9000,
+      0,
+      10006,
+      0,
+      "AUDIO"
+    ],
+    [
+      34,
+      10002,
+      0,
+      10008,
+      0,
+      "MODEL"
+    ],
+    [
+      35,
+      268,
+      0,
+      10009,
+      0,
+      "CONDITIONING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.3944624652455977,
+      "offset": [
+        1138.4974832005441,
+        269.66666666666674
+      ]
+    }
+  },
+  "version": 0.4
+}

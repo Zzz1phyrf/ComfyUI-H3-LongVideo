@@ -8,10 +8,19 @@ import zipfile
 
 def build(output):
     root=Path(__file__).resolve().parents[1]
-    names=['__init__.py','nodes.py','core.py','controller.py','routes.py','director_rules.py',
-           'materials.py','diagnostics.py','expansion.py','worker.py','requirements.txt',
-           'README.md','README_TALKING_RH.md','CHANGELOG.md','ref2va_performance_rule.txt',
-           'examples/04_H3长视频_单节点一体化.json','examples/05_H3口播_一镜到底.json']
+    names=['__init__.py','nodes.py','core.py','storage.py','controller.py','routes.py','director_rules.py',
+           'materials.py','diagnostics.py','workflow_errors.py','expansion.py','progress.py','worker.py','mv_rh.py','rh_credentials.py','requirements.txt',
+           'README.md','README_TALKING_RH.md','FRIEND_TESTING.md','MV_RUNNINGHUB.md','TALKING_CANVAS.md','TALKING_OVERLAP.md',
+           'scripts/migrate_talking_resolution.py','scripts/migrate_talking_sampler.py',
+           'CHANGELOG.md','ref2va_performance_rule.txt',
+           'examples/04_H3长视频_单节点一体化.json','examples/05_H3口播_一镜到底.json',
+           'examples/06_H3口播_本地完整工作流.json','examples/07_H3MV_本地与RH.json',
+           'examples/08_H3MV_RH云端生成模板.json','examples/09_H3口播_Ref2VA本地展开.json',
+           'examples/10_H3口播_Ref2VA标准K本地展开.json',
+           'examples/11_H3口播_Ref2VA标准K_RH云端模板.json',
+           'examples/13_H3口播_独立窗口_本地展开.json',
+           'examples/14_H3口播_独立窗口_RH控制.json',
+           'examples/15_H3口播_独立窗口_RH云端模板.json']
     for folder,extensions in [('talking_rh',{'.py'}),('defaults',{'.json','.txt'}),('web',{'.js','.css','.html'})]:
         names.extend(str(p.relative_to(root)).replace('\\','/') for p in (root/folder).rglob('*') if p.is_file() and p.suffix in extensions)
     files={name:(root/name).read_bytes() for name in sorted(set(names))}

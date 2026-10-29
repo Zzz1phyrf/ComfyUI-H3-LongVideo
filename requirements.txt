@@ -1,3 +1,4 @@
 faster-whisper==1.2.1
 requests>=2.31
 soundfile>=0.12
+mediapipe>=0.10.31,<0.11

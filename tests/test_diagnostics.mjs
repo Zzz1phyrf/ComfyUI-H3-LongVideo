@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+const {syncHiddenWidgetConnections}=await import('data:text/javascript,'+encodeURIComponent(fs.readFileSync(new URL('../web/widget_visibility.js',import.meta.url),'utf8')));
 
 const source = fs.readFileSync(new URL("../web/diagnostics.js", import.meta.url), "utf8")
   .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
@@ -78,7 +79,7 @@ test("long-video node exposes a non-serialized download widget without changing 
   const script = fs.readFileSync(new URL("../web/h3lv.js", import.meta.url), "utf8")
     .replace(/^import .*;\r?\n/gm, "")
     .replace('new URL("./h3lv.css", import.meta.url).href', '"h3lv.css"');
-  vm.runInNewContext(script, {app, document: {querySelector: () => ({})},
+  vm.runInNewContext(script, {syncHiddenWidgetConnections,app, document: {querySelector: () => ({})},
     setTimeout: callback => callback(), downloadErrorLog: async () => {downloads++;}});
   function Node() {}
   await extension.beforeRegisterNodeDef(Node, {name: "H3LVUnified"});
@@ -102,9 +103,27 @@ test("unrelated workflow queue errors are not collected by the plugin", async ()
   const script = fs.readFileSync(new URL("../web/h3lv.js", import.meta.url), "utf8")
     .replace(/^import .*;\r?\n/gm, "")
     .replace('new URL("./h3lv.css", import.meta.url).href', '"h3lv.css"');
-  vm.runInNewContext(script, {app, api: {addEventListener() {}},
+  vm.runInNewContext(script, {syncHiddenWidgetConnections,app, api: {addEventListener() {}},
     document: {querySelector: () => ({})}, withUiLogging() {wrapped++;}});
   await extension.setup();
   await assert.rejects(app.queuePrompt(1), error => error === failure);
   assert.equal(wrapped, 0);
+});
+
+
+test("failure card shows node causes, hides raw details, locates and copies safely", async () => {
+  const make = tag => ({tag, children: [], textContent: "", append(child) {this.children.push(child);},
+    replaceChildren() {this.children=[];}, setAttribute() {}});
+  const render = vm.runInNewContext(`${source}\nrenderFailure`, {document:{createElement:make}});
+  const parent=make("section"); let located, copied;
+  const info={summary:"第 1 段 · 工作流检查失败", issues:[{node_id:"219",node_type:"VHS_VideoCombine",
+    reason:"缺少必填输入：images",action:"连接图像"}], action:"修复后重试", preserved:"保留 1 段"};
+  render(parent,info,{locate:id=>{located=id;},copy:async text=>{copied=text;}});
+  const walk=n=>[n,...n.children.flatMap(walk)]; const nodes=walk(parent);
+  assert.equal(parent.hidden,false);
+  assert(nodes.some(n=>n.textContent.includes("#219：缺少必填输入")));
+  assert.equal(nodes.find(n=>n.tag==="details").open,undefined);
+  nodes.find(n=>n.textContent==="定位本地节点").onclick(); assert.equal(located,"219");
+  await nodes.find(n=>n.textContent==="复制诊断").onclick(); assert.equal(JSON.parse(copied).summary,info.summary);
+  render(parent,null); assert.equal(parent.hidden,true);assert.equal(parent.children.length,0);
 });

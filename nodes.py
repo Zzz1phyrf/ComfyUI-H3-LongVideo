@@ -13,8 +13,9 @@ import uuid
 
 from . import director_rules
 from .diagnostics import logged
-from .core import (audio_file, audit_asr_transcript, decorate, fingerprint, project_path,
-                   read_plan, segmentation, validate_segment_brief, write_plan)
+from .storage import MV_PREFIX, output_path
+from .core import (audio_file, audit_asr_transcript, decorate, project_path,
+                   read_plan, segment_cache_key, segmentation, validate_segment_brief, write_plan)
 
 
 HDEMUCS_MODEL_URL = "https://download.pytorch.org/torchaudio/models/hdemucs_high_trained.pt"
@@ -25,8 +26,7 @@ HDEMUCS_VERIFIED_SIGNATURE = None
 
 
 def storage_root():
-    import folder_paths
-    return Path(folder_paths.get_output_directory()) / "H3LongVideo"
+    return output_path(MV_PREFIX)
 
 
 def data_root():
@@ -386,7 +386,7 @@ class LoadSegment:
     def IS_CHANGED(cls, project_id, segment_index):
         try:
             plan = read_plan(data_root(), project_id)
-            return fingerprint(plan)+str(plan.get("approved", False))
+            return segment_cache_key(plan, segment_index)+str(plan.get("approved", False))
         except (ValueError, FileNotFoundError):
             return float("nan")
 
@@ -419,20 +419,24 @@ class LoadSegment:
         material = packet(plan, row, directory) if plan.get('materials_version') else {}
         pictures = images(material) if material else (None,)*6
         return (*outputs, row["generation_frames"],
-                f"H3LongVideo/projects/{project_id}/takes/seg_{segment_index:04d}", material,
+                f"{MV_PREFIX}/projects/{project_id}/takes/seg_{segment_index:04d}", material,
                 *pictures, str(row.get("final_prompt") or ""), 24.0)
 
 
 class Unified:
     """Analyze on native partial execution; load one approved segment during controller runs."""
-    DESCRIPTION = "歌曲MV的音频分析、分段审核和顺序生成。连接MV Prompt Expander及H3采样图；口播请使用Talking Avatar。"
+    DESCRIPTION = "歌曲MV的分段审核、人工微调、逐段预览和合并。默认执行本地画布，可选RunningHub已有工作流；RH采样配置在云端调整，提示词仍使用本地MV Prompt Expander或segment_prompt。"
     @classmethod
     def INPUT_TYPES(cls):
         analyze = Analyze.INPUT_TYPES()
         required = dict(analyze["required"])
         required.update(project_id=("STRING", {"default": ""}),
                         segment_index=("INT", {"default": 0, "min": 0, "max": 10000}))
-        return {"required": required, "optional": analyze.get("optional", {})}
+        return {"required": required, "optional": {
+            "backend": (["本地", "RunningHub"],),
+            "rh_workflow_id": ("STRING", {"default": "", "tooltip": "RunningHub工作流ID；本地模式留空。RH采样、seed和分辨率以云端工作流为准。"}),
+            "rh_region": (["海外版", "国内版"],),
+            "rh_instance_type": (["ultra", "plus", "default"],)}}
 
     RETURN_TYPES = LoadSegment.RETURN_TYPES
     RETURN_NAMES = LoadSegment.RETURN_NAMES
@@ -441,12 +445,12 @@ class Unified:
     OUTPUT_NODE = True
 
     @classmethod
-    def IS_CHANGED(cls, project_id="", **kwargs):
+    def IS_CHANGED(cls, project_id="", segment_index=0, **kwargs):
         if str(project_id).strip():
             try:
                 plan = read_plan(data_root(), project_id)
                 if plan.get("approved"):
-                    return fingerprint(plan)
+                    return segment_cache_key(plan, segment_index)
             except (ValueError, FileNotFoundError):
                 pass
         return float("nan")
@@ -454,7 +458,7 @@ class Unified:
     @logged("long_video_node")
     def process(self, audio, mode, max_seconds, target_seconds, asr_python, asr_model,
                 asr_device="auto", director_mode="本地规则", project_id="", segment_index=0,
-                vocals=None):
+                vocals=None, backend="本地", rh_workflow_id="", rh_region="海外版", rh_instance_type="ultra"):
         require_mv_mode(mode)
         if str(project_id).strip():
             try:
@@ -464,11 +468,11 @@ class Unified:
             except FileNotFoundError:
                 pass
         analyzed = Analyze().analyze(audio, mode, max_seconds, target_seconds,
-                                     asr_python, asr_model, asr_device, director_mode, vocals)
+                                     asr_python, asr_model, asr_device, director_mode)
         # Native Run targets only this node. These placeholders are not sent downstream;
         # the approved controller run replaces them with the selected segment outputs.
         return {"ui": analyzed["ui"],
-                "result": (audio, vocals or audio, 0, "", {}, *((None,)*6))}
+                "result": (audio, audio, 0, "", {}, *((None,)*6), "", 24.0)}
 
 
 def math_ceil_samples(frames, sr):
@@ -486,12 +490,21 @@ def require_mv_mode(mode):
 NODE_CLASS_MAPPINGS = {"H3LVUnified": Unified, "H3LVPromptExpand": PromptExpand}
 NODE_DISPLAY_NAME_MAPPINGS = {"H3LVUnified": "MiniMax H3 · MV Generator", "H3LVPromptExpand": "MiniMax H3 · MV Prompt Expander"}
 
-from .talking_rh import TalkingRH
+from .talking_rh import TalkingRH, TalkingAvatar
 NODE_CLASS_MAPPINGS["H3LVTalkingRH"] = TalkingRH
-NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingRH"] = "MiniMax H3 · Talking Avatar"
+NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingRH"] = "MiniMax H3 · Talking Avatar (Legacy)"
+NODE_CLASS_MAPPINGS["H3LVTalkingAvatar"] = TalkingAvatar
+NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingAvatar"] = "MiniMax H3 · Talking Avatar"
 from .talking_rh.local import StaticVideoMask
 NODE_CLASS_MAPPINGS["H3LVTalkingVideoMask"] = StaticVideoMask
 NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingVideoMask"] = "H3口播内部静态遮罩"
 from .talking_rh.local_weights import OwnedClipLoader
 NODE_CLASS_MAPPINGS["H3LVTalkingClipLoader"] = OwnedClipLoader
 NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingClipLoader"] = "H3口播内部CLIP读取"
+from .talking_rh.canvas import SegmentState, TalkingMerge, FrozenPrefix
+NODE_CLASS_MAPPINGS["H3LVTalkingSegmentState"] = SegmentState
+NODE_CLASS_MAPPINGS["H3LVTalkingMerge"] = TalkingMerge
+NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingSegmentState"] = "H3口播分段状态"
+NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingMerge"] = "MiniMax H3 · Talking Merge"
+NODE_CLASS_MAPPINGS["H3LVTalkingFrozenPrefix"] = FrozenPrefix
+NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingFrozenPrefix"] = "H3口播 · 冻结前缀校验恢复"

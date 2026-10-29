@@ -8,6 +8,7 @@ import time
 import uuid
 
 from ..core import inside
+from ..storage import TALKING_PREFIX
 from .project import digest
 from .remote import Rejected
 
@@ -43,24 +44,32 @@ def validate_models(config):
 
 class LocalClient:
     def __init__(self,config,*,server=None,input_root=None,output_root=None,validate=None):
+        from .canvas import output_ids
+        self.output_ids=output_ids(config)
+        self.client_id=None
         if server is None:
             import execution
             import folder_paths
             from server import PromptServer
-            validate_models(config)
+            if config.get('execution_mode')!='canvas':validate_models(config)
             server=PromptServer.instance
             input_root=folder_paths.get_input_directory()
             output_root=folder_paths.get_output_directory()
             validate=execution.validate_prompt
         self.server=server;self.validate=validate
         self.input=Path(input_root).resolve();self.output=Path(output_root).resolve()
-        self.records=self.output/'H3TalkingRH/local_tasks'
+        self.records=self.output/TALKING_PREFIX/'local_tasks'
         self.records.mkdir(parents=True,exist_ok=True)
 
-    def upload(self,path):
+    def upload(self,path,*,attempt=''):
         source=Path(path)
         # ComfyUI's annotated input resolver accepts subdirectories for all loaders.
         relative=Path('H3TalkingInputs')/(digest(source)+source.suffix)
+        if attempt:
+            if len(attempt)!=12 or any(c not in '0123456789abcdef' for c in attempt):
+                raise ValueError('本地音频执行标识无效。')
+            # Identical source audio must still invalidate the sampler cache on redo.
+            relative=relative.parent/attempt/relative.name
         target=self.input/relative
         if not target.is_file():
             target.parent.mkdir(parents=True,exist_ok=True)
@@ -76,7 +85,9 @@ class LocalClient:
             if str(uuid.UUID(task_id))!=task_id:raise ValueError()
         except (ValueError,AttributeError):
             raise ValueError('本地任务ID无效。') from None
-        return self.records/(task_id+'.json')
+        path=self.records/(task_id+'.json')
+        legacy=self.output/'H3TalkingRH/local_tasks'/path.name
+        return legacy if not path.is_file() and legacy.is_file() else path
 
     def save(self,task_id,value):
         path=self.record(task_id);temporary=path.with_suffix('.'+uuid.uuid4().hex+'.tmp')
@@ -85,12 +96,14 @@ class LocalClient:
 
     def create(self,graph,task_id):
         async def enqueue():
-            valid=await self.validate(task_id,graph,['273','9200'])
+            valid=await self.validate(task_id,graph,list(self.output_ids.values()))
             if not valid[0]:
                 raise Rejected('本地采样图校验失败，请检查现有H3/Avatar/KJ节点和模型：'+str(valid[1])[:1200])
             self.save(task_id,{'status':'PENDING','graph':graph})
             number=self.server.number;self.server.number+=1
-            self.server.prompt_queue.put((number,task_id,graph,{'create_time':int(time.time()*1000)},valid[2],{}))
+            extra={'create_time':int(time.time()*1000)}
+            if self.client_id:extra['client_id']=self.client_id
+            self.server.prompt_queue.put((number,task_id,graph,extra,valid[2],{}))
             return task_id
         return asyncio.run_coroutine_threadsafe(enqueue(),self.server.loop).result(timeout=120)
 
@@ -109,7 +122,8 @@ class LocalClient:
                 self.save(task_id,{**saved,'status':'FAILED','history':history})
                 return {'status':'FAILED'}
             results=[]
-            for node,extension in [('273','.mp4'),('9200','.latent')]:
+            for kind,node in self.output_ids.items():
+                extension='.latent' if kind=='latent' else '.mp4'
                 output=history.get('outputs',{}).get(node,{})
                 entries=sum((output.get(k,[]) for k in ('gifs','images','latents')),[])
                 matches=[e for e in entries if e.get('type')=='output' and str(e.get('filename','')).endswith(extension)]

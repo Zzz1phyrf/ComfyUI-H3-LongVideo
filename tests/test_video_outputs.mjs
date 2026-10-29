@@ -26,6 +26,48 @@ test("sequential generation accepts native CreateVideo -> SaveVideo instead of V
   assert.equal(payload.video_id, "4");
 });
 
+test("RunningHub generation does not require a valid local sampler or decoder", async () => {
+  const prompt = {
+    "1": {class_type:"H3LVUnified",inputs:{backend:"RunningHub",rh_workflow_id:"123"}},
+    "2": {class_type:"SaveVideo",inputs:{}},
+  };
+  const payload = await payloadFor(prompt);
+  assert.equal(payload.loader_id,"1");
+  assert.equal(payload.video_id,"2");
+  assert.equal(payload.prompt["1"].inputs.rh_workflow_id,"123");
+});
+
+test("RH configuration check only requests preflight and reports its limits", async () => {
+  const start = source.indexOf("async function checkRunningHub()");
+  const end = source.indexOf("async function analyzeOnly(owner)", start);
+  const calls = [], messages = [];
+  const check = vm.runInNewContext(`${source.slice(start,end)}\ncheckRunningHub`, {
+    async buildGenerationPayload() {return {prompt:{fixture:true}};},
+    async request(path,payload) {calls.push({path,payload});return {workflow_id:"123",seed:42,prompt_source:"segment_prompt"};},
+    async messageDialog(message) {messages.push(message);},
+  });
+  await check();
+  assert.deepEqual(calls.map(x=>x.path),["/h3lv/rh-check"]);
+  assert.match(messages[0].message,/没有上传素材或提交生成/);
+  assert.match(messages[0].message,/实际画面效果仍需真实运行验证/);
+});
+
+test("native Run resumes a persisted running project when its controller process is gone", async () => {
+  const start = source.indexOf("const startingProjects = new Set();");
+  const end = source.indexOf("async function analyzeOnly(owner)", start);
+  const calls = [];
+  const run = vm.runInNewContext(`${source.slice(start,end)}\nstartApprovedSequence`, {
+    toast() {}, clearVideoNodePreview() {},
+    async buildGenerationPayload() {return {video_id:"273"};},
+    async request(path) {calls.push(path);},
+  });
+  await run({}, {id:"restart",run_status:"running",controller_active:false,segments:[]});
+  assert.deepEqual(calls,["/h3lv/project/restart/run"]);
+  calls.length = 0;
+  await run({}, {id:"restart",run_status:"running",controller_active:true,segments:[]});
+  assert.equal(calls.length,0);
+});
+
 function workflowWithOutputs() {
   return {
     "1": {class_type: "H3LVUnified", inputs: {}},

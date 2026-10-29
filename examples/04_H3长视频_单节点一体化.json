@@ -649,7 +649,7 @@
       "widgets_values": {
         "frame_rate": 24,
         "loop_count": 0,
-        "filename_prefix": "video/MiniMax_H3",
+        "filename_prefix": "H3LongVideo/MV/video",
         "format": "video/h264-mp4",
         "pix_fmt": "yuv420p",
         "crf": 19,
@@ -661,7 +661,7 @@
       "widgets_values_named": {
         "frame_rate": 24,
         "loop_count": 0,
-        "filename_prefix": "video/MiniMax_H3",
+        "filename_prefix": "H3LongVideo/MV/video",
         "format": "video/h264-mp4",
         "pix_fmt": "yuv420p",
         "crf": 19,

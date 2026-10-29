@@ -4,7 +4,7 @@
     "inputs": {
       "attention": "comfy kitchen attention",
       "model": [
-        "127",
+        "9300",
         0
       ]
     }
@@ -190,7 +190,7 @@
   "127": {
     "class_type": "UNETLoader",
     "inputs": {
-      "unet_name": "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+      "unet_name": "minimax_h3_fl2va_bf16.safetensors",
       "weight_dtype": "default"
     }
   },
@@ -353,7 +353,7 @@
   "273": {
     "class_type": "SaveVideo",
     "inputs": {
-      "filename_prefix": "H3TalkingRH/raw",
+      "filename_prefix": "H3LongVideo/口播/raw",
       "format": "auto",
       "format.codec": "auto",
       "format.codec.encoding": "auto",
@@ -435,7 +435,18 @@
         "251",
         0
       ],
-      "filename_prefix": "H3TalkingRH/video"
+      "filename_prefix": "H3LongVideo/口播/video"
+    }
+  },
+  "9300": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "127",
+        0
+      ],
+      "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "strength_model": 1.0
     }
   }
 }

@@ -85,6 +85,14 @@ class LocalBackendTests(unittest.TestCase):
         self.assertEqual((self.client.input/first).read_bytes(),source.read_bytes())
         with self.assertRaises(ValueError):self.client.download(str(source),self.base/'b.latent')
 
+    def test_redo_audio_has_a_new_cache_input_but_identical_samples(self):
+        source=self.base/'condition.wav';source.write_bytes(b'identical-source-audio')
+        first=self.client.upload(source,attempt='a'*12)
+        second=self.client.upload(source,attempt='b'*12)
+        self.assertNotEqual(first,second)
+        self.assertEqual((self.client.input/first).read_bytes(),(self.client.input/second).read_bytes())
+        with self.assertRaises(ValueError):self.client.upload(source,attempt='../outside')
+
     def test_completion_between_queue_and_history_reads_is_not_reported_missing(self):
         task_id=self.client.reserve();self.client.create(self.example_graph(),task_id)
         folder=self.client.output/'H3TalkingRH/p/0/attempt';folder.mkdir(parents=True)
@@ -139,6 +147,10 @@ class DualModeNodeTests(unittest.TestCase):
         self.assertEqual(value['127']['inputs']['unet_name'],'selected-local_model')
         self.assertEqual(value['242']['inputs']['model'],['9300',0])
         self.assertEqual(value['9300']['inputs']['lora_name'],'selected-lora')
+        p['config']['models']['local_lora']=local.NO_LORA
+        value=graph.build(p,r,{'audio':'a','references':['i'],'mask':'m','attempt':'test'})
+        self.assertNotIn('9300',value)
+        self.assertEqual(value['242']['inputs']['model'],['127',0])
 
     def test_local_orchestration_reserves_id_before_enqueue_and_never_calls_rh(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -156,8 +168,10 @@ class DualModeNodeTests(unittest.TestCase):
                     self.test.assertEqual(saved['status'],'creating_unknown')
                     self.created.append(value);return task_id
             client=Client();client.test=self
+            def merge(*_):
+                final=Path(temporary)/'final.mp4';final.write_bytes(b'assembled test video');return str(final)
             with patch.object(runner,'Client',side_effect=AssertionError('No RH backend')):
-                runner.run_project(root,p['id'],client,validate=lambda *_:{},assemble=lambda *_:'final',sleep=lambda _:None)
+                runner.run_project(root,p['id'],client,validate=lambda *_:{},assemble=merge,sleep=lambda _:None)
             self.assertEqual(len(client.created),2)
             self.assertEqual(project.read_plan(root,p['id'])['run_status'],'completed')
 

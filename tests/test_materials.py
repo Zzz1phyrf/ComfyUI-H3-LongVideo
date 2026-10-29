@@ -11,7 +11,8 @@ from test_plugin import core, controller, nodes, sample_plan
 
 materials = importlib.import_module('h3lv_test.materials')
 expansion = importlib.import_module('h3lv_test.expansion')
-TEXT = 'subject_definitions:\n<Subject 1> from <Picture 1>.\nsummary:\nOne shot.\nretention_analysis:\nKeep scene.\ndetailed_description:\n[Shot 1] Move.\noverall_soundscape:\nN/A\nnon_diegetic_music:\nN/A'
+TEXT = 'subject_definitions:\n<Subject 1> from <Picture 1>. <Audio 1> is singing.\nsummary:\nOne shot follows <Audio 1>.\nretention_analysis:\nKeep scene.\ndetailed_description:\n[Shot 1] Move.\noverall_soundscape:\nN/A\nnon_diegetic_music:\nN/A'
+MULTI_TEXT = TEXT.replace('from <Picture 1>.', 'from <Picture 1>. <Picture 2> supplies the scene and composition.')
 
 class MaterialTests(unittest.TestCase):
     def setUp(self):
@@ -106,8 +107,8 @@ class MaterialTests(unittest.TestCase):
     def test_vision_cache_and_context_invalidation(self):
         packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)
         packet['material_note'] = '@图1是人物，@图2是环境'
-        with patch.object(expansion,'public_settings',return_value={'base_url':'https://example.test/v1'}), patch.object(expansion,'call',return_value={'choices':[{'message':{'content':TEXT}}]}) as call:
-            self.assertEqual(expansion.expand(packet,'vision','m','r'),TEXT)
+        with patch.object(expansion,'public_settings',return_value={'base_url':'https://example.test/v1'}), patch.object(expansion,'call',return_value={'choices':[{'message':{'content':MULTI_TEXT}}]}) as call:
+            self.assertEqual(expansion.expand(packet,'vision','m','r'),MULTI_TEXT)
             expansion.expand(packet,'vision','m','r')
             self.assertEqual(call.call_count,1)
             content = call.call_args.args[1]['messages'][1]['content']
@@ -156,21 +157,21 @@ class MaterialTests(unittest.TestCase):
         self.assertIn('detailed_description:\n[Shot 1]\nMove.', result)
 
     def test_summary_shot_label_is_removed_when_detail_has_single_shot(self):
-        duplicated_in_summary = TEXT.replace('summary:\nOne shot.', 'summary:\n[Shot 1] One shot.')
+        duplicated_in_summary = TEXT.replace('summary:\nOne shot follows <Audio 1>.', 'summary:\n[Shot 1] One shot follows <Audio 1>.')
         result = expansion.validate_prompt(duplicated_in_summary, 2)
         self.assertEqual(result.count('[Shot 1]'), 1)
-        self.assertIn('summary:\nOne shot.', result)
+        self.assertIn('summary:\nOne shot follows <Audio 1>.', result)
         self.assertIn('detailed_description:\n[Shot 1] Move.', result)
 
     def test_single_shot_label_variations_are_canonicalized(self):
         cases = {
             'bold_compact_uppercase_summary': TEXT.replace(
-                'summary:\nOne shot.', 'summary:\n**[SHOT1]** One shot.'),
+                'summary:\nOne shot follows <Audio 1>.', 'summary:\n**[SHOT1]** One shot follows <Audio 1>.'),
             'label_after_detail_prose': TEXT.replace(
                 'detailed_description:\n[Shot 1] Move.',
                 'detailed_description:\nContinuous take. [shot 1] Move.'),
             'label_only_outside_detail': TEXT.replace(
-                'summary:\nOne shot.', 'summary:\n[ Shot 1 ] One shot.').replace('[Shot 1] ', ''),
+                'summary:\nOne shot follows <Audio 1>.', 'summary:\n[ Shot 1 ] One shot follows <Audio 1>.').replace('[Shot 1] ', ''),
         }
         for name, prompt in cases.items():
             with self.subTest(name=name):
@@ -259,9 +260,9 @@ class MaterialTests(unittest.TestCase):
 
     def test_stale_prompt_override_is_not_reused(self):
         packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)
-        with patch.object(expansion,'public_settings',return_value={'base_url':'https://example.test/v1'}), patch.object(expansion,'call',return_value={'choices':[{'message':{'content':TEXT}}]}) as call:
+        with patch.object(expansion,'public_settings',return_value={'base_url':'https://example.test/v1'}), patch.object(expansion,'call',return_value={'choices':[{'message':{'content':MULTI_TEXT}}]}) as call:
             packet['expanded_key'] = expansion.cache_key(packet,'vision','m','r',0)
-            packet['expanded_prompt'] = TEXT.replace('Keep scene.','User edit.')
+            packet['expanded_prompt'] = MULTI_TEXT.replace('Keep scene.','User edit.')
             self.assertIn('User edit.',expansion.expand(packet,'vision','m','r'))
             call.assert_not_called()
             packet['brief'] += ' changed'

@@ -7,10 +7,20 @@ from test_talking_rh import project
 
 
 class NodeRoleTests(unittest.TestCase):
+    def test_mv_public_entry_always_uses_internal_vocal_separation(self):
+        self.assertNotIn('vocals',nodes.Unified.INPUT_TYPES()['optional'])
+        audio=object();external=object()
+        with patch.object(nodes.Analyze,'analyze',return_value={'ui':{},'result':('id',1)}) as analyze:
+            result=nodes.Unified().process(audio,'singing',15,11,'','',vocals=external)
+        self.assertNotIn(external,analyze.call_args.args)
+        self.assertNotIn('vocals',analyze.call_args.kwargs)
+        self.assertIs(result['result'][1],audio)
+
     def test_public_names_and_singing_only_contract(self):
         self.assertEqual(nodes.NODE_DISPLAY_NAME_MAPPINGS['H3LVUnified'], 'MiniMax H3 · MV Generator')
         self.assertEqual(nodes.NODE_DISPLAY_NAME_MAPPINGS['H3LVPromptExpand'], 'MiniMax H3 · MV Prompt Expander')
-        self.assertEqual(nodes.NODE_DISPLAY_NAME_MAPPINGS['H3LVTalkingRH'], 'MiniMax H3 · Talking Avatar')
+        self.assertEqual(nodes.NODE_DISPLAY_NAME_MAPPINGS['H3LVTalkingAvatar'], 'MiniMax H3 · Talking Avatar')
+        self.assertTrue(nodes.NODE_CLASS_MAPPINGS['H3LVTalkingRH'].DEPRECATED)
         self.assertEqual(nodes.Unified.INPUT_TYPES()['required']['mode'][0], ['singing'])
 
     def test_legacy_spoken_mode_stops_before_analysis_or_generation(self):

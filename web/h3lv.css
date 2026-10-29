@@ -319,6 +319,9 @@
 }
 .h3lv-shot-control-help { color: #aeb8c6; font-size: 12px; }
 .h3lv-prompt-actions { margin-top: 10px; }
+.h3lv-shot-advanced { margin-top: 12px; border-top: 1px solid #41505c; padding-top: 10px; }
+.h3lv-shot-advanced > summary { cursor: pointer; color: #aeb8c6; padding-bottom: 8px; }
+.h3lv-shot-request { min-height: 85px; }
 .h3lv-direct-prompt {
   margin-top: 12px; border: 1px solid #425563; border-radius: 7px; background: #151b22;
 }
@@ -334,3 +337,12 @@
 .h3lv-expansion-panel .h3lv-content { display: flex; flex-direction: column; gap: 14px; }
 .h3lv-expansion-panel label { display: flex; flex-direction: column; gap: 8px; }
 .h3lv-expansion-panel input, .h3lv-expansion-panel select, .h3lv-expansion-panel textarea { background: #121a21; color: #e1edf5; border: 1px solid #425563; padding: 10px; border-radius: 5px; box-sizing: border-box; width: 100%; }
+
+.h3lv-error-card { border: 1px solid #d97757; border-radius: 8px; padding: 12px; margin: 8px 0; background: #322725; max-height: 38vh; overflow: auto; }
+.h3lv-error-card[hidden] { display: none; }
+.h3lv-error-card p { margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.h3lv-error-card pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.h3lv-error-card button { margin: 4px 8px 4px 0; }
+.h3lv-status { white-space: pre-line; }
+.h3lv-live-progress { color: #6fddff; font-weight: 600; }
+.h3lv-shot-intent { width: 100%; min-height: 70px; box-sizing: border-box; background: #151d23; color: #e4edf3; border: 1px solid #40515e; border-radius: 5px; padding: 9px; }

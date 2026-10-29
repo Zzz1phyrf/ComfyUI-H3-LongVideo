@@ -2,7 +2,7 @@
   "id": "ec9d1cb5-e890-4865-abf6-e5af862ff044",
   "revision": 0,
   "last_node_id": 5,
-  "last_link_id": 4,
+  "last_link_id": 2,
   "nodes": [
     {
       "id": 1,
@@ -73,85 +73,10 @@
       ]
     },
     {
-      "id": 3,
-      "type": "LoadImage",
-      "pos": [
-        390,
-        290
-      ],
-      "size": [
-        310,
-        350
-      ],
-      "flags": {},
-      "order": 2,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            3
-          ]
-        },
-        {
-          "name": "MASK",
-          "type": "MASK",
-          "links": null
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "LoadImage"
-      },
-      "widgets_values": [
-        "选择人物活动遮罩.png",
-        "image"
-      ],
-      "title": "加载人物活动遮罩（白色可动，黑色背景）"
-    },
-    {
-      "id": 4,
-      "type": "ImageToMask",
-      "pos": [
-        750,
-        350
-      ],
-      "size": [
-        230,
-        80
-      ],
-      "flags": {},
-      "order": 3,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "link": 3
-        }
-      ],
-      "outputs": [
-        {
-          "name": "MASK",
-          "type": "MASK",
-          "links": [
-            4
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "ImageToMask"
-      },
-      "widgets_values": [
-        "red"
-      ]
-    },
-    {
       "id": 5,
       "type": "H3LVTalkingRH",
       "pos": [
-        1040,
+        400,
         65
       ],
       "size": [
@@ -171,11 +96,6 @@
           "name": "reference_image",
           "type": "IMAGE",
           "link": 2
-        },
-        {
-          "name": "person_mask",
-          "type": "MASK",
-          "link": 4
         },
         {
           "name": "reference_2",
@@ -260,22 +180,6 @@
       5,
       1,
       "IMAGE"
-    ],
-    [
-      3,
-      3,
-      0,
-      4,
-      0,
-      "IMAGE"
-    ],
-    [
-      4,
-      4,
-      0,
-      5,
-      2,
-      "MASK"
     ]
   ],
   "groups": [],
