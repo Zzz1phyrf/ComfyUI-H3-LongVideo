@@ -1,6 +1,8 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { materialEditor } from "./materials.js";
+import { attachPanelDrag } from "./panel_drag.js";
+import { openAssetLibrary } from "./asset_library.js";
 import { createTimeline, pcmWavePeaks } from "./timeline.js";
 import { generationOutputs } from "./video_outputs.js";
 import { syncHiddenWidgetConnections } from "./widget_visibility.js";
@@ -57,7 +59,7 @@ function actionButton(parent, label, action, className = "") {
         else await messageDialog({title: "操作失败", message: `${error.message}\n${error.diagnostic.action}`, tone: "error"});
       } else await messageDialog({title: "操作失败", message: error.message || String(error), tone: "error"});
     }
-    finally { node.disabled = node.dataset.busy==='true'; if (node.textContent==='处理中…') node.textContent=originalLabel; }
+    finally { node.disabled = node.dataset.busy==='true' || Boolean(node.h3lvLocked); if (node.textContent==='处理中…') node.textContent=originalLabel; }
   };
   return node;
 }
@@ -374,6 +376,7 @@ async function reanalyzeProject(owner, {ask = true} = {}) {
   if (projectWidget) projectWidget.value = "";
   const previous = document.getElementById("h3lv-panel");
   previous?.querySelector("canvas")?.disposeTimeline?.();
+  previous?.disposePanelDrag?.();
   previous?.remove();
   await analyzeOnly(owner);
   return true;
@@ -567,22 +570,25 @@ function statusText(plan) {
     stopped:"已停止", pausing:"等待当前段完成后暂停", stopping:"等待当前段完成后停止", merging:"合并中"}[plan.run_status] || plan.run_status;
   return `状态：${state} · ${plan.approved ? "方案已确认" : "待确认"} · ${completed}/${plan.segments.length} 段可用`+
     `${stale ? ` · ${stale}段待重生成` : ""}${plan.final_stale ? " · 当前成片为旧版" : ""}${plan.error ? ` · ${plan.error_info?.summary || "操作失败，请查看下方原因"}` : ""}`+
+    (plan.expansion_active ? " · 批量扩写进行中，素材/分段暂只读" : "")+
     (progressText(plan) ? `\n${progressText(plan)}` : '');
 }
 
 async function openReview(owner) {
   const previous = document.getElementById("h3lv-panel");
   previous?.querySelector("canvas")?.disposeTimeline?.();
+  previous?.disposePanelDrag?.();
   previous?.remove();
   const shade = element("div", undefined, document.body, "h3lv-shade");
   shade.id = "h3lv-panel";
   shade.setAttribute("role", "dialog");
   shade.setAttribute("aria-modal", "true");
   shade.setAttribute("aria-label", "MiniMax H3 · MV Generator");
-  const panel = element("div", undefined, shade, "h3lv-panel");
+  const panel = element("div", undefined, shade, "h3lv-panel h3lv-review-panel");
   const header = element("header", undefined, panel, "h3lv-header");
   const titleRow = element("div", undefined, header, "h3lv-title-row");
   element("h2", "MiniMax H3 · MV Generator", titleRow);
+  const disposePanelDrag = attachPanelDrag(panel, titleRow); shade.disposePanelDrag = disposePanelDrag;
   actionButton(titleRow, "关闭", async () => {
     if (dirty) {
       const decision = await confirmDialog({
@@ -597,7 +603,7 @@ async function openReview(owner) {
       if (decision !== "secondary") await saveAndApprove();
     }
     canvas.disposeTimeline?.();
-    shade.remove();
+    disposePanelDrag(); shade.remove();
   }, "h3lv-close");
   const projectRow = element("div", undefined, header, "h3lv-project-row");
   const selectLabel = element("label", "分析项目", projectRow);
@@ -626,7 +632,7 @@ async function openReview(owner) {
       owner.setDirtyCanvas?.(true, true);
       clearVideoNodePreview();
       canvas.disposeTimeline?.();
-      shade.remove();
+      disposePanelDrag(); shade.remove();
       toast("当前分析项目已删除", "请重新分析音频，或再次打开面板选择其他项目。");
       return;
     }
@@ -634,6 +640,7 @@ async function openReview(owner) {
     populateProjects(currentId);
     await load();
   }, "project-manager");
+  actionButton(projectRow, "素材库", () => openAssetLibrary());
   const defaultRow = element("label", "默认参考图张数", projectRow, "h3lv-default-references");
   const defaultSelect = element("select", undefined, defaultRow);
   defaultSelect.onchange = () => { if (plan) markDirty(); };
@@ -757,6 +764,7 @@ async function openReview(owner) {
     });
   }
   function moveBoundary(index, proposed) {
+    if (plan?.expansion_active) return;
     const start = index === 0 ? 0 : Number(rows[index-1].end.value);
     const nextEnd = Number(rows[index+1].end.value);
     const maximum = Math.min(15, plan.max_seconds);
@@ -852,7 +860,7 @@ async function openReview(owner) {
       segmentAudio.src = api.apiURL(endpoint(`/audio?index=${row.index}&revision=${plan.revision}`));
       let note, rowRefs, renderReferences, materialControls, visualTypeSelect, shotIntent;
       if (plan.materials_version) {
-        materialControls = materialEditor(inner, {projectId:plan.id, index:row.index,
+        materialControls = materialEditor(inner, {projectId:plan.id, index:row.index, getRevision:() => plan.revision,
           refs:row.refs || [], note:row.material_note || "",
           source:row.reference_source || (row.refs?.length ? "custom" : "default"),
           defaults:() => ({refs:defaultEditor.refs, note:defaultEditor.getNote()}), changed:markDirty,
@@ -1083,7 +1091,7 @@ async function openReview(owner) {
       return;
     }
     plan = await request(endpoint());
-    if (!plan.materials_version && !plan.segments.some(row => row.job)) {
+    if (!plan.expansion_active && !plan.materials_version && !plan.segments.some(row => row.job)) {
       plan = await request(endpoint("/edit"), {revision:plan.revision, materials:{refs:[], note:""},
         segments:plan.segments.map(row => ({...row, reference_source:row.refs?.length ? "custom" : "default"}))});
     }
@@ -1102,7 +1110,7 @@ async function openReview(owner) {
     if (plan.materials_version) {
       element("p", "上传一次，所有使用默认的分段自动继承；本段自定义的图片保持独立。",
         defaultHeaderText, "h3lv-help");
-      defaultEditor = materialEditor(defaultMaterials, {projectId:plan.id, refs:plan.default_refs || [],
+      defaultEditor = materialEditor(defaultMaterials, {projectId:plan.id, getRevision:() => plan.revision, refs:plan.default_refs || [],
         note:plan.default_material_note || "", changed:() => {markDirty(); rows.forEach(row => row.renderRefs());}});
     } else {
       element("p", "当前沿用画布参考图。启用内置素材后，请上传默认图并核对每段用途。",
@@ -1136,7 +1144,7 @@ async function openReview(owner) {
       app.canvas.centerOnNode(node);
       shade.style.display = "none";
       toast("已定位节点", "修复后重新打开分段面板继续。");
-      canvas.disposeTimeline?.(); shade.remove();
+      canvas.disposeTimeline?.(); disposePanelDrag(); shade.remove();
     }});
     status.textContent += ` · ${plan.generation_backend === "runninghub" ? "RunningHub" : "本地"}`;
     status.classList.remove("is-dirty");
@@ -1152,6 +1160,12 @@ async function openReview(owner) {
       `${analysis.legacy_notice ? ` · ${analysis.legacy_notice}` : ""}`;
     renderCards();
     segmentsBody.querySelectorAll('.segment-run').forEach(button=>{button.disabled=busy(plan);button.dataset.busy=String(busy(plan));});
+    if (plan.expansion_active) {
+      for (const root of [defaultMaterials, segmentsBody]) {
+        root.querySelectorAll("input,textarea,select,button").forEach(control => {control.h3lvLocked = true; control.disabled = true;});
+      }
+    }
+    [saveButton, reanalyzeButton, runButton].forEach(control => {control.h3lvLocked = Boolean(plan.expansion_active); control.disabled = control.h3lvLocked || control.dataset.busy === 'true';});
     updateSelected(selected);
     if (details[selected]) details[selected].open = true;
     if (plan.final_video && plan.final_preview?.filename) {
@@ -1173,6 +1187,7 @@ async function openReview(owner) {
   }
 
   async function saveDraft(splitTime, removeCut) {
+    if (plan?.expansion_active) throw new Error("批量扩写进行中，素材/分段暂只读，请等待批次结束。");
     let revision = plan.revision;
     if (dirty || splitTime !== undefined || removeCut !== undefined) {
       const saved = await request(endpoint("/edit"), {revision,
@@ -1204,7 +1219,7 @@ async function openReview(owner) {
     dirty = false;
     return approved;
   }
-  actionButton(controls, "保存并确认", async () => {
+  const saveButton = actionButton(controls, "保存并确认", async () => {
     if (!await confirmDialog({
       title: "保存并确认分段？",
       message: "请确认已经试听并检查所有切点。保存后，这个项目将允许开始顺序生成。",
@@ -1213,7 +1228,7 @@ async function openReview(owner) {
     try {await saveAndApprove();}
     finally {await load();}
   }, "primary");
-  actionButton(controls, "重新分析分段", async () => {
+  const reanalyzeButton = actionButton(controls, "重新分析分段", async () => {
     await reanalyzeProject(owner);
   });
   const runButton = actionButton(controls, "▶ 开始顺序生成", async () => {
@@ -1270,8 +1285,8 @@ async function openReview(owner) {
   };
   await load();
   const timer = setInterval(async () => {
-    if (!shade.isConnected) { clearInterval(timer); canvas.disposeTimeline?.(); return; }
-    if (dirty || !plan || !["running", "pausing", "stopping", "merging"].includes(plan.run_status)) return;
+    if (!shade.isConnected) { clearInterval(timer); canvas.disposeTimeline?.(); disposePanelDrag(); return; }
+    if (dirty || !plan || (!plan.expansion_active && !["running", "pausing", "stopping", "merging"].includes(plan.run_status))) return;
     try {
       const latest = await request(endpoint());
       status.textContent = statusText(latest);
@@ -1281,7 +1296,7 @@ async function openReview(owner) {
       });
       const oldDone = plan.segments.filter(row => row.job?.status === "completed").length;
       const newDone = latest.segments.filter(row => row.job?.status === "completed").length;
-      if (latest.run_status !== plan.run_status || oldDone !== newDone) await load();
+      if (latest.run_status !== plan.run_status || latest.expansion_active !== plan.expansion_active || oldDone !== newDone) await load();
     } catch (error) { status.textContent = error.message; }
   }, 2000);
 }

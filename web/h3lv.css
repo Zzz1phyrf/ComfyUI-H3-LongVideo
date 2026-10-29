@@ -346,3 +346,62 @@
 .h3lv-status { white-space: pre-line; }
 .h3lv-live-progress { color: #6fddff; font-weight: 600; }
 .h3lv-shot-intent { width: 100%; min-height: 70px; box-sizing: border-box; background: #151d23; color: #e4edf3; border: 1px solid #40515e; border-radius: 5px; padding: 9px; }
+.h3lv-library-shade { z-index: 10003; }
+.h3lv-library-panel { max-width: 1120px; }
+.h3lv-library-panel .h3lv-content { display: block; overflow: auto; }
+.h3lv-library-tools, .h3lv-library-import { align-items: end; flex-wrap: wrap; }
+.h3lv-library-tools label, .h3lv-library-import label, .h3lv-library-card label { display: grid; gap: 5px; }
+.h3lv-library-panel input, .h3lv-library-panel select, .h3lv-library-panel textarea {
+  box-sizing: border-box; max-width: 100%; padding: 7px; border: 1px solid #566274; border-radius: 5px;
+  background: #121a21; color: #e1edf5;
+}
+.h3lv-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 14px 0; }
+.h3lv-library-card { display: flex; flex-direction: column; gap: 7px; padding: 12px; border: 1px solid #414c5b; border-radius: 7px; background: #141920; min-width: 0; }
+.h3lv-library-card > img { width: 100%; height: 160px; object-fit: contain; background: #080a0e; }
+.h3lv-library-card p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.h3lv-library-card textarea { width: 100%; min-height: 70px; }
+.h3lv-library-card details > label { margin-top: 8px; }
+.h3lv-library-card summary { cursor: pointer; }
+.h3lv-library-import { position: sticky; bottom: -16px; padding: 12px; background: #202832; border-top: 1px solid #566274; }
+.h3lv-batch { border-top: 1px solid #414c5b; padding-top: 12px; }
+.h3lv-batch-targets { max-height: 240px; overflow: auto; display: grid; gap: 7px; margin-bottom: 12px; }
+.h3lv-expansion-panel .h3lv-batch label { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.h3lv-expansion-panel .h3lv-batch input[type=checkbox] { width: 17px; height: 17px; flex: 0 0 auto; accent-color: #4f9fe8; }
+.h3lv-expansion-panel .h3lv-batch-controls select { width: auto; }
+.h3lv-batch-controls { flex-wrap: wrap; }
+.h3lv-batch-item { margin: 12px 0; padding: 12px; background: #141920; border: 1px solid #414c5b; border-radius: 7px; }
+.h3lv-batch-item pre { white-space: pre-wrap; overflow-wrap: anywhere; color: #aeb8c6; }
+.h3lv-batch-item textarea { margin-top: 10px; resize: vertical; }
+@media (max-width: 600px) {
+  .h3lv-library-grid { grid-template-columns: 1fr; }
+  .h3lv-library-import { position: static; }
+}
+/* Some extensions declare a global main { display:flex }. Keep this review's existing
+   overview, default references and segment list in their original vertical flow. */
+#h3lv-panel > .h3lv-review-panel > .h3lv-content { display: block; min-width: 0; }
+.h3lv-review-panel { width: min(1440px, 90vw); height: min(1000px, 90dvh); max-width: calc(100vw - 16px); box-sizing: border-box; }
+.h3lv-review-panel .h3lv-content > * { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.h3lv-review-panel .h3lv-default-materials { width: 100%; }
+.h3lv-review-panel .h3lv-default-materials-title { min-width: min(220px, 60%); overflow-wrap: anywhere; }
+.h3lv-drag-handle { cursor: grab; user-select: none; touch-action: none; }
+.h3lv-drag-handle.is-dragging { cursor: grabbing; }
+.h3lv-drag-handle button { cursor: pointer; touch-action: manipulation; }
+.h3lv-drag-handle:focus-visible { outline: 2px solid #61aef8; outline-offset: 3px; }
+@media (max-width: 600px) {
+  .h3lv-review-panel { width: calc(100vw - 16px); height: calc(100dvh - 16px); }
+  .h3lv-review-panel .h3lv-title-row { flex-wrap: nowrap; }
+  .h3lv-review-panel .h3lv-title-row h2 { min-width: 0; font-size: 16px; }
+  .h3lv-review-panel .h3lv-close { flex-shrink: 0; }
+  .h3lv-review-panel .h3lv-project-row select { min-width: 0; max-width: calc(100vw - 100px); }
+  .h3lv-review-panel .h3lv-card > summary { grid-template-columns: minmax(0, 1fr) auto; }
+  .h3lv-review-panel .h3lv-content { padding: 12px; }
+  .h3lv-review-panel .h3lv-default-materials-header { gap: 8px; padding: 12px; }
+  .h3lv-review-panel .h3lv-selected-bar audio { width: 100%; }
+}
+/* Library and expansion dialogs have a single title row, unlike the review header. */
+.h3lv-library-panel > .h3lv-header,
+.h3lv-expansion-panel > .h3lv-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.h3lv-library-panel > .h3lv-header h2,
+.h3lv-expansion-panel > .h3lv-header h2 { min-width: 0; margin: 0; }
+.h3lv-library-panel > .h3lv-header > button,
+.h3lv-expansion-panel > .h3lv-header > button { flex: 0 0 auto; margin-left: auto; }

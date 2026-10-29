@@ -83,10 +83,12 @@ def refresh_expansion_settings(snapshot, current_prompt):
         inputs, source = node['inputs'], current[key]['inputs']
         if inputs.get('material') != source.get('material'):
             raise ValueError('扩写素材连线已变化，请通过重新生成本段更新工作流快照。')
-        for field in ('mode', 'model', 'rule', 'revision'):
+        optional = ('provider', 'codex_model', 'codex_reasoning', 'codex_timeout')
+        for field in ('mode', 'model', 'rule', 'revision', *optional):
             if isinstance(source.get(field), (list, tuple)):
                 raise ValueError('扩写设置改成了连线输入，请通过重新生成本段更新工作流快照。')
             if field in source: inputs[field] = copy.deepcopy(source[field])
+            elif field in optional: inputs.pop(field, None)
 
 
 def normalize_output_contract(snapshot):
@@ -548,6 +550,9 @@ def start(root, project_id, payload, server):
     if backend != "本地":
         raise ValueError("请选择本地或RunningHub生成后端。")
     with LOCK:
+        from .expansion_jobs import active
+        if active(project_id):
+            raise ValueError('该项目正在批量扩写，请等待完成或取消后再生成视频。')
         if project_id in TASKS:
             raise ValueError("该项目已经在生成中。")
         plan = read_plan(root, project_id)

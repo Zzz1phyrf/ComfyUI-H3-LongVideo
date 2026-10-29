@@ -153,6 +153,25 @@ class ExpansionAPITests(unittest.TestCase):
             self.assertEqual(request.call_args.kwargs['timeout'], 600)
             self.assertNotIn(KEY, str(caught.exception))
 
+    def test_frozen_profile_controls_transport_without_reading_changed_settings(self):
+        frozen = {**self.config, 'timeout_seconds': 600}
+        with patch.object(expansion, 'settings', side_effect=AssertionError('Live profile reread')), \
+             patch.object(expansion, 'urlopen', return_value=Response(b'{"choices": []}')) as request:
+            self.assertEqual(expansion.call('/chat/completions', {'model': 'fixture'}, profile=frozen), {'choices': []})
+        self.assertEqual(request.call_args.kwargs['timeout'], 600)
+        self.assertEqual(request.call_args.args[0].full_url, frozen['base_url']+'/chat/completions')
+        self.assertEqual(request.call_args.args[0].get_header('Authorization'), 'Bearer '+KEY)
+
+    def test_capture_request_profile_deep_copies_all_effective_api_options(self):
+        config = {**self.config, 'extra_body': {'temperature': .2}}
+        with patch.object(expansion, 'settings', return_value=config):
+            captured = expansion.capture_request_profile()
+        config['extra_body']['temperature'] = .8
+        config['api_key'] = 'changed'
+        self.assertEqual(captured['extra_body'], {'temperature': .2})
+        self.assertEqual(captured['api_key'], KEY)
+        self.assertEqual(captured['response_mode'], 'json')
+
     def test_http_error_preserves_safe_code_not_key_or_request_body(self):
         body = json.dumps({'error': {'code': 'invalid_parameter', 'message': f'unsupported: {KEY}'}}).encode()
         error = HTTPError(self.config['base_url'], 400, 'fixture', {}, io.BytesIO(body))

@@ -1,4 +1,6 @@
 import { api } from "../../scripts/api.js";
+import { openAssetLibrary, mergeLibraryImport } from "./asset_library.js";
+import { withUiLogging } from "./diagnostics.js";
 import {insertImageMention, mentionedImageNumbers, remapImageMentions} from "./material_mentions.js";
 import {shotRequestText} from './shot_request.js';
 
@@ -8,7 +10,7 @@ function el(tag, parent, text) {
   parent.append(item); return item;
 }
 
-export function materialEditor(parent, {projectId, index = 0, refs = [], note = "", defaults, source = "default", changed, reorder, extraReferences, unified = false, shotRequest, legacyIntent = ''}) {
+export function materialEditor(parent, {projectId, index = 0, refs = [], note = "", defaults, source = "default", changed, reorder, extraReferences, unified = false, shotRequest, legacyIntent = '', getRevision}) {
   const box = el("section", parent); box.className = "h3lv-material-editor";
   const value = [...refs];
   let sourceSelect, copy;
@@ -24,6 +26,19 @@ export function materialEditor(parent, {projectId, index = 0, refs = [], note = 
   const upload = el("input", box); upload.type = "file"; upload.accept = "image/*"; upload.multiple = true; upload.hidden = true;
   const add = el("button", actions, "＋ 上传图片（最多 6 张）"); add.type = "button"; add.className = "h3lv-button";
   add.onclick = () => upload.click();
+  const library = el("button", actions, "从素材库选择"); library.type = "button"; library.className = "h3lv-button";
+  library.onclick = withUiLogging(async () => {
+    if (inherited() || uploading) return;
+    await openAssetLibrary({projectId, getRevision, currentCount:value.length, onImport:async (imported, choices) => {
+      if (!box.isConnected || inherited()) throw new Error("编辑器已关闭或已切换为继承，请重新打开素材库。");
+      const before = [...value];
+      const merged = mergeLibraryImport(before, currentText(), imported, choices);
+      for (const number of mentionedImageNumbers(extraReferences?.())) {
+        if (!merged.refs.includes(before[number-1])) throw new Error("本段其他要求仍引用被替换的图片，请先修改引用。");
+      }
+      value.splice(0, value.length, ...merged.refs); setText(merged.note); reorder?.(before, value); render(); changed();
+    }});
+  }, {source:"materials", action:"从素材库选择"});
   const mention = el("button", actions, "@ 引用图片"); mention.type = "button"; mention.className = "h3lv-button h3lv-mention-button";
   if (unified) el('p', box, '本段怎么拍（可选）').className = 'h3lv-help';
   const textarea = el("textarea", box); textarea.className = unified ? "h3lv-material-note h3lv-shot-request" : "h3lv-material-note"; textarea.value = note;
@@ -72,6 +87,8 @@ export function materialEditor(parent, {projectId, index = 0, refs = [], note = 
     const names = linked ? defaults().refs : value;
     textarea.value = unified ? currentText() : (linked ? defaults().note : customNote);
     textarea.disabled = Boolean(linked) && !unified; add.disabled = uploading; mention.disabled = (Boolean(linked) && !unified) || !names.length;
+    library.disabled = Boolean(linked) || uploading || !getRevision;
+    library.title = linked ? "选择本段自定义后可导入素材" : "";
     add.classList.toggle("is-inherited", Boolean(linked));
     mention.classList.toggle("is-unavailable", mention.disabled);
     add.title = linked ? "上传将切换到本段自定义，不修改项目默认图片" : "";

@@ -6,6 +6,10 @@ import unittest
 from unittest.mock import patch
 import test_materials as fixtures
 materials, expansion, TEXT = fixtures.materials, fixtures.expansion, fixtures.MULTI_TEXT
+AUDIO_TEXT = TEXT.replace('\n\nsummary:', '\n<Audio 1> 是 <Subject 1> (S1) 的已确认音频参考。\n\nsummary:', 1).replace(
+    '[reference generation]', '[reference generation + audio reference]', 1).replace(
+    '根据已声明场景与光影参考生成一个连续镜头。', '依据 <Audio 1> 参考生成 <Subject 1> 的自然表演。', 1).replace(
+    '\n\ndetailed_description:', '\n<Audio 1>：reference - 使用已确认的人声音频作为表演参考。\n\ndetailed_description:', 1)
 from test_plugin import core, sample_plan
 
 
@@ -57,8 +61,7 @@ class IntentTests(unittest.TestCase):
         row['shot_intent']='@图1走出房间，镜头跟随'
         row['brief_source']='automatic'
         packet=materials.packet(self.plan,row,self.directory)
-        answer=TEXT.replace('One shot.', 'One shot follows <Audio 1>.').replace(
-            '<Subject 1> from <Picture 1>.','<Subject 1> from <Picture 1>. <Audio 1> is singing.')
+        answer=TEXT
         with patch.object(expansion,'public_settings',return_value={'base_url':'https://test.invalid/v1'}), patch.object(
                 expansion,'call',return_value={'choices':[{'message':{'content':answer}}]}) as call:
             expansion.expand(packet,'vision','model','style')
@@ -83,10 +86,14 @@ class IntentTests(unittest.TestCase):
 
     def test_contract_rejects_missing_audio_and_environment_audio(self):
         packet=materials.packet(self.plan,self.plan['segments'][0],self.directory)
-        no_audio=TEXT.replace('<Audio 1> is singing.','').replace('follows <Audio 1>.','.')
-        with self.assertRaisesRegex(ValueError,'Audio 1'): expansion.validate_result(no_audio,packet)
+        self.assertEqual(expansion.validate_result(TEXT, packet), TEXT)
+        with self.assertRaisesRegex(ValueError, '没有已核实的 Audio 1'):
+            expansion.validate_result(AUDIO_TEXT, packet)
+        packet.update(audio_reference_available=True, audio_reference_slot=1)
+        with self.assertRaisesRegex(ValueError,'Audio 1'): expansion.validate_result(TEXT,packet)
+        self.assertEqual(expansion.validate_result(AUDIO_TEXT, packet), AUDIO_TEXT)
         packet['visual_type']='environment'
-        with self.assertRaisesRegex(ValueError,'误用了人声'): expansion.validate_result(TEXT+' <Audio 1>',packet)
+        with self.assertRaisesRegex(ValueError,'误用了人声'): expansion.validate_result(AUDIO_TEXT,packet)
 
     def test_provenance_user_edit_and_type_preview(self):
         changes=self.updates(); changes[0]['prompt']='女人走出房间。'
@@ -160,12 +167,12 @@ class IntentTests(unittest.TestCase):
 
     def test_single_picture_source_is_unambiguous_but_multi_picture_is_not(self):
         packet=materials.packet(self.plan,self.plan['segments'][0],self.directory)
-        missing=fixtures.TEXT.replace(' from <Picture 1>', '')
+        missing=fixtures.TEXT.replace('来自 <Picture 1> ', '')
         with self.assertRaisesRegex(ValueError,'多图'): expansion.validate_result(missing,packet)
         packet['paths']=packet['paths'][:1]
         fixed=expansion.validate_result(missing,packet)
-        self.assertIn('use <Picture 1> as their reference',fixed)
-        self.assertIn('[Shot 1] Move.',fixed)
+        self.assertIn('画面主体与场景来源为 <Picture 1>',fixed)
+        self.assertIn('[Shot 1] '+fixtures.SHOT_BODY,fixed)
 
 
 class ProgressTests(unittest.TestCase):

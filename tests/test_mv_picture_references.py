@@ -7,16 +7,23 @@ materials, expansion, TEXT = fixtures.materials, fixtures.expansion, fixtures.TE
 
 
 REPORTED = '''subject_definitions:
-<Subject 1> is the young woman with a gold hairpin and a cream Hanfu. <Audio 1> is the supplied vocal reference.
+<Subject 1> 是佩戴金色发簪、穿奶油色汉服的年轻女子。
+
 summary:
-One continuous performance of <Subject 1> singing to <Audio 1> in a wooden pavilion.
+[reference generation] 根据已声明人物和木亭场景生成一个连续镜头。
+
 retention_analysis:
-<Subject 1>: identity, hair and cream Hanfu are preserved from <Picture 1>.
-<Picture 2>: the pavilion, tea set, lotus pond and opening composition are preserved.
+<Subject 1>：fully_preserved - 保留来自 <Picture 1> 的人物身份、头发和奶油色汉服。
+<Picture 2>：fully_preserved - 保留木亭、茶具、荷塘与开场构图。
+
 detailed_description:
-[Shot 1] <Subject 1> sings naturally in the pavilion shown in <Picture 2>.
+写实摄影风格，光线柔和，木亭结构与人物比例自然。
+[Shot 1] <Subject 1> 在 <Picture 2> 所示木亭中自然表演，保持人物服装与场景布局，镜头缓慢前移并稳定结束。
+所有画面均不新增字幕、标题、歌词、水印或图形叠加；不转录参考图背景中的文字。
+
 overall_soundscape:
 N/A
+
 non_diegetic_music:
 N/A'''
 
@@ -47,13 +54,13 @@ class PictureReferenceTests(unittest.TestCase):
             expansion.validate_result(TEXT, self.packet())
 
     def test_two_views_of_one_person_keep_a_single_subject(self):
-        prompt = REPORTED.replace(
-            '<Subject 1> is the young woman',
-            '<Subject 1> is the same woman in <Picture 1> and <Picture 2>, the young woman')
+        prompt = fixtures.MULTI_TEXT.replace(
+            '的场景、光影与构图参考，并使用 <Picture 2> 提供的环境布局。',
+            '和 <Picture 2> 的同一人物参考，保留两张角度中的身份与服装。')
         self.assertEqual(expansion.validate_result(prompt, self.packet()), prompt)
 
     def test_missing_all_sources_still_rejects_ambiguous_multi_image_output(self):
-        missing = REPORTED.replace('<Picture 1>', 'the first photo').replace('<Picture 2>', 'the second photo')
+        missing = REPORTED.replace('<Picture 1>', '第一张照片').replace('<Picture 2>', '第二张照片')
         with self.assertRaisesRegex(ValueError, '多图'):
             expansion.validate_result(missing, self.packet())
 
@@ -62,7 +69,7 @@ class PictureReferenceTests(unittest.TestCase):
             expansion.validate_result(REPORTED.replace('<Picture 2>', '<Picture 3>'), self.packet())
 
     def test_unbound_reference_only_in_action_does_not_invent_a_source_role(self):
-        prompt = TEXT.replace('[Shot 1] Move.', '[Shot 1] Move beside <Picture 2>.')
+        prompt = TEXT.replace('[Shot 1] '+fixtures.SHOT_BODY, '[Shot 1] 在 <Picture 2> 所示环境中移动。')
         with self.assertRaisesRegex(ValueError, 'Picture 2'):
             expansion.validate_result(prompt, self.packet())
 

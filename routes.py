@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -10,16 +11,89 @@ from . import controller
 from . import director_rules
 from .diagnostics import download_log, record_error, record_event
 from .workflow_errors import failure_report
-from .core import (LOCK, REFERENCE_MIRROR_ROOT, UNSET, archive_take, audio_file, edit_plan, fingerprint, inside, preview_bounds,
+from .core import (LOCK, MAX_REFERENCE_BYTES, REFERENCE_MIRROR_ROOT, UNSET, apply_expansion_results, archive_take, audio_file, edit_plan, fingerprint, inside, preview_bounds,
                    output_preview, project_path, read_plan, read_project_transcript,
                    preview_segment_brief, reference_directory, remove_reference,
                    request_regeneration, segmentation,
                    state_file, store_reference, write_plan)
-from .nodes import data_root, final_root, rules_path
+from .nodes import data_root, final_root, rules_path, user_data_root
 from .storage import comfy_output, final_file, project_plans
 from .mv_rh import pending, require_settled
 
 RANGE_HEADER = re.compile(r"\s*bytes=(\d*)-(\d*)\s*")
+
+
+def library_root():
+    return user_data_root()/'asset_library'
+
+
+def expansion_active(project_id):
+    from .expansion_jobs import active
+    return active(project_id)
+
+
+def require_idle(plan):
+    require_settled(plan)
+    if plan.get('run_status') in {'running', 'pausing', 'stopping', 'merging'} or plan['id'] in controller.TASKS:
+        raise ValueError('视频任务正在运行，请先停止后再修改素材或扩写。')
+    if expansion_active(plan['id']):
+        raise ValueError('该项目正在批量扩写，请等待完成或取消后再修改。')
+
+
+def require_revision(payload, plan):
+    value = payload.get('revision')
+    if type(value) is not int or value != plan['revision']:
+        raise ValueError('项目已在其他窗口变化，请刷新后重试；已生成候选仍保留。')
+
+
+def selected_indices(value, count):
+    if not isinstance(value, list) or not value or any(type(i) is not int or not 0 <= i < count for i in value) or len(set(value)) != len(value):
+        raise ValueError('请选择有效且不重复的分段。')
+    return value
+
+
+def batch_settings(payload, defaults=None):
+    from .expansion import generation_options
+    defaults = defaults or {}
+    selected = {name: payload.get(name, defaults.get(name, default)) for name, default in
+                (('mode', 'vision'), ('model', ''), ('rule', ''), ('provider', 'api'),
+                 ('codex_model', ''), ('codex_reasoning', 'default'), ('codex_timeout', 300))}
+    selected['revision'] = payload.get('expansion_revision', defaults.get('revision', 0))
+    if selected['mode'] not in ('vision', 'text'):
+        raise ValueError('批量扩写请选择 vision 或 text；手写直通提示词保留原样。')
+    if any(not isinstance(selected[name], str) for name in ('model', 'rule', 'codex_model')):
+        raise ValueError('模型和扩写规则必须是文本。')
+    if type(selected['revision']) is not int or selected['revision'] < 0:
+        raise ValueError('扩写版本号无效。')
+    generation_options(selected['provider'], selected['codex_model'], selected['codex_reasoning'], selected['codex_timeout'])
+    return selected
+
+
+def batch_items(plan, directory, indices, force=False):
+    from .materials import packet
+    items = []
+    for index in indices:
+        row = plan['segments'][index]
+        text = row.get('expanded_prompt') or ''
+        generated = row.get('expanded_source') == 'generated' and row.get('expanded_generated_hash') == hashlib.sha256(text.encode('utf-8')).hexdigest()
+        overwrite = force is True or isinstance(force, set) and index in force
+        protected = bool(row.get('final_prompt')) or bool(text and not generated and not overwrite)
+        item = {'index': index, 'protected': protected}
+        try:
+            item['material'] = packet(plan, row, directory)
+        except (ValueError, OSError) as error:
+            item.update(material=None, error=str(error))
+        items.append(item)
+    return items
+
+
+def expansion_profile(selected):
+    from .expansion import api_options, capture_request_profile
+    profile = capture_request_profile(selected['provider'], selected['codex_model'], selected['codex_reasoning'])
+    if selected['provider'] == 'api':
+        profile.setdefault('base_url', 'https://api.ofox.io/v1')
+        profile.update(api_options(profile))
+    return profile
 
 
 def path_bytes(path):
@@ -118,6 +192,8 @@ def register_routes():
                 record_error("api_route", exc, source=fn.__name__,
                              project_id=request.match_info.get("project_id"))
                 if isinstance(exc, FileNotFoundError):
+                    if fn.__name__.startswith('library_'):
+                        return web.json_response({'error': '素材或图片版本不存在，请刷新素材库。'}, status=404)
                     return web.json_response({"error": "项目文件不完整或已被移动，请重新运行音频分析。"}, status=400)
                 status = 400 if isinstance(exc, (ValueError, KeyError, IndexError)) else 500
                 stage = 'video_assembly' if fn.__name__ == 'assemble' else 'api_route'
@@ -204,11 +280,12 @@ def register_routes():
     @endpoint
     async def expansion_preview(request):
         from .materials import packet
-        from .expansion import expand, cache_key, cache_source, validate_result
+        from .expansion import expand, cache_key, cache_source, validate_result, generation_options
         payload = await request.json()
         root, pid = data_root(), request.match_info['project_id']
         with LOCK:
             plan = read_plan(root, pid)
+            require_idle(plan)
             if plan['revision'] != payload.get('revision'):
                 raise ValueError('素材已变化，请刷新后重新扩写。')
             require_settled(plan)
@@ -219,24 +296,234 @@ def register_routes():
             row = plan['segments'][index]
             material = packet(plan, row, project_path(root, pid))
         args = (material, payload['mode'], payload['model'], payload['rule'], int(payload.get('expansion_revision', 0)))
-        key = cache_key(*args)
+        selected = generation_options(**{name: payload[name] for name in
+            ('provider', 'codex_model', 'codex_reasoning', 'codex_timeout') if name in payload})
+        key = cache_key(*args, **selected)
         if 'text' not in payload:
-            source = cache_source(material, key, payload['mode'])
-            text = await asyncio.to_thread(expand, *args)
+            source = cache_source(material, key, payload['mode'], selected['provider'])
+            text = await asyncio.to_thread(expand, *args, **selected)
             return web.json_response({'text': text, 'key': key, 'source': source})
         text = validate_result(str(payload['text']), material)
         if payload.get('key') != key: raise ValueError('扩写设置已变化，请重新预览。')
         with LOCK:
             plan = read_plan(root, pid)
+            require_idle(plan)
             if plan['revision'] != payload['revision'] or plan.get('run_status') in {'running','pausing','stopping','merging'}:
                 raise ValueError('项目状态已变化，请刷新。')
             row = plan['segments'][index]
-            row.update(expanded_prompt=text, expanded_key=key)
+            row.update(expanded_prompt=text, expanded_key=key, expanded_source='edited')
             request_regeneration(row, '扩写提示词已修改')
             plan.update(revision=plan['revision']+1, approved=False, run_status='draft')
             if plan.get('final_video'): plan['final_stale'] = True
             write_plan(root, plan)
         return web.json_response({'revision':plan['revision']})
+
+    @routes.get('/h3lv/library')
+    @endpoint
+    async def library_list(request):
+        from . import asset_library
+        trash = request.query.get('deleted') == '1'
+        result = await asyncio.to_thread(asset_library.list_assets, library_root(),
+            request.query.get('category') or None, request.query.get('q', ''), trash)
+        if trash:
+            result['assets'] = [item for item in result['assets'] if item.get('deleted_at')]
+        return web.json_response(result)
+
+    @routes.post('/h3lv/library/upload')
+    @endpoint
+    async def library_upload(request):
+        from . import asset_library
+        reader = await request.multipart()
+        fields, content, filename = {}, bytearray(), ''
+        while (part := await reader.next()) is not None:
+            if part.name == 'image':
+                if filename:
+                    raise ValueError('请按文件分别上传图片。')
+                filename = part.filename or ''
+                while chunk := await part.read_chunk(1024*1024):
+                    content.extend(chunk)
+                    if len(content) > MAX_REFERENCE_BYTES:
+                        raise ValueError('单张素材图不能超过 32 MiB。')
+            elif part.name in ('category', 'name', 'description', 'tags', 'revision', 'asset_id'):
+                fields[part.name] = await part.text()
+        if not filename:
+            raise ValueError('没有收到素材图片。')
+        revision = int(fields['revision']) if fields.get('revision') else None
+        result = await asyncio.to_thread(asset_library.upload, library_root(), filename, bytes(content),
+            category=fields.get('category') or 'character', name=fields.get('name', ''),
+            description=fields.get('description', ''), tags=json.loads(fields.get('tags') or '[]'),
+            expected_revision=revision, asset_id=fields.get('asset_id') or None)
+        result['duplicate'] = bool(result['asset'].get('duplicate_ids'))
+        return web.json_response(result)
+
+    @routes.post('/h3lv/library/{asset_id}/edit')
+    @endpoint
+    async def library_edit(request):
+        from . import asset_library
+        payload = await request.json()
+        if type(payload.get('revision')) is not int:
+            raise ValueError('素材库版本号无效，请刷新。')
+        fields = {name: payload[name] for name in ('name', 'category', 'description', 'tags') if name in payload}
+        return web.json_response(await asyncio.to_thread(asset_library.edit_asset, library_root(),
+            request.match_info['asset_id'], expected_revision=payload['revision'], **fields))
+
+    async def library_deleted(request, deleted):
+        from . import asset_library
+        payload = await request.json()
+        if type(payload.get('revision')) is not int:
+            raise ValueError('素材库版本号无效，请刷新。')
+        return web.json_response(await asyncio.to_thread(asset_library.set_deleted, library_root(),
+            request.match_info['asset_id'], deleted=deleted, expected_revision=payload['revision']))
+
+    @routes.post('/h3lv/library/{asset_id}/delete')
+    @endpoint
+    async def library_delete(request):
+        return await library_deleted(request, True)
+
+    @routes.post('/h3lv/library/{asset_id}/restore')
+    @endpoint
+    async def library_restore(request):
+        return await library_deleted(request, False)
+
+    @routes.get('/h3lv/library/{asset_id}/image')
+    @endpoint
+    async def library_image(request):
+        from . import asset_library
+        version = int(request.query['version']) if request.query.get('version') else None
+        path = await asyncio.to_thread(asset_library.asset_path, library_root(), request.match_info['asset_id'],
+            version=version, thumbnail=request.query.get('thumbnail') == '1')
+        return web.FileResponse(path, headers={'Cache-Control': 'no-store'})
+
+    @routes.post('/h3lv/project/{project_id}/library/import')
+    @endpoint
+    async def library_import(request):
+        from . import asset_library
+        payload = await request.json()
+        root, pid = data_root(), request.match_info['project_id']
+        with LOCK:
+            plan = read_plan(root, pid)
+            require_idle(plan)
+            require_revision(payload, plan)
+            result = asset_library.import_assets(library_root(), project_path(root, pid), payload.get('selection'))
+        return web.json_response(result)
+
+    @routes.post('/h3lv/project/{project_id}/expansion-batches')
+    @endpoint
+    async def batch_start(request):
+        from . import expansion_jobs
+        payload = await request.json()
+        root, pid = data_root(), request.match_info['project_id']
+        with LOCK:
+            plan = read_plan(root, pid)
+            require_idle(plan)
+            require_revision(payload, plan)
+            indices = selected_indices(payload.get('indices'), len(plan['segments']))
+            selected = batch_settings(payload)
+            directory = project_path(root, pid)
+            items = batch_items(plan, directory, indices, payload.get('force') is True)
+            job = expansion_jobs.start(directory, pid, plan['revision'], items, selected,
+                request_profile=expansion_profile(selected), concurrency=payload.get('concurrency', 2))
+        return web.json_response(job)
+
+    @routes.get('/h3lv/project/{project_id}/expansion-batches')
+    @endpoint
+    async def batch_list(request):
+        from . import expansion_jobs
+        directory = project_path(data_root(), request.match_info['project_id'])
+        return web.json_response({'jobs': expansion_jobs.list_jobs(directory)})
+
+    @routes.get('/h3lv/project/{project_id}/expansion-batches/{job_id}')
+    @endpoint
+    async def batch_get(request):
+        from . import expansion_jobs
+        pid = request.match_info['project_id']
+        job = expansion_jobs.get(project_path(data_root(), pid), request.match_info['job_id'])
+        if job['project_id'] != pid:
+            raise ValueError('批次不属于当前项目。')
+        return web.json_response(job)
+
+    @routes.post('/h3lv/project/{project_id}/expansion-batches/{job_id}/cancel')
+    @endpoint
+    async def batch_cancel(request):
+        from . import expansion_jobs
+        directory = project_path(data_root(), request.match_info['project_id'])
+        return web.json_response(expansion_jobs.cancel(directory, request.match_info['job_id']))
+
+    @routes.post('/h3lv/project/{project_id}/expansion-batches/{job_id}/retry')
+    @endpoint
+    async def batch_retry(request):
+        from . import expansion_jobs
+        from .expansion import cache_key
+        payload = await request.json()
+        root, pid = data_root(), request.match_info['project_id']
+        with LOCK:
+            plan = read_plan(root, pid)
+            require_idle(plan)
+            require_revision(payload, plan)
+            directory = project_path(root, pid)
+            old = expansion_jobs.get(directory, request.match_info['job_id'])
+            if old['project_id'] != pid:
+                raise ValueError('批次不属于当前项目。')
+            unfinished = {row['index']: row for row in old['items']
+                          if row['status'] in ('failed', 'cancelled', 'interrupted', 'conflict', 'pending')}
+            indices = selected_indices(payload.get('indices', list(unfinished)), len(plan['segments']))
+            if any(i not in unfinished for i in indices):
+                raise ValueError('只能重试该批次的未完成分段。')
+            selected = batch_settings({}, old['settings'])
+            profile = expansion_profile(selected)
+            force = {i for i in indices if (unfinished[i].get('material') or {}).get('expanded_prompt', '') == plan['segments'][i].get('expanded_prompt', '')}
+            items = batch_items(plan, directory, indices, force)
+            for item in items:
+                previous = unfinished[item['index']]
+                if previous.get('key') and item.get('material') and not item['protected']:
+                    if cache_key(item['material'], **selected, profile=profile) != previous['key']:
+                        raise ValueError('素材、简报或生成配置已变化，请按当前设置启动新批次；旧结果保留。')
+            job = expansion_jobs.start(directory, pid, plan['revision'], items, selected,
+                request_profile=profile, concurrency=payload.get('concurrency', old['concurrency']))
+        return web.json_response(job)
+
+    @routes.post('/h3lv/project/{project_id}/expansion-batches/{job_id}/apply')
+    @endpoint
+    async def batch_apply(request):
+        from . import expansion_jobs
+        from .expansion import cache_key, validate_result
+        from .materials import packet
+        payload = await request.json()
+        root, pid = data_root(), request.match_info['project_id']
+        with LOCK:
+            plan = read_plan(root, pid)
+            require_idle(plan)
+            require_revision(payload, plan)
+            directory = project_path(root, pid)
+            job = expansion_jobs.get(directory, request.match_info['job_id'])
+            if job['project_id'] != pid:
+                raise ValueError('批次不属于当前项目。')
+            indices = selected_indices(payload.get('indices'), len(plan['segments']))
+            entries = {item['index']: item for item in job['items']}
+            selected = batch_settings(payload, job['settings'])
+            profile = expansion_profile(selected)
+            edits = payload.get('edits') or {}
+            if not isinstance(edits, dict) or any(str(i) not in {str(n) for n in indices} or not isinstance(text, str) for i, text in edits.items()):
+                raise ValueError('批量编辑内容无效或包含未选择的分段。')
+            candidates = []
+            for index in indices:
+                entry = entries.get(index)
+                if not entry or entry['status'] not in ('succeeded', 'cached'):
+                    raise ValueError('仅可保存本批次已成功的分段。')
+                row = plan['segments'][index]
+                current = packet(plan, row, directory)
+                if cache_key(current, **selected, profile=profile) != entry['key']:
+                    raise ValueError('本段素材、简报或扩写设置已变化，无法覆盖当前项目；请重新生成或校验。')
+                text = validate_result(edits.get(str(index), entry['text']), current)
+                original = (entry.get('material') or {}).get('expanded_prompt', '') or ''
+                if row.get('expanded_prompt', '') not in (original, text):
+                    raise ValueError('本段提示词已被其他操作编辑，批量结果已保留，请重新检查。')
+                candidates.append({'index': index, 'text': text, 'key': entry['key'],
+                    'generated_text': entry['text'], 'edited': text != entry['text'], 'batch_id': job['id']})
+            updated, changed = apply_expansion_results(plan, candidates)
+            if changed:
+                write_plan(root, updated)
+        return web.json_response({'revision': updated['revision'], 'changed': changed, 'plan': updated})
 
     @routes.get("/h3lv/rules")
     @endpoint
@@ -284,7 +571,7 @@ def register_routes():
                 try:
                     entry = project_storage_entry(
                         root, file.parent.parent.name, finals, mirrors,
-                        active=file.parent.parent.name in controller.TASKS)
+                        active=file.parent.parent.name in controller.TASKS or expansion_active(file.parent.parent.name))
                     result.append({key:value for key, value in entry.items()
                                    if key not in {"directory", "mirror", "final_files"}})
                 except (ValueError, OSError):
@@ -307,7 +594,7 @@ def register_routes():
         root, finals = data_root(), final_root()
         mirrors = Path(folder_paths.get_input_directory())/REFERENCE_MIRROR_ROOT
         with LOCK:
-            active = [project_id for project_id in project_ids if project_id in controller.TASKS]
+            active = [project_id for project_id in project_ids if project_id in controller.TASKS or expansion_active(project_id)]
             if active:
                 raise ValueError("选中的项目仍在生成或合成，请等待任务结束后再删除。")
             entries = [project_storage_entry(root, project_id, finals, mirrors)
@@ -324,6 +611,7 @@ def register_routes():
         root = data_root()
         plan = read_plan(root, request.match_info["project_id"])
         plan["controller_active"] = plan["id"] in controller.TASKS
+        plan['expansion_active'] = expansion_active(plan['id'])
         if not plan.get("error"):
             plan.pop("error_info", None)
         plan["final_preview"] = output_preview(comfy_output(data_root()), plan.get("final_video"))
@@ -369,6 +657,7 @@ def register_routes():
         root, pid = data_root(), request.match_info["project_id"]
         with LOCK:
             plan = read_plan(root, pid)
+            require_idle(plan)
             if int(payload.get("revision", -1)) != plan["revision"]:
                 raise ValueError("方案已被另一个窗口修改，请刷新。")
             if ('split_time' in payload or 'remove_cut' in payload) and pid in controller.TASKS:
@@ -404,6 +693,7 @@ def register_routes():
         root, pid = data_root(), request.match_info["project_id"]
         with LOCK:
             plan = read_plan(root, pid)
+            require_idle(plan)
             if plan.get("run_status") in {"running", "pausing", "stopping", "merging"}:
                 raise ValueError("任务运行中。")
             if payload.get("revision") != plan["revision"]:
@@ -429,6 +719,7 @@ def register_routes():
             raise ValueError("没有收到参考图文件。")
         with LOCK:
             plan = read_plan(root, pid)
+            require_idle(plan)
             if plan.get("run_status") in {"running", "pausing", "stopping", "merging"}:
                 raise ValueError("生成任务正在运行，请先停止再修改参考图。")
             require_settled(plan)
@@ -456,6 +747,7 @@ def register_routes():
         directory = project_path(root, pid)
         with LOCK:
             plan = read_plan(root, pid)
+            require_idle(plan)
             if plan.get("run_status") in {"running", "pausing", "stopping", "merging"}:
                 raise ValueError("生成任务正在运行，请先停止再修改参考图。")
             require_settled(plan)
@@ -464,6 +756,9 @@ def register_routes():
                 raise ValueError("缺少要删除的参考图。")
             if name in plan.get("default_refs", []) or any(name in (row.get("refs") or []) for row in plan["segments"]):
                 raise ValueError("该参考图仍被某个分段使用，请先在分段卡片中移除。")
+            origins = state_file(directory, 'library_sources.json')
+            if origins.is_file() and name in json.loads(origins.read_text(encoding='utf-8')).get('origins', {}):
+                raise ValueError('库导入的项目快照保留用于历史复现；从片段解除引用即可。')
             remove_reference(directory, name)
         return web.json_response({"removed": name})
 

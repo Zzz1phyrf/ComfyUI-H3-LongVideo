@@ -1,6 +1,7 @@
 import copy
 import importlib
 import io
+import json
 from pathlib import Path
 import re
 import tempfile
@@ -11,8 +12,15 @@ from test_plugin import core, controller, nodes, sample_plan
 
 materials = importlib.import_module('h3lv_test.materials')
 expansion = importlib.import_module('h3lv_test.expansion')
-TEXT = 'subject_definitions:\n<Subject 1> from <Picture 1>. <Audio 1> is singing.\nsummary:\nOne shot follows <Audio 1>.\nretention_analysis:\nKeep scene.\ndetailed_description:\n[Shot 1] Move.\noverall_soundscape:\nN/A\nnon_diegetic_music:\nN/A'
-MULTI_TEXT = TEXT.replace('from <Picture 1>.', 'from <Picture 1>. <Picture 2> supplies the scene and composition.')
+STYLE = '写实摄影风格，光影柔和，空间关系稳定。'
+SHOT_BODY = '镜头缓慢前移，场景的布局、材质和光线随连续运动自然展开，结尾保持原有空间关系。'
+SUMMARY = '[reference generation] 根据已声明场景与光影参考生成一个连续镜头。'
+TEXT = ('subject_definitions:\n<Subject 1> 是来自 <Picture 1> 的场景、光影与构图参考。\n\n'
+        'summary:\n'+SUMMARY+'\n\n'
+        'retention_analysis:\n<Subject 1>：fully_preserved - 保留场景布局与材质。\n\n'
+        'detailed_description:\n'+STYLE+'\n[Shot 1] '+SHOT_BODY+'\n'+expansion.h3_prompt_rules.NO_OVERLAY+'\n\n'
+        'overall_soundscape:\nN/A\n\nnon_diegetic_music:\nN/A')
+MULTI_TEXT = TEXT.replace('的场景、光影与构图参考。', '的场景、光影与构图参考，并使用 <Picture 2> 提供的环境布局。')
 
 class MaterialTests(unittest.TestCase):
     def setUp(self):
@@ -119,10 +127,10 @@ class MaterialTests(unittest.TestCase):
             self.assertEqual(context['audio_role'], 'vocal')
             self.assertEqual(context['visual_type'], 'performance')
             system = call.call_args.args[1]['messages'][0]['content']
-            self.assertIn('atmosphere means a visible performer who remains closed-mouth', system)
-            self.assertIn('environment means only the declared environment is visible', system)
+            self.assertIn('atmosphere 保持人物嘴唇闭合', system)
+            self.assertIn('environment 只表现环境', system)
             self.assertIn('generation_seconds', system)
-            self.assertIn('do not quote, transcribe, translate, paraphrase or describe its wording', system)
+            self.assertIn('不要引用、转录、翻译或改写参考背景', system)
             other = copy.deepcopy(packet); other['material_note'] = 'different roles'
             expansion.expand(other,'vision','m','r')
             self.assertEqual(call.call_count,2)
@@ -154,30 +162,30 @@ class MaterialTests(unittest.TestCase):
         missing_label = TEXT.replace('[Shot 1] ', '')
         result = expansion.validate_prompt(missing_label, 2)
         self.assertEqual(result.count('[Shot 1]'), 1)
-        self.assertIn('detailed_description:\n[Shot 1]\nMove.', result)
+        self.assertIn('detailed_description:\n'+STYLE+'\n[Shot 1] '+SHOT_BODY, result)
 
     def test_summary_shot_label_is_removed_when_detail_has_single_shot(self):
-        duplicated_in_summary = TEXT.replace('summary:\nOne shot follows <Audio 1>.', 'summary:\n[Shot 1] One shot follows <Audio 1>.')
+        duplicated_in_summary = TEXT.replace('summary:\n'+SUMMARY, 'summary:\n[Shot 1] '+SUMMARY)
         result = expansion.validate_prompt(duplicated_in_summary, 2)
         self.assertEqual(result.count('[Shot 1]'), 1)
-        self.assertIn('summary:\nOne shot follows <Audio 1>.', result)
-        self.assertIn('detailed_description:\n[Shot 1] Move.', result)
+        self.assertIn('summary:\n'+SUMMARY, result)
+        self.assertIn('detailed_description:\n'+STYLE+'\n[Shot 1] '+SHOT_BODY, result)
 
     def test_single_shot_label_variations_are_canonicalized(self):
         cases = {
             'bold_compact_uppercase_summary': TEXT.replace(
-                'summary:\nOne shot follows <Audio 1>.', 'summary:\n**[SHOT1]** One shot follows <Audio 1>.'),
+                'summary:\n'+SUMMARY, 'summary:\n**[SHOT1]** '+SUMMARY),
             'label_after_detail_prose': TEXT.replace(
-                'detailed_description:\n[Shot 1] Move.',
-                'detailed_description:\nContinuous take. [shot 1] Move.'),
+                '[Shot 1] '+SHOT_BODY,
+                '镜头保持连续。 [shot 1] '+SHOT_BODY),
             'label_only_outside_detail': TEXT.replace(
-                'summary:\nOne shot follows <Audio 1>.', 'summary:\n[ Shot 1 ] One shot follows <Audio 1>.').replace('[Shot 1] ', ''),
+                'summary:\n'+SUMMARY, 'summary:\n[ Shot 1 ] '+SUMMARY).replace('[Shot 1] ', ''),
         }
         for name, prompt in cases.items():
             with self.subTest(name=name):
                 result = expansion.validate_prompt(prompt, 2)
                 self.assertEqual(result.count('[Shot 1]'), 1)
-                self.assertIn('detailed_description:\n[Shot 1]', result)
+                self.assertIn('[Shot 1] '+SHOT_BODY, result)
                 self.assertEqual(
                     re.findall(r'(?i)\[\s*shot\s*\d+\s*\]', result),
                     ['[Shot 1]'],
@@ -191,26 +199,26 @@ class MaterialTests(unittest.TestCase):
                 prompt = TEXT.replace(f'{heading}:\n', f'{heading}:\n**[SHOT #1]**: ', 1)
                 result = expansion.validate_prompt(prompt, 2)
                 self.assertEqual(result.count('[Shot 1]'), 1)
-                self.assertIn('detailed_description:\n[Shot 1]', result)
+                self.assertIn('[Shot 1] '+SHOT_BODY, result)
                 self.assertNotIn('[SHOT #1]', result)
 
     def test_duplicate_single_shot_labels_are_rejected(self):
-        duplicate = TEXT.replace('[Shot 1] Move.', '[Shot 1] Move.\n[Shot 1] Continue.')
+        duplicate = TEXT.replace('[Shot 1] '+SHOT_BODY, '[Shot 1] '+SHOT_BODY+'\n[Shot 1] 继续移动。')
         with self.assertRaisesRegex(ValueError, '\\[Shot 1\\]'):
             expansion.validate_prompt(duplicate, 2)
 
     def test_noncanonical_multi_shot_and_duplicate_detail_are_rejected(self):
         prompts = {
-            'uppercase_second_shot': TEXT.replace('[Shot 1] Move.', '[SHOT 2] Move.'),
+            'uppercase_second_shot': TEXT.replace('[Shot 1] '+SHOT_BODY, '[SHOT 2] '+SHOT_BODY),
             'compact_duplicate_detail': TEXT.replace(
-                '[Shot 1] Move.', '[Shot 1] Move.\n**[SHOT1]** Continue.'),
+                '[Shot 1] '+SHOT_BODY, '[Shot 1] '+SHOT_BODY+'\n**[SHOT1]** 继续移动。'),
         }
         for name, prompt in prompts.items():
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, '\\[Shot 1\\]'):
                 expansion.validate_prompt(prompt, 2)
 
     def test_malformed_bracketed_shot_label_is_rejected(self):
-        malformed = TEXT.replace('[Shot 1] Move.', '[Shot one] Move.')
+        malformed = TEXT.replace('[Shot 1] '+SHOT_BODY, '[Shot one] '+SHOT_BODY)
         with self.assertRaisesRegex(ValueError, '\\[Shot 1\\]'):
             expansion.validate_prompt(malformed, 2)
 
@@ -221,8 +229,10 @@ class MaterialTests(unittest.TestCase):
             self.assertEqual(expansion.cache_source(packet,key,'vision'),'api')
             cache = Path(packet['cache_dir']); cache.mkdir(parents=True)
             (cache/(key+'.json')).write_text('{"text":"cached"}',encoding='utf-8')
+            self.assertEqual(expansion.cache_source(packet,key,'vision'),'api')
+            (cache/(key+'.json')).write_text(json.dumps({'text':MULTI_TEXT}),encoding='utf-8')
             self.assertEqual(expansion.cache_source(packet,key,'vision'),'cache')
-            packet.update(expanded_key=key, expanded_prompt=TEXT)
+            packet.update(expanded_key=key, expanded_prompt=MULTI_TEXT)
             self.assertEqual(expansion.cache_source(packet,key,'vision'),'saved')
 
     def test_secret_not_returned_and_host_change_clears_old_key(self):
@@ -262,11 +272,11 @@ class MaterialTests(unittest.TestCase):
         packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)
         with patch.object(expansion,'public_settings',return_value={'base_url':'https://example.test/v1'}), patch.object(expansion,'call',return_value={'choices':[{'message':{'content':MULTI_TEXT}}]}) as call:
             packet['expanded_key'] = expansion.cache_key(packet,'vision','m','r',0)
-            packet['expanded_prompt'] = MULTI_TEXT.replace('Keep scene.','User edit.')
-            self.assertIn('User edit.',expansion.expand(packet,'vision','m','r'))
+            packet['expanded_prompt'] = MULTI_TEXT.replace('保留场景布局与材质。','保留场景布局与用户调整。')
+            self.assertIn('用户调整',expansion.expand(packet,'vision','m','r'))
             call.assert_not_called()
             packet['brief'] += ' changed'
-            self.assertNotIn('User edit.',expansion.expand(packet,'vision','m','r'))
+            self.assertNotIn('用户调整',expansion.expand(packet,'vision','m','r'))
             call.assert_called_once()
 
     def test_markdown_labels_normalize_without_filling_missing_sections(self):
