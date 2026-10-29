@@ -1,6 +1,7 @@
 import copy
 import importlib
 import io
+import json
 from pathlib import Path
 import re
 import tempfile
@@ -220,7 +221,7 @@ class MaterialTests(unittest.TestCase):
             key = expansion.cache_key(packet,'vision','m','r',0)
             self.assertEqual(expansion.cache_source(packet,key,'vision'),'api')
             cache = Path(packet['cache_dir']); cache.mkdir(parents=True)
-            (cache/(key+'.json')).write_text('{"text":"cached"}',encoding='utf-8')
+            (cache/(key+'.json')).write_text(json.dumps({'text':MULTI_TEXT}),encoding='utf-8')
             self.assertEqual(expansion.cache_source(packet,key,'vision'),'cache')
             packet.update(expanded_key=key, expanded_prompt=TEXT)
             self.assertEqual(expansion.cache_source(packet,key,'vision'),'saved')

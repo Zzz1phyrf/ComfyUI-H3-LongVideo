@@ -44,6 +44,8 @@ Resolve the shot before writing its six sections. These rules also apply to cust
 Each supplied image used as evidence must retain its original Picture number, including after image reordering. A performance prompt must define <Audio 1> in subject_definitions and reference it in summary. Other visual types must omit audio reference tags. The user's original soundtrack is restored by the workflow.
 '''
 API_DEFAULTS = {'timeout_seconds': 300, 'response_mode': 'json', 'thinking_mode': 'auto', 'extra_body': {}}
+FORMAT_RULE = '''Output-format contract (creative instructions above remain unchanged):
+Return the six named English sections as plain text, each with a standalone field label and ASCII colon. Each visual section contains actual completed prose. Every reference uses the literal token <Picture N>, <Subject N> or <Audio N> with its original integer; Picture and Subject numbers are independent. Each Subject used later has an explicit definition. The available numbered assets are listed below; they establish availability, not image roles. State the role of every supplied image in subject_definitions or retention_analysis using the user's assignments and visible evidence. Place exactly one [Shot 1] at the start of detailed_description. Both sound fields contain N/A because the workflow restores the original soundtrack. Custom style rules affect creative content within this fixed format. Check all section bodies, reference numbers and definitions before returning the final text.'''
 
 
 def model_material_note(note, count):
@@ -263,34 +265,68 @@ def join_sections(sections):
     return '\n'.join(name + ':\n' + sections[name] for name in HEADINGS)
 
 
-def validate_prompt(text, count, complete_sound=False):
-    # Normalize presentation; visual content and reference roles stay explicit.
-    if not isinstance(text, str): raise ValueError('扩写正文必须是文本。')
-    text = text.replace('\r\n', '\n').strip()
+def normalize_sections(text, complete_sound):
+    """Read equivalent presentations of named fields without inferring content."""
+    text = text.lstrip('\ufeff').replace('\r\n', '\n').replace('\r', '\n').strip()
     if text.startswith('```') and text.endswith('```'):
         if '\n' not in text:raise ValueError('扩写结果缺少 H3 六段结构，请重新扩写或修正后保存。')
         text = text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
-    for heading in HEADINGS:
-        text = re.sub(r'(?im)^[ \t]*(?:#{1,6}[ \t]*)?(?:\d+[.)][ \t]*)?(?:\*\*|__)?' + heading + r'(?:\*\*|__)?[ \t]*[:：](?:\*\*|__)?[ \t]*\n?', heading + ':\n', text)
-    markers = re.findall(r'(?m)^(' + '|'.join(HEADINGS) + r'):\n', text)
-    if len(markers) != len(set(markers)):
-        raise ValueError('扩写结果包含重复字段，请修正后保存。')
+    if text.startswith('{'):
+        def unique_fields(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:raise ValueError('扩写结果包含重复字段，请修正后保存。')
+                result[key] = value
+            return result
+        try:sections = json.loads(text, object_pairs_hook=unique_fields)
+        except json.JSONDecodeError:
+            raise ValueError('扩写结果的字段 JSON 不完整或无效，请修正后保存。') from None
+        if set(sections) - set(HEADINGS) or any(not isinstance(value,str) for value in sections.values()):
+            raise ValueError('扩写结果只能包含 H3 六个文本字段。')
+    else:
+        names = '|'.join(name.replace('_', r'[ _-]+') for name in HEADINGS)
+        labels = re.compile(r'(?im)^[ \t]*(?:#{1,6}[ \t]*)?(?:(?:[-*+][ \t]+)|(?:\(?\d+[.)][ \t]+))?'
+                            r'(?:\*\*|__|`)?[ \t]*(' + names + r')[ \t]*(?:\*\*|__|`)?[ \t]*'
+                            r'(?:[:：][ \t]*(?:\*\*|__|`)?[ \t]*|(?=\n|$))')
+        matches = list(labels.finditer(text))
+        sections = {}
+        for index, match in enumerate(matches):
+            name = re.sub(r'[ _-]+', '_', match[1].lower())
+            if name in sections:raise ValueError('扩写结果包含重复字段，请修正后保存。')
+            sections[name] = text[match.end():matches[index+1].start() if index+1<len(matches) else len(text)].strip()
     if complete_sound:
-        for heading in HEADINGS[-2:]:
-            if heading not in markers:
-                field = heading + ':\nN/A\n'
-                next_field = re.search(r'(?m)^non_diegetic_music:\n', text) if heading=='overall_soundscape' else None
-                if next_field:text = text[:next_field.start()] + field + text[next_field.start():]
-                else:text += '\n' + field.rstrip()
-    positions = [re.search(r'(?m)^' + h + r':\n', text) for h in HEADINGS]
-    if any(p is None for p in positions) or [p.start() for p in positions] != sorted(p.start() for p in positions):
-        raise ValueError('扩写结果缺少 H3 六段结构，请重新扩写或修正后保存。')
-    text = re.sub(r'<\s*(Picture|Audio|Subject)\s*(\d+)\s*>',
-                  lambda match: '<' + match[1].capitalize() + ' ' + str(int(match[2])) + '>', text, flags=re.I)
-    # Explicit prose labels carry the same provenance; restore H3 punctuation
-    # without inventing picture roles or deriving references from filenames.
-    text = re.sub(r'(?i)(?<![\w</\\])\b(Picture|Audio|Subject)\s+(\d+)\b(?!\s*>)(?!\.(?:png|jpe?g|webp|gif|bmp|tiff?|wav|mp3|flac)\b)',
-                  lambda match: '<' + match[1].capitalize() + ' ' + str(int(match[2])) + '>', text)
+        for name in HEADINGS[-2:]:sections.setdefault(name,'N/A')
+    missing = [name for name in HEADINGS if name not in sections]
+    if missing:raise ValueError('扩写结果缺少 H3 六段结构中的字段：'+', '.join(missing)+'。请修正后保存。')
+    for name in HEADINGS[:4]:
+        body = SHOT_LABEL_TOKEN_RE.sub('',sections[name]).strip()
+        if not body or body.lower() in ('...', '…', 'n/a', 'null'):
+            raise ValueError('扩写结果字段 '+name+' 缺少具体内容，请修正后保存。')
+    return join_sections(sections)
+
+
+def normalize_references(text):
+    """Canonicalize explicit labels; never infer roles, ordinals or filenames."""
+    kinds = r'(Picture|Audio|Subject|Video)'
+    def token(match):return '<' + match[1].capitalize() + ' ' + str(int(match[2])) + '>'
+    text = re.sub(r'(?i)(?:<|＜|\[|［|&lt;)\s*' + kinds + r'[\s_#]*([0-9０-９]+)\s*(?:>|＞|\]|］|&gt;)',token,text)
+    text = re.sub(r'(?i)(?<![\w</\\\[＜［])\b' + kinds + r'[ \t_#]*([0-9０-９]+)\b'
+                  r'(?![ \t]*(?:>|＞|\]|］|&gt;))(?!\.(?:png|jpe?g|webp|gif|bmp|tiff?|wav|mp3|flac|mp4|mov|mkv)\b)',token,text)
+    closed = re.sub(r'<(?:Picture|Audio|Subject|Video) [1-9][0-9]*>','',text)
+    if re.search(r'(?i)(?:<|＜|\[|［|&lt;)\s*(?:Picture|Audio|Subject|Video)(?![A-Za-z])',closed):
+        raise ValueError('扩写结果包含未闭合或无效的引用标签；编号须为正整数，请修正后保存。')
+    return text
+
+
+def validate_prompt(text, count, complete_sound=False):
+    # Normalize presentation; visual content and reference roles stay explicit.
+    if not isinstance(text, str): raise ValueError('扩写正文必须是文本。')
+    text = normalize_references(normalize_sections(text,complete_sound))
+    text = re.sub(r'(?i)[\[［]\s*shot\s*#?\s*(\d+)\s*[\]］]',lambda match:'[Shot '+str(int(match[1]))+']',text)
+    text = re.sub(r'(?im)^[ \t]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?'
+                  r'(?:\([ \t]*shot[ \t]*#?[ \t]*(\d+)[ \t]*\)|shot[ \t]*#?[ \t]*(\d+))'
+                  r'(?:\*\*|__)?[ \t]*(?:[:：][ \t]*|(?=\n|$))',
+                  lambda match:'[Shot '+str(int(match[1] or match[2]))+'] ',text)
     if any(not 1 <= int(n) <= count for n in re.findall(r'<Picture\s+(\d+)>', text)):
         raise ValueError('扩写结果引用了不存在的图片。')
     marker = 'detailed_description:\n'
@@ -341,8 +377,15 @@ def cache_key(material, mode, model, rule, revision, profile=None):
 def cache_source(material, key, mode):
     if material.get('expanded_key') == key and material.get('expanded_prompt'):
         return 'saved'
-    if mode != 'manual' and (Path(material['cache_dir'])/(key+'.json')).exists():
-        return 'cache'
+    if mode != 'manual':
+        for suffix in ('.json','.invalid.txt'):
+            path = Path(material['cache_dir'])/(key+suffix)
+            if not path.is_file():continue
+            try:
+                text = path.read_text(encoding='utf-8-sig')
+                validate_result(json.loads(text)['text'] if suffix=='.json' else text,material)
+            except (ValueError,KeyError,TypeError):continue
+            return 'cache'
     return 'manual' if mode == 'manual' else 'api'
 
 
@@ -358,6 +401,14 @@ def validate_result(text, material):
     if not modern:
         return text
     sections = prompt_sections(text)
+    subjects = set(re.findall(r'<Subject (\d+)>',text))
+    defined_subjects = set(re.findall(r'<Subject (\d+)>',sections['subject_definitions']))
+    undefined = subjects - defined_subjects
+    if undefined:
+        raise ValueError('扩写正文引用了未定义的主体：'+', '.join('<Subject '+n+'>' for n in sorted(undefined,key=int))+'。请补齐已有内容的定义。')
+    videos = re.findall(r'<Video (\d+)>',text)
+    if videos:
+        raise ValueError('扩写正文引用了未接入的视频：'+', '.join('<Video '+n+'>' for n in sorted(set(videos),key=int))+'；本段仅提供图片和所选人声。')
     definitions = sections['subject_definitions']
     retention = sections['retention_analysis']
     defined = set(re.findall(r'<Picture\s+(\d+)>', definitions, re.I))
@@ -450,7 +501,13 @@ def expand(material, mode, model, rule, revision=0):
                     im = ImageOps.exif_transpose(im).convert('RGB'); im.thumbnail((1280,1280))
                     b = io.BytesIO(); im.save(b, format='JPEG', quality=88)
                 content.append({'type':'image_url','image_url':{'url':'data:image/jpeg;base64,'+base64.b64encode(b.getvalue()).decode()}})
-        payload = {'model':model, 'messages':[{'role':'system','content':GUARD+'\n'+rule+'\n'+INTENT_RULE}, {'role':'user','content':content}], 'max_tokens':8192,
+        # This block restates the existing output contract. Valid saved/cached
+        # creative content keeps its key and is normalized at the same boundary.
+        available = {'pictures':[f'<Picture {i+1}>' for i in range(len(material['paths']))],
+                     'audio':'<Audio 1>' if material['visual_type']=='performance' else None,
+                     'video':None}
+        format_rule = FORMAT_RULE+'\nAvailable assets for this packet: '+json.dumps(available)
+        payload = {'model':model, 'messages':[{'role':'system','content':GUARD+'\n'+rule+'\n'+INTENT_RULE+'\n'+format_rule}, {'role':'user','content':content}], 'max_tokens':8192,
                    'stream':api_options(profile)['response_mode'] == 'stream'}
         for name, value in request_options(profile, model).items():
             if value is None: payload.pop(name, None)
@@ -459,6 +516,10 @@ def expand(material, mode, model, rule, revision=0):
         try:
             choice = response['choices'][0]
             if choice.get('finish_reason') == 'length': raise ValueError('扩写结果被截断，请调整模型或规则。')
+            if choice.get('finish_reason') not in (None,'stop'):
+                raise ValueError('扩写 API 未正常完成正文（过滤、工具调用或其他停止原因）；未提交视频生成，也没有自动重试。')
+            if choice['message'].get('refusal'):
+                raise ValueError('扩写模型拒绝返回正文；未提交视频生成，也没有自动重试。')
             answer = content_text(choice['message'].get('content'))
             if not answer.strip():
                 raise ValueError('模型没有返回正文，可能只返回了思考内容；请检查模型思考设置或更换模型。')

@@ -39,9 +39,12 @@ class Client:
         try:
             response = requests.post(self.config['base_url']+path,headers=self.headers,json=body,timeout=timeout)
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            if not isinstance(data,dict):
+                raise RemoteError('RH返回格式无效，应为JSON对象；创建结果如未确认，请核对原任务，不会自动重建。')
+            return data
         except (requests.RequestException,ValueError):
-            raise RemoteError('RH网络请求未能确认。任务ID如已保存，继续时只查询该任务；不会自动重建。') from None
+            raise RemoteError('RH请求或返回内容未能确认。任务ID如已保存，继续时只查询该任务；不会自动重建。') from None
 
     def upload(self,path):
         try:
@@ -50,8 +53,11 @@ class Client:
                     headers=self.headers,files={'file':(Path(path).name,stream)},timeout=180)
             response.raise_for_status()
             data = response.json()
-            name = (data.get('data') or {}).get('filename') or (data.get('data') or {}).get('fileName')
-            if data.get('code') not in (0,200) or not name:
+            if not isinstance(data,dict):
+                raise RemoteError('RH素材上传返回格式无效；尚未提交新的生成任务。')
+            record = data.get('data')
+            name = (record.get('filename') or record.get('fileName')) if isinstance(record,dict) else None
+            if data.get('code') not in (0,200) or not isinstance(name,str) or not name.strip():
                 raise RemoteError('RH素材上传被拒绝，请检查账号权限及文件类型。')
             return name
         except (requests.RequestException,ValueError):
@@ -64,9 +70,10 @@ class Client:
             'workflowId':self.config['workflow_id'],'workflow':json.dumps(graph,ensure_ascii=False),
             'nodeInfoList':[{'nodeId':seed_node,'fieldName':seed_field,'fieldValue':self.config['seed']}],
             'instanceType':self.config['instance_type'],'addMetadata':True,'apiKey':self.key},120)
-        task_id = str((data.get('data') or {}).get('taskId') or '')
         if data.get('code')!=0:
             raise Rejected('RH明确拒绝创建任务，请检查工作流权限、额度或节点配置后手动重试。')
+        record = data.get('data')
+        task_id = str(record.get('taskId') or '') if isinstance(record,dict) else ''
         if not task_id.isdigit():
             raise RemoteError('RH没有返回有效任务ID，创建结果未知；请到RH任务列表核对后绑定任务ID。')
         return task_id
@@ -74,11 +81,14 @@ class Client:
     def workflow(self):
         data = self._post('/api/openapi/getJsonApiFormat',
             {'apiKey':self.key,'workflowId':self.config['workflow_id']})
-        value = (data.get('data') or {}).get('prompt')
+        record = data.get('data')
+        value = record.get('prompt') if isinstance(record,dict) else None
         if data.get('code') != 0 or not isinstance(value,(str,dict)):
             raise RemoteError('无法读取RH工作流，请检查ID、区域及访问权限。尚未提交生成任务。')
         try:
-            return json.loads(value) if isinstance(value,str) else value
+            graph = json.loads(value) if isinstance(value,str) else value
+            if not isinstance(graph,dict):raise ValueError('RH workflow must be an object')
+            return graph
         except ValueError:
             raise RemoteError('RH工作流不是有效API图；尚未提交生成任务。') from None
 

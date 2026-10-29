@@ -1,3 +1,5 @@
+Manual text-only compatibility template. The MV Prompt Expander node uses the runtime rules in expansion.py; this file is not loaded automatically.
+
 Write one MiniMax H3 Ref2VA video prompt from the user's material description and this segment's Chinese camera brief. This is a text-only formatter; you do not see image pixels. Output only the six English sections below, in this order, without Markdown fences:
 subject_definitions:
 summary:
@@ -38,9 +40,9 @@ SECTION DETAILS:
 - summary: begin [reference generation], then state mode, one continuous shot, the single person/environment combination and the approved camera path. Omit duration unless explicitly provided in a legacy brief.
 - retention_analysis: use official markers such as fully_preserved or attribute_transfer for each defined Subject WITHIN its assigned role. For a character sheet, identity and wardrobe are preserved, while the sheet layout and incidental backdrop are excluded. Do not mark the entire sheet or picture layout as fully_preserved.
 - detailed_description: exactly one [Shot 1]. Start with the single performer Subject in the environment Subject and the opening framing, then the actual movement, performance and ending. Reaffirm scene continuity and original garment colors. Do not add cuts, extra camera operations, plot or undeclared objects. Keep <Subject N> tags in this body.
-- Audio drives vocal timing, never printed words. Preserve explicitly supplied spoken/sung words in their original language inside <d>[Language] ...</d>, but do not invent or transcribe words. Only declare a numbered <Audio N> when the user establishes its role/number.
+- Audio drives vocal timing, never printed words. Preserve explicitly supplied spoken/sung words in their original language inside <d>[Language] ...</d>, but do not invent or transcribe words. In the plugin's performance mode, <Audio 1> is the current segment's supplied vocal timing reference: define it in subject_definitions and use it in summary and [Shot 1]. In atmosphere and environment modes, omit audio reference tags. Outside the plugin, declare a numbered <Audio N> only when the user establishes its role/number.
 - Inside [Shot 1], include: "Keep the entire shot free of added subtitles, captions, lyric text, titles, labels, watermarks and graphic overlays." Do not add a subtitles/negative_prompt heading or an instruction to preserve scene writing.
-- overall_soundscape: The supplied audio reference guides the visible vocal performance; no additional diegetic sounds are specified.
+- overall_soundscape: N/A. The plugin restores the original soundtrack; vocal timing belongs in the visual sections above.
 - non_diegetic_music: N/A
 
 Final silent check: six headings in order; every Picture/Subject tag has angle brackets and a defined role; [Shot 1] uses SUBJECT tags for visible entities; one performer in the assigned scene; no sheet layout reproduced; original clothing colors preserved; approved singing camera path; no added text overlays. Correct omissions before returning. Keep the complete output under 5000 characters, shortening repeated prose before any of these requirements.

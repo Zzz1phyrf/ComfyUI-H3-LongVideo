@@ -343,11 +343,17 @@ def validate_generation_materials(plan, directory, indices=None):
     if not plan.get("materials_version"):
         return
     from .materials import effective
-    targets = range(len(plan["segments"])) if indices is None else indices
+    from .expansion import model_material_note
+    targets = [index for index,row in enumerate(plan['segments'])
+               if row.get('job',{}).get('status')!='completed' or row.get('needs_regeneration')] if indices is None else indices
     missing = []
     for index in targets:
         try:
-            effective(plan, plan["segments"][index], directory, require=True)
+            row = plan['segments'][index]
+            value = effective(plan, row, directory, require=True)
+            model_material_note(value['material_note'],len(value['refs']))
+            if 'shot_request' not in row:
+                model_material_note(row.get('shot_intent',''),len(value['refs']))
         except ValueError as exc:
             if "没有有效参考图" not in str(exc):
                 raise ValueError(f"第 {index + 1} 段：{exc}") from exc
