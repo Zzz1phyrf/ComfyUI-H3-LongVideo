@@ -206,7 +206,7 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     else if(!dirty)renderRows(savedEnds());
     $('state').textContent=talkingStatus(plan)+(plan.approved?' · 分段已确认':' · 分段待确认');
     if(typeof window!=='undefined' && window.parent!==window)syncWorkflowStatus(window.parent,plan.id,talkingStatus(plan));
-    $('overview-meta').textContent=`${plan.duration.toFixed(3)}秒 · ${plan.segments.length}段 · ${plan.resolution_summary || (plan.config.megapixels+' MP')} · ${local?'本地生成':'RunningHub / '+plan.config.instance_type}`;
+    $('overview-meta').textContent=`${plan.duration.toFixed(3)}秒 · ${plan.segments.length}段 · ${plan.resolution_summary || (plan.config.megapixels+' MP')} · ${local?'本地生成':'RunningHub / '+plan.config.instance_type} · 音频：${plan.config.audio_processing || '旧项目沿用原处理'}`;
     $('error').textContent=actionError || plan.error || (!plan.credential_configured?'请在节点的RH API设置中保存凭据，再刷新状态。':'');
     $('dirty').textContent=dirty?'切点尚未保存。保存并确认后，受影响的段将等待重新生成，旧视频保留。':plan.segmentation_summary || '拖动彩色切点调整分段；新增或合并后的每段为4–15秒。';
     $('approve').disabled=active || pending || regenerating || promptDirty || dirty && !validCutDraft();

@@ -25,7 +25,7 @@ class CandidatePackageTests(unittest.TestCase):
 
     def test_archive_contains_current_runtime_examples_and_docs(self):
         required = {
-            'FRIEND_TESTING.md','talking_rh/management.py','storage.py',
+            'FRIEND_TESTING.md','talking_rh/management.py','storage.py','audio_preparation.py',
             'scripts/migrate_talking_resolution.py','scripts/migrate_talking_sampler.py',
             'rh_credentials.py', 'web/rh_settings.js', 'web/widget_visibility.js','web/node_ui.js',
             'mv_rh.py', 'MV_RUNNINGHUB.md', 'TALKING_CANVAS.md',

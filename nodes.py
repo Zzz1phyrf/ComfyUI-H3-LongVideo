@@ -295,7 +295,8 @@ class Analyze:
             "asr_device": (["auto", "cuda", "cpu"],),
             # Hidden and ignored compatibility slot retained for saved projects.
             "director_mode": ("STRING", {"default": "本地规则"}),
-            }, "optional": {"vocals": ("AUDIO",)}}
+            }, "optional": {"vocals": ("AUDIO",),
+                "audio_processing": (["直接使用","提取人声"], {"default":"提取人声"})}}
     RETURN_TYPES = ("STRING", "INT")
     RETURN_NAMES = ("project_id", "segment_count")
     FUNCTION = "analyze"
@@ -308,26 +309,23 @@ class Analyze:
 
     @logged("audio_analysis")
     def analyze(self, audio, mode, max_seconds, target_seconds, asr_python, asr_model,
-                asr_device="auto", director_mode="本地规则", vocals=None):
+                asr_device="auto", director_mode="本地规则", vocals=None, audio_processing="提取人声"):
         require_mv_mode(mode)
         import soundfile as sf
         import numpy as np
         mix, sr = audio_array(audio)
         audio_seed = hashlib.sha256(np.ascontiguousarray(mix).tobytes()).hexdigest()[:16]
         rules = director_rules.read_rules(rules_path())
-        if vocals is not None:
-            voice, vsr = audio_array(vocals)
-            if vsr != sr or len(voice) != len(mix):
-                raise ValueError("原曲与人声必须采样率、样本数一致；请提供同版本未裁切的人声。")
-        else:
-            voice = separate(mix, sr)
+        from .audio_preparation import cache_reference,validate_mode
+        validate_mode(audio_processing)
         project_id = uuid.uuid4().hex
         root = data_root()
         directory = project_path(root, project_id)
         for name in ("state", "audio", "takes", "cache", "work"):
             (directory/name).mkdir(parents=True, exist_ok=True)
         sf.write(audio_file(directory, "source.wav"), mix, sr, subtype="FLOAT")
-        sf.write(audio_file(directory, "vocals.wav"), voice, sr, subtype="FLOAT")
+        prepared=cache_reference(directory,audio_processing,external=audio_array(vocals) if vocals is not None else None)
+        voice=sf.read(audio_file(directory,"vocals.wav"),dtype='float32',always_2d=True)[0]
         transcript = audit_asr_transcript(run_asr(directory), len(voice)/sr)
         transcript_temp = directory/"state"/f".transcript-{uuid.uuid4().hex}.tmp"
         transcript_temp.write_text(
@@ -348,6 +346,7 @@ class Analyze:
             "revision": 1, "created": time.time(),
             "mode": mode, "max_seconds": float(max_seconds), "target_seconds": float(target_seconds),
             "sample_rate": sr, "samples": len(mix), "duration": len(mix)/sr,
+            "audio_processing":audio_processing,"audio_preparation":prepared,
             "materials_version": 1, "default_refs": [], "default_material_note": "",
             "director": {"mode": "rule", "performance_intensity": "auto",
                          "note": "", "rule_config": rules["config"],
@@ -399,6 +398,9 @@ class LoadSegment:
             raise ValueError("尚未分析音频。请先运行 H3 音频分析节点并确认分段。")
         plan = read_plan(data_root(), project_id)
         require_mv_mode(plan.get("mode"))
+        if plan.get('audio_preparation'):
+            from .audio_preparation import verify_reference
+            verify_reference(project_path(data_root(),project_id),plan['audio_preparation'])
         if not plan.get("approved"):
             raise ValueError("音频已经分析，但分段尚未确认。请先在分段审核界面点击“保存并确认”。")
         if not 0 <= segment_index < len(plan["segments"]):
@@ -436,7 +438,8 @@ class Unified:
             "backend": (["本地", "RunningHub"],),
             "rh_workflow_id": ("STRING", {"default": "", "tooltip": "RunningHub工作流ID；本地模式留空。RH采样、seed和分辨率以云端工作流为准。"}),
             "rh_region": (["海外版", "国内版"],),
-            "rh_instance_type": (["ultra", "plus", "default"],)}}
+            "rh_instance_type": (["ultra", "plus", "default"],),
+            "audio_processing": (["直接使用","提取人声"], {"default":"提取人声"})}}
 
     RETURN_TYPES = LoadSegment.RETURN_TYPES
     RETURN_NAMES = LoadSegment.RETURN_NAMES
@@ -458,17 +461,20 @@ class Unified:
     @logged("long_video_node")
     def process(self, audio, mode, max_seconds, target_seconds, asr_python, asr_model,
                 asr_device="auto", director_mode="本地规则", project_id="", segment_index=0,
-                vocals=None, backend="本地", rh_workflow_id="", rh_region="海外版", rh_instance_type="ultra"):
+                vocals=None, backend="本地", rh_workflow_id="", rh_region="海外版", rh_instance_type="ultra", audio_processing="提取人声"):
         require_mv_mode(mode)
         if str(project_id).strip():
             try:
                 plan = read_plan(data_root(), project_id)
                 if plan.get("approved"):
+                    if audio_processing!=plan.get('audio_processing','提取人声'):
+                        raise ValueError('音频处理已改变，请重新分析并创建新项目；旧片段保留。')
                     return LoadSegment().load(project_id, int(segment_index))
             except FileNotFoundError:
                 pass
         analyzed = Analyze().analyze(audio, mode, max_seconds, target_seconds,
-                                     asr_python, asr_model, asr_device, director_mode)
+                                     asr_python, asr_model, asr_device, director_mode,
+                                     audio_processing=audio_processing)
         # Native Run targets only this node. These placeholders are not sent downstream;
         # the approved controller run replaces them with the selected segment outputs.
         return {"ui": analyzed["ui"],

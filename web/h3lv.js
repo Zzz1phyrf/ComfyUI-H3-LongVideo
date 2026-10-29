@@ -1407,6 +1407,8 @@ app.registerExtension({
         });
       }
       const result = oldConfigured?.call(this, info);
+      const audioMode=this.widgets?.find(widget=>widget.name==='audio_processing');
+      if(audioMode && !['直接使用','提取人声'].includes(audioMode.value))audioMode.value='提取人声';
       const vocalsIndex = this.inputs?.findIndex(input => input.name === "vocals");
       if (vocalsIndex >= 0) this.removeInput(vocalsIndex);
       syncHiddenWidgetConnections(this);
@@ -1430,10 +1432,14 @@ app.registerExtension({
         const internal = this.widgets?.find(item => item.name === name);
         setWidgetHidden(internal, true);
       }
-      const backendLabels = {backend:"生成后端", rh_workflow_id:"RH 工作流 ID",
+      const backendLabels = {backend:"生成后端",audio_processing:"音频处理", rh_workflow_id:"RH 工作流 ID",
         rh_region:"RH 区域", rh_instance_type:"RH 实例"};
       for (const item of this.widgets || []) {
         if (backendLabels[item.name]) item.label = backendLabels[item.name];
+      }
+      for(const output of this.outputs || []) {
+        if(output.name==='original_audio_padded')output.label='分段原声';
+        if(output.name==='vocals_padded')output.label='参考人声';
       }
       const rulesWidget = this.addWidget("button", "运镜规则：查看与修改", null,
         () => openDirectorRules(this).catch(error => messageDialog({

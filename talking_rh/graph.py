@@ -65,9 +65,17 @@ def build(plan,row,uploaded,previous=None):
         condition=graph['268']['inputs']
         condition['ref_images.ref_image_0']=['9001',0]
         if len(uploaded['references'])==1 and not independent:condition['ref_images.ref_image_1']=['9001',0]
-        graph['9250']={'class_type':'AudioSeparation','inputs':{'audio':['9000',0],
-            'chunk_fade_shape':'linear','chunk_length':10.,'chunk_overlap':.1}}
-        condition.update(audio_vae=['120',0],**{'ref_audios.ref_audio_0':['9250',3]})
+        if plan['config'].get('audio_preparation_version')==1:
+            reference=uploaded.get('reference_audio')
+            if reference is None and plan['config']['audio_processing']=='直接使用':reference=uploaded.get('audio')
+            if not reference:raise ValueError('缺少项目已准备的参考人声。')
+            graph['9002']={'class_type':'LoadAudio','inputs':{'audio':reference}}
+            reference_audio=['9002',0]
+        else:
+            graph['9250']={'class_type':'AudioSeparation','inputs':{'audio':['9000',0],
+                'chunk_fade_shape':'linear','chunk_length':10.,'chunk_overlap':.1}}
+            reference_audio=['9250',3]
+        condition.update(audio_vae=['120',0],**{'ref_audios.ref_audio_0':reference_audio})
         graph['9101']={'class_type':'LTXVSeparateAVLatent','inputs':{'av_latent':['268',1]}}
         graph.pop('269')
         graph['270']['inputs'].update(positive=['268',0],vae=['119',0],transition_step=4)

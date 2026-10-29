@@ -125,11 +125,13 @@ class GraphTests(unittest.TestCase):
                 self.assertIn(ident,nodes[src]['outputs'][slot]['links'])
             if prefix!='15':
                 self.assertEqual(nodes[5]['type'],'H3LVTalkingAvatar')
-                self.assertEqual(len(nodes[5]['outputs']),9)
+                self.assertEqual(len(nodes[5]['outputs']),10)
+                self.assertEqual(nodes[5]['outputs'][-1]['name'],'reference_audio')
                 self.assertEqual([i['name'] for i in nodes[5]['inputs'] if i['type']=='IMAGE'],['reference_image'])
                 self.assertFalse(any(i['name'].startswith('reference_') and i['name']!='reference_image' for i in nodes[5]['inputs']))
             else:self.assertFalse(any(n['type'].startswith('H3LV') for n in nodes.values()))
             if prefix=='13':
+                self.assertFalse(any(n['type']=='AudioSeparation' for n in nodes.values()))
                 self.assertFalse(any(n['type']=='LazySwitchKJ' for n in nodes.values()))
                 self.assertTrue(all(output['links'] for output in nodes[5]['outputs'] if output['name']!='project_id'))
 

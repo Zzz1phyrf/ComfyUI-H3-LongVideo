@@ -29,20 +29,20 @@ class PublicTalkingTests(unittest.TestCase):
         schema=node.TalkingAvatar.INPUT_TYPES()
         images=[name for group in ('required','optional') for name,spec in schema[group].items() if spec[0]=='IMAGE']
         self.assertEqual(images,['reference_image'])
-        self.assertEqual(len(node.TalkingAvatar.RETURN_TYPES),9)
-        self.assertEqual(len(node.TalkingRH.RETURN_TYPES),28)
+        self.assertEqual(len(node.TalkingAvatar.RETURN_TYPES),10)
+        self.assertEqual(len(node.TalkingRH.RETURN_TYPES),29)
         self.assertFalse(node.TalkingAvatar.DEPRECATED)
         self.assertTrue(node.TalkingRH.DEPRECATED)
         for name in ('person_mask','execution_mode','continuation_mode','local_model','reference_3'):
             self.assertNotIn(name,{**schema['required'],**schema['optional']})
 
     def test_local_single_image_reaches_real_segment_reader(self):
-        with tempfile.TemporaryDirectory() as tmp,patch.dict('sys.modules',folder_paths=types.SimpleNamespace(get_output_directory=lambda:tmp)),patch.object(node.canvas,'blocked',side_effect=lambda p:(p['id'],)+(None,)*27),patch.object(node,'Client') as client,patch.object(node,'validate_models') as models:
+        with tempfile.TemporaryDirectory() as tmp,patch.dict('sys.modules',folder_paths=types.SimpleNamespace(get_output_directory=lambda:tmp)),patch.object(node.canvas,'blocked',side_effect=lambda p:(p['id'],)+(None,)*28),patch.object(node,'Client') as client,patch.object(node,'validate_models') as models:
             raw=public_canvas();before=copy.deepcopy(raw)
             kwargs=dict(audio={'waveform':torch.zeros(1,1,430000),'sample_rate':24000},
                 reference_image=torch.zeros(1,64,32,3),prompt=raw,unique_id='5')
             result=node.TalkingAvatar().prepare(**kwargs)
-            self.assertEqual(len(result['result']),9)
+            self.assertEqual(len(result['result']),10)
             plan=project.read_plan(node.root(),result['result'][0])
             self.assertEqual(len(project.reference_assets(plan)),1)
             self.assertEqual(raw,before)
@@ -65,7 +65,7 @@ class PublicTalkingTests(unittest.TestCase):
                         backend='RunningHub',workflow_id='123')
             pid=node.TalkingAvatar().prepare(**kwargs)['result'][0]
             plan=project.read_plan(node.root(),pid)
-            raw=graph.build(plan,plan['segments'][0],{'audio':'window.wav','references':['person.png'],'attempt':'a'*12})
+            raw=graph.build(plan,plan['segments'][0],{'audio':'window.wav','reference_audio':'window.wav','references':['person.png'],'attempt':'a'*12})
             refs=raw['268']['inputs']
             self.assertEqual(raw[refs['ref_images.ref_image_0'][0]]['inputs']['image'],'person.png')
             self.assertNotIn('ref_images.ref_image_1',refs)
@@ -81,7 +81,7 @@ class PublicTalkingTests(unittest.TestCase):
             node.TalkingAvatar().prepare(None,None,background_image=torch.zeros(1))
 
     def test_custom_prompt_is_not_silently_rewritten_and_legacy_graph_is_unchanged(self):
-        with patch.object(node.TalkingRH,'prepare',return_value={'result':tuple(range(28))}) as prepare:
+        with patch.object(node.TalkingRH,'prepare',return_value={'result':tuple(range(29))}) as prepare:
             value=node.TalkingAvatar().prepare(None,None,fixed_prompt='My single picture prompt.')
             self.assertEqual(prepare.call_args.kwargs['fixed_prompt'],'My single picture prompt.')
             self.assertEqual(value['result'],node.TalkingAvatar.LEGACY_SLOTS)

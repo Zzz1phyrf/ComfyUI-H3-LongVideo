@@ -23,7 +23,7 @@ class SamplerSeedTests(unittest.TestCase):
             reference_image=torch.zeros(1,64,32,3),width=768,height=1376,unique_id='5')
 
     def test_k_seed_is_recorded_and_reaches_actual_segment_graph(self):
-        with tempfile.TemporaryDirectory() as tmp,patch.dict('sys.modules',folder_paths=types.SimpleNamespace(get_output_directory=lambda:tmp)),patch.object(canvas,'blocked',side_effect=lambda p:(p['id'],)+(None,)*27):
+        with tempfile.TemporaryDirectory() as tmp,patch.dict('sys.modules',folder_paths=types.SimpleNamespace(get_output_directory=lambda:tmp)),patch.object(canvas,'blocked',side_effect=lambda p:(p['id'],)+(None,)*28):
             raw=public_canvas();raw['270']['inputs']['noise_seed']=78123
             pid=node.TalkingAvatar().prepare(**self.inputs(),prompt=raw)['result'][0]
             plan=project.read_plan(node.root(),pid)
@@ -32,7 +32,7 @@ class SamplerSeedTests(unittest.TestCase):
             self.assertEqual(queued['270']['inputs']['noise_seed'],78123)
 
     def test_same_seed_unwiring_can_resume_legacy_project_without_state_change(self):
-        with tempfile.TemporaryDirectory() as tmp,patch.dict('sys.modules',folder_paths=types.SimpleNamespace(get_output_directory=lambda:tmp)),patch.object(canvas,'blocked',side_effect=lambda p:(p['id'],)+(None,)*27):
+        with tempfile.TemporaryDirectory() as tmp,patch.dict('sys.modules',folder_paths=types.SimpleNamespace(get_output_directory=lambda:tmp)),patch.object(canvas,'blocked',side_effect=lambda p:(p['id'],)+(None,)*28):
             kwargs=self.inputs()
             pid=node.TalkingRH().prepare(**kwargs,prompt=fixture(True),seed=9260,backend='本地',
                 execution_mode='画布',continuation_mode='独立窗口（自然动作）')['result'][0]

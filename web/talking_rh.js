@@ -95,9 +95,14 @@ function resetPictureLabels(node) {
   for (const input of node.inputs || []) {
     if (input.name==="reference_image") delete input.label;
   }
+  if(node.outputs && !node.outputs.some(output=>output.name==='reference_audio'))node.addOutput?.('reference_audio','AUDIO');
+  for(const output of node.outputs || []) {
+    if(output.name==='audio')output.label='分段原声';
+    if(output.name==='reference_audio')output.label='参考人声';
+  }
 }
 
-const publicWidgets=['backend','workflow_id','region','instance_type','project_id','fixed_prompt'];
+const publicWidgets=['backend','workflow_id','region','instance_type','project_id','fixed_prompt','audio_processing'];
 const loadingWidgets=new Map();
 function preparePublicCanvas(data) {
   loadingWidgets.clear();
@@ -107,6 +112,7 @@ function preparePublicCanvas(data) {
     const names=typeof saved[4]==='number' ? ['backend','workflow_id','region','instance_type',
       ...(typeof saved[5]==='number' ? ['megapixels'] : []),'seed','project_id','fixed_prompt'] : publicWidgets;
     const values=Object.fromEntries(names.map((name,index)=>[name,saved[index]]));
+    values.audio_processing ??= '直接使用';
     loadingWidgets.set(String(owner.id),values);
     owner.widgets_values=publicWidgets.map(name=>values[name]);
     const output=owner.outputs?.findIndex(item=>item.name==='seed');
@@ -133,6 +139,25 @@ function preparePublicCanvas(data) {
     }
     for(const key of ['widget_ue_connectable','input_ue_unconnectable'])
       if(owner.properties?.ue_properties?.[key])delete owner.properties.ue_properties[key].seed;
+    if(Array.isArray(owner.outputs) && !owner.outputs.some(item=>item.name==='reference_audio'))
+      owner.outputs.push({name:'reference_audio',type:'AUDIO',links:[]});
+    // A bound old project retains its frozen graph. New canvases use prepared audio.
+    if(!validId(values.project_id) && owner.outputs) {
+      const slot=owner.outputs.findIndex(item=>item.name==='reference_audio');
+      for(const separation of [...data.nodes]) {
+        if(separation.type!=='AudioSeparation')continue;
+        const input=(data.links || []).filter(link=>link[3]===separation.id);
+        const uses=(data.links || []).filter(link=>link[1]===separation.id);
+        if(input.length!==1 || input[0][1]!==owner.id || input[0][2]!==1 || !uses.length)continue;
+        if(!uses.every(link=>link[2]===3 && data.nodes.some(n=>n.id===link[3] && n.type==='MiniMaxH3ReferenceToVideo' && n.inputs?.[link[4]]?.name==='ref_audios.ref_audio_0')))continue;
+        const oldInput=input[0][0];
+        for(const link of uses){link[1]=owner.id;link[2]=slot;}
+        owner.outputs[slot].links.push(...uses.map(link=>link[0]));
+        owner.outputs[1].links=owner.outputs[1].links?.filter(id=>id!==oldInput);
+        data.links=data.links.filter(link=>link[0]!==oldInput);
+        data.nodes=data.nodes.filter(node=>node.id!==separation.id);
+      }
+    }
   }
 }
 
@@ -229,7 +254,7 @@ app.registerExtension({
   loadedGraphNode(node) {
     if(node.comfyClass!=='H3LVTalkingAvatar')return;
     const values=loadingWidgets.get(String(node.id));
-    if(values)for(const widget of node.widgets || [])if(publicWidgets.includes(widget.name))widget.value=values[widget.name];
+    if(values)for(const widget of node.widgets || [])if(publicWidgets.includes(widget.name) && values[widget.name]!==undefined)widget.value=values[widget.name];
     updateMode(node);
   },
   afterConfigureGraph() {
@@ -284,7 +309,7 @@ app.registerExtension({
       original?.apply(this,arguments);
       hideUnusedLegacyMask(this);
       resetPictureLabels(this);
-      const labels={backend:'生成后端',workflow_id:'RH 工作流 ID',region:'RH 区域',instance_type:'RH 实例'};
+      const labels={backend:'生成后端',workflow_id:'RH 工作流 ID',region:'RH 区域',instance_type:'RH 实例',audio_processing:'音频处理'};
       for(const widget of this.widgets || [])if(labels[widget.name])widget.label=labels[widget.name];
       updateMode(this);
       for (const mode of this.widgets.filter(w=>["execution_mode","continuation_mode","backend"].includes(w.name))) {
@@ -301,6 +326,8 @@ app.registerExtension({
     const configured = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function(info) {
       configured?.apply(this,arguments);
+      const audioMode=this.widgets?.find(widget=>widget.name==='audio_processing');
+      if(audioMode && !['直接使用','提取人声'].includes(audioMode.value))audioMode.value='直接使用';
       const values=info.widgets_values;
       if (nodeData.name==='H3LVTalkingAvatar' && typeof values?.[4]==='number') {
         const old=['backend','workflow_id','region','instance_type',

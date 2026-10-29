@@ -16,11 +16,13 @@
 | 用途 | 导入文件 | 额外节点 |
 |---|---|---|
 | 歌曲MV | `examples/07_H3MV_本地与RH.json` | `ComfyUI-KJNodes`（MiniMaxChunkFeedForward、MiniMaxLowVRAMAttention）、`selflift-Avatar`（SelfLiftAvatarH3Sampler）、`ComfyUI-YCNodes-MiniMax-H3`（H3SigmaRefiner） |
-| 口播数字人 | `examples/13_H3口播_独立窗口_本地展开.json` | `audio-separation-nodes-comfyui`（AudioSeparation） |
+| 口播数字人 | `examples/13_H3口播_独立窗口_本地展开.json` | 当前13号无需额外人声分离节点；使用相关H3原生节点 |
 
 上述归属依据打包时本机实际节点注册信息。ComfyUI本身须提供MiniMaxH3ReferenceToVideo、ResolutionSelector、CreateVideo/SaveVideo及相关音视频latent节点。缺失节点时，按节点名检查其所属包或ComfyUI版本。旧版兼容示例04/05/06/09/10/11不作为本次测试入口。
 
-所有模型/LoRA/CLIP/VAE加载节点，都要重新选择自己机器上实际存在的文件名；示例文件名只是参考。口播使用人物连场景的一张图片和原声。MV在分段面板上传参考图。音频分离需要HDEMUCS；MV语音识别还需要Faster-Whisper模型缓存，首次准备可能需要下载对应模型。
+所有模型/LoRA/CLIP/VAE加载节点，都要重新选择自己机器上实际存在的文件名；示例文件名只是参考。口播使用人物连场景的一张图片和原声。MV在分段面板上传参考图。只有选择“提取人声”才需要HDEMUCS，MV默认提取、口播默认直接使用干声；MV语音识别还需要Faster-Whisper模型缓存，首次准备可能需要下载对应模型。
+
+旧项目继续使用其冻结执行图；使用过AudioSeparation的旧项目仍需保留该节点包。新13/15号示例不再包含逐段分离节点。改变音频处理方式须新建项目，旧结果保留。
 
 MV示例的Prompt Expander需配置测试者自己的扩写API；也可使用已有完整H3提示词，将MV节点的 `segment_prompt` 连接到Ref2VA的prompt。API Key通过节点设置填写，不写入工作流。
 

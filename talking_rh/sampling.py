@@ -43,7 +43,7 @@ def binding(graph):
     return sampler,reference
 
 
-def freeze(source):
+def freeze(source,prepared_audio=False):
     if not isinstance(source,dict) or not source:
         raise ValueError('RH没有返回有效工作流；没有回退到内置采样配置。')
     graph={str(k):{'class_type':n['class_type'],'inputs':copy.deepcopy(n['inputs'])} for k,n in source.items()}
@@ -73,7 +73,14 @@ def freeze(source):
     graph[reference]['inputs']={k:copy.deepcopy(condition[k]) for k in ('clip','vae','ref_image_size') if k in condition}
     graph[reference]['inputs']['audio_vae']=audio_vae
     reference_audio=condition.get('ref_audios.ref_audio_0')
-    if reference_audio is not None:
+    if prepared_audio:
+        if (graph[reference]['class_type']!='MiniMaxH3ReferenceToVideo' or not link(reference_audio,graph)
+                or (graph[str(reference_audio[0])]['class_type'],reference_audio[1]) not in
+                   (('AudioSeparation',3),('LoadAudio',0))):
+            raise ValueError('RH口播Ref2VA须连接有效的参考人声音频。')
+        if any(k.startswith('ref_audios.') and k!='ref_audios.ref_audio_0' for k in condition):
+            raise ValueError('口播只提供一条参考人声音频。')
+    elif reference_audio is not None:
         if (not link(reference_audio,graph) or reference_audio[1]!=3
                 or graph[str(reference_audio[0])]['class_type']!='AudioSeparation'):
             raise ValueError('RH口播参考音频须连接AudioSeparation的人声输出。')
@@ -88,11 +95,15 @@ def freeze(source):
     if any(n['class_type'] in {'KSampler','KSamplerAdvanced','SamplerCustomAdvanced',
             'LoadImage','LoadAudio','SaveVideo','VHS_VideoCombine'} for n in graph.values()):
         raise ValueError('RH采样主干含额外素材或非Avatar生成节点，不能静默改写为内置参数。')
-    return {'graph':graph,'sha256':digest(graph)}
+    value={'graph':graph}
+    if prepared_audio:value['prepared_audio']=True
+    value['sha256']=digest(value if prepared_audio else graph)
+    return value
 
 
 def verify(snapshot):
-    if digest(snapshot['graph'])!=snapshot.get('sha256'):
+    expected=({'graph':snapshot['graph'],'prepared_audio':True} if snapshot.get('prepared_audio') else snapshot['graph'])
+    if digest(expected)!=snapshot.get('sha256'):
         raise ValueError('项目冻结的RH采样配置已变化，请保留旧项目并新建项目。')
     binding(snapshot['graph'])
 
@@ -119,7 +130,7 @@ def apply(value, snapshot, *, ref2va=False):
     selected=[v[0] for k,v in source[sampler]['inputs'].items()
               if k not in ('positive','latent_image') and link(v,source)]
     selected += [condition[k][0] for k in ('clip','vae','audio_vae')]
-    if ref2va:
+    if ref2va and not snapshot.get('prepared_audio'):
         reference_audio=condition.get('ref_audios.ref_audio_0')
         if not link(reference_audio,source):raise ValueError('冻结RH配置缺少Ref2VA参考人声。')
         selected.append(reference_audio[0])
@@ -142,8 +153,12 @@ def apply(value, snapshot, *, ref2va=False):
     if value['268']['class_type']=='MiniMaxH3ReferenceToVideo':
         value['268']['inputs']['ref_image_size']=condition.get('ref_image_size','match')
     if ref2va:
-        target=remap(reference_audio)
-        value[target[0]]['inputs']['audio']=['9000',0]
+        if snapshot.get('prepared_audio'):
+            target=['9002',0]
+            if value.get('9002',{}).get('class_type')!='LoadAudio':raise ValueError('缺少项目已准备的参考人声。')
+        else:
+            target=remap(reference_audio)
+            value[target[0]]['inputs']['audio']=['9000',0]
         value['268']['inputs'].update(audio_vae=audio,**{'ref_audios.ref_audio_0':target})
     value['248']['inputs']['audio_vae']=audio
     if '269' in value:value['269']['inputs']['audio_vae']=audio

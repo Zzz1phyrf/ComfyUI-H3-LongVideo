@@ -162,21 +162,26 @@ def prepare(root, wave, sr, pictures, mask, config, input_fingerprint):
             raise ValueError('MASK尺寸须与主参考图或最终生成画面相同。')
         if np.asarray(image).min()!=0 or np.asarray(image).max()!=255:
             raise ValueError('请提供同时包含背景黑区和人物活动白区的遮罩。')
-    mono = wave.mean(axis=1,keepdims=True)
-    speech_segmentation=None
-    if overlap.enabled({'config':config}):
-        if not 1<=len(pictures)<=2 or mask is not None:raise ValueError('独立窗口口播使用人物图和可选背景图，最多两张，不使用人物空间遮罩。')
-        from . import speech
-        speech_segmentation=speech.plan(wave)
-        rows=overlap.manual_clock(len(wave),speech_segmentation['cuts'])
-    else:
-        cuts = auto_cuts(mono,float(config['first_seconds']),float(config['segment_seconds']))
-        rows = clock(len(wave),cuts)
     pid = uuid.uuid4().hex
     directory = project_path(root,pid)
     for name in ('audio','refs','state','takes','cache','work'):
         (directory/name).mkdir(parents=True,exist_ok=True)
     sf.write(audio_file(directory,'source.wav'),wave,24000,subtype='FLOAT')
+    prepared=None;voice=wave
+    if config.get('audio_preparation_version')==1:
+        from ..audio_preparation import cache_reference
+        prepared=cache_reference(directory,config['audio_processing'])
+        voice=sf.read(audio_file(directory,'vocals.wav'),dtype='float32',always_2d=True)[0]
+    mono = voice.mean(axis=1,keepdims=True)
+    speech_segmentation=None
+    if overlap.enabled({'config':config}):
+        if not 1<=len(pictures)<=2 or mask is not None:raise ValueError('独立窗口口播使用人物图和可选背景图，最多两张，不使用人物空间遮罩。')
+        from . import speech
+        speech_segmentation=speech.plan(voice)
+        rows=overlap.manual_clock(len(wave),speech_segmentation['cuts'])
+    else:
+        cuts = auto_cuts(mono,float(config['first_seconds']),float(config['segment_seconds']))
+        rows = clock(len(wave),cuts)
     assets = []
     for index,picture in enumerate(pictures):
         path = directory/'refs'/f'reference_{index}.png'
@@ -194,6 +199,7 @@ def prepare(root, wave, sr, pictures, mask, config, input_fingerprint):
             'first_condition':'ref2va' if config.get('talking_profile') in ('ref2va-v1',overlap.PROFILE) else ('endpoint' if len(pictures)==1 else 'ref2va'),
             'multi_reference_visual_accepted':False}
     if speech_segmentation is not None:plan['speech_segmentation']=speech_segmentation
+    if prepared is not None:plan['audio_preparation']=prepared
     write_plan(root,plan)
     return plan
 
@@ -225,6 +231,11 @@ def verify_assets(root,plan):
         raise ValueError('云端生成模板已变化，请保留旧项目并新建项目。')
     if digest(audio_file(directory,'source.wav')) != plan['source_sha256']:
         raise ValueError('项目原音频已变化，请新建项目。')
+    if plan['config'].get('audio_preparation_version')==1:
+        from ..audio_preparation import verify_reference
+        record=plan.get('audio_preparation') or {}
+        verify_reference(directory,record)
+        if record['mode']!=plan['config']['audio_processing']:raise ValueError('项目音频处理方式已变化，请新建项目。')
     for item in plan['assets']:
         path = directory/'refs'/item['name']
         if path.parent != directory/'refs' or digest(path)!=item['sha256']:

@@ -280,7 +280,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(required["director_mode"][0], "STRING")
         self.assertEqual(required["asr_device"][0], ["auto", "cuda", "cpu"])
         optional = nodes.Unified.INPUT_TYPES()["optional"]
-        self.assertEqual(set(optional), {"backend", "rh_workflow_id", "rh_region", "rh_instance_type"})
+        self.assertEqual(set(optional), {"backend", "rh_workflow_id", "rh_region", "rh_instance_type","audio_processing"})
         for removed in ("visual_brief", "performance_intensity", "director_note",
                         "reference_layout", "vocal_assignment", "reference_roles_json"):
             self.assertNotIn(removed, required)

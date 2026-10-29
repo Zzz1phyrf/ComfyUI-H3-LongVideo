@@ -59,7 +59,7 @@ class TalkingRH:
                 backend='RunningHub',local_model='',local_clip='',local_video_vae='',local_audio_vae='',
                 local_upscaler='',local_lora=NO_LORA,local_clip_read='原生',execution_mode='内置',
                 continuation_mode='旧版latent续接',fixed_prompt=overlap.DEFAULT_PROMPT,
-                prompt=None,unique_id=None,extra_pnginfo=None,width=None,height=None,seed_from_sampler=False,**references):
+                prompt=None,unique_id=None,extra_pnginfo=None,width=None,height=None,seed_from_sampler=False,audio_processing=None,**references):
         from ..nodes import audio_array
         wave,sr = audio_array(audio)
         pictures=[]
@@ -73,6 +73,10 @@ class TalkingRH:
             signature.update(str(value.shape).encode()+value.tobytes())
             pictures.append(Image.fromarray(np.rint(np.clip(value[0,:,:,:3],0,1)*255).astype('uint8')))
         prior=read_plan(root(),project_id.strip()) if str(project_id).strip() else None
+        prepared=audio_processing is not None and (prior is None or prior['config'].get('audio_preparation_version')==1)
+        if audio_processing is not None:
+            from ..audio_preparation import validate_mode
+            validate_mode(audio_processing)
         if continuation_mode not in ('独立窗口（自然动作）','旧版latent续接'):raise ValueError('口播续接方式无效。')
         independent=continuation_mode=='独立窗口（自然动作）'
         if prior and overlap.enabled(prior)!=independent:
@@ -117,7 +121,7 @@ class TalkingRH:
             config={k:config[k] for k in (*resolution,'seed','first_seconds','segment_seconds','template_sha256')}
             config['backend']='local'
             if execution_mode=='画布':
-                config.update(execution_mode='canvas',canvas=canvas.capture(prompt,unique_id,independent=independent))
+                config.update(execution_mode='canvas',canvas=canvas.capture(prompt,unique_id,independent=independent,prepared_audio=prepared))
                 if seed_from_sampler:
                     config['seed']=canvas.sampler_seed(config['canvas'],int(seed))
                     previous=prior.get('config',{}).get('canvas') if prior else None
@@ -144,7 +148,7 @@ class TalkingRH:
                     config['rh_sampling']=prior['config']['rh_sampling']
             else:
                 from .sampling import freeze
-                config['rh_sampling']=freeze(Client(config).workflow())
+                config['rh_sampling']=freeze(Client(config).workflow(),prepared_audio=prepared)
             if seed_from_sampler:
                 if prior:config['seed']=prior['config']['seed']
                 else:
@@ -167,8 +171,10 @@ class TalkingRH:
                 source=config['rh_sampling']['graph'];sampler,reference=binding(source)
                 if independent and source[sampler]['class_type']!='SamplerCustom':
                     raise ValueError('独立窗口RH模板需要标准K单采样，请使用15号云端模板。')
-                if 'ref_audios.ref_audio_0' not in source[reference]['inputs']:
-                    raise ValueError('新口播项目的RH工作流必须使用Ref2VA并连接AudioSeparation的人声音频参考。')
+                if not config['rh_sampling'].get('prepared_audio') and 'ref_audios.ref_audio_0' not in source[reference]['inputs']:
+                    raise ValueError('口播RH工作流须使用Ref2VA并连接参考人声。')
+        if prepared:
+            config.update(audio_preparation_version=1,audio_processing=audio_processing)
         if mask is None:config['person_mask_mode']='none'
         if auto_info is not None:config['auto_mask']=auto_info
         if not 2.333<=first_seconds<=13.667 or not 2.2<=segment_seconds<=12:
@@ -193,11 +199,11 @@ class TalkingAvatar(TalkingRH):
     DEPRECATED = False
     DESCRIPTION = '口播：一张图片确定人物、背景与构图。先准备审核，再分段生成；种子在K采样器固定，本地执行外部画布，RH执行已保存的云端模板。'
     OUTPUT_FIELDS = ('project_id','condition_audio','reference_image',
-                     'generation_frames','width','height','fixed_prompt','fps','raw_prefix')
+                     'generation_frames','width','height','fixed_prompt','fps','raw_prefix','reference_audio')
     LEGACY_SLOTS = (0, *(canvas.SLOT[name] for name in OUTPUT_FIELDS[1:]))
     RETURN_TYPES = tuple(canvas.RETURN_TYPES[index] for index in LEGACY_SLOTS)
     RETURN_NAMES = ('project_id','audio','reference_image',
-                    'frames','width','height','prompt','fps','filename_prefix')
+                    'frames','width','height','prompt','fps','filename_prefix','reference_audio')
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -208,6 +214,7 @@ class TalkingAvatar(TalkingRH):
         required['backend']=(['本地','RunningHub'],{'tooltip':'本地使用右侧模型和采样链路；RH使用保存的云端工作流，右侧链路不执行。'})
         required.update({key:old['required'][key] for key in ('workflow_id','region','instance_type','project_id')})
         required['fixed_prompt']=old['optional']['fixed_prompt']
+        required['audio_processing']=(['直接使用','提取人声'],{'default':'直接使用','tooltip':'干声直接使用；带背景音乐时提取人声。仅创建新项目时处理整条音频一次。'})
         return {'required':required,'optional':{},'hidden':old['hidden']}
 
     @classmethod
@@ -223,12 +230,12 @@ class TalkingAvatar(TalkingRH):
 
     def prepare(self,audio,reference_image,backend='本地',workflow_id='',region='海外版',instance_type='ultra',
                 megapixels=1.,seed=9260,project_id='',fixed_prompt=overlap.DEFAULT_PROMPT,
-                prompt=None,unique_id=None,extra_pnginfo=None,width=None,height=None):
+                prompt=None,unique_id=None,extra_pnginfo=None,width=None,height=None,audio_processing='直接使用'):
         text=str(fixed_prompt).strip()
         result=super().prepare(audio=audio,reference_image=reference_image,
             backend=backend,workflow_id=workflow_id,region=region,instance_type=instance_type,
             megapixels=megapixels,width=width,height=height,seed=seed,project_id=project_id,fixed_prompt=text,
             execution_mode='画布' if backend=='本地' else '内置',continuation_mode='独立窗口（自然动作）',
-            prompt=self.legacy_prompt(prompt,unique_id),unique_id=unique_id,extra_pnginfo=extra_pnginfo,seed_from_sampler=True)
+            prompt=self.legacy_prompt(prompt,unique_id),unique_id=unique_id,extra_pnginfo=extra_pnginfo,seed_from_sampler=True,audio_processing=audio_processing)
         result['result']=tuple(result['result'][index] for index in self.LEGACY_SLOTS)
         return result

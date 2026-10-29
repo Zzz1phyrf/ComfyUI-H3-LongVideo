@@ -25,6 +25,7 @@ FIELDS = [
     ('preview_prefix','STRING'), ('crop_start','INT'), ('keep_frames','INT'),
     *[(f'reference_{i}','IMAGE') for i in range(2,7)],
     ('lowres_scale','FLOAT'),
+    ('reference_audio','AUDIO'),
 ]
 SLOT = {name:i+3 for i,(name,_) in enumerate(FIELDS)}
 RETURN_TYPES = ('STRING','STRING','INT', *(kind for _,kind in FIELDS))
@@ -53,7 +54,7 @@ def ancestors(prompt, key, stop):
     return seen
 
 
-def capture(prompt, loader, independent=False):
+def capture(prompt, loader, independent=False, prepared_audio=False):
     loader=str(loader)
     if not prompt or loader not in prompt:raise ValueError('画布模式需要完整工作流，请重新导入口播展开示例。')
     video=[];latents=[];previews=[]
@@ -81,6 +82,7 @@ def capture(prompt, loader, independent=False):
             raise ValueError('独立窗口需要唯一的标准K采样器和音频零罩。')
         result={'prompt':saved,'loader_id':loader,'video_id':video[0],
                 'sampler_id':samplers[0],'audio_mask_id':masks[0],'profile':overlap.PROFILE}
+        if prepared_audio:prepare_reference(result)
         verify_ref2va(result)
         return result
     if len(video)!=1 or len(latents)!=1 or len(previews)!=1:
@@ -123,6 +125,22 @@ def output_ids(config):
             if canvas else {'video':'273','latent':'9200'})
 
 
+def prepare_reference(saved):
+    """Bind a new project to its prepared audio, preserving the sampler graph."""
+    prompt=saved['prompt'];sampler=prompt[saved['sampler_id']]['inputs']
+    positive=sampler.get('positive')
+    node=prompt.get(str(positive[0]),{}) if isinstance(positive,list) and len(positive)==2 else {}
+    if node.get('class_type')!='MiniMaxH3ReferenceToVideo':raise ValueError('口播参考人声需要连接Ref2VA。')
+    condition=node['inputs']
+    expected=[saved['loader_id'],SLOT['reference_audio']]
+    if condition.get('ref_audios.ref_audio_0')!=expected:verify_ref2va(saved)
+    condition['ref_audios.ref_audio_0']=expected
+    saved['prepared_audio']=True
+    used=ancestors(prompt,saved['video_id'],saved['loader_id'])
+    for key in list(prompt):
+        if key not in used:prompt.pop(key)
+
+
 def verify_ref2va(saved):
     prompt=saved['prompt'];sampler=prompt[saved['sampler_id']]['inputs']
     positive=sampler.get('positive')
@@ -131,7 +149,10 @@ def verify_ref2va(saved):
         raise ValueError('新口播项目须使用Ref2VA展开示例09；旧项目请填原项目ID恢复。')
     audio=condition['inputs'].get('ref_audios.ref_audio_0')
     separation=prompt.get(str(audio[0]),{}) if isinstance(audio,list) else {}
-    if (not audio or audio[1]!=3 or separation.get('class_type')!='AudioSeparation'
+    if saved.get('prepared_audio'):
+        if audio!=[saved['loader_id'],SLOT['reference_audio']]:
+            raise ValueError('Ref2VA须连接当前项目的参考人声音频。')
+    elif (not audio or audio[1]!=3 or separation.get('class_type')!='AudioSeparation'
             or separation['inputs'].get('audio')!=[saved['loader_id'],SLOT['condition_audio']]):
         raise ValueError('Ref2VA参考音频须连接分段音频的AudioSeparation人声输出，请使用展开示例09。')
     encoded=prompt[str(prompt[saved['audio_mask_id']]['inputs']['samples'][0])]['inputs']
@@ -308,6 +329,10 @@ class SegmentState:
         row=plan['segments'][segment_index]
         wave,sr=sf.read(audio_file(directory,'source.wav'),dtype='float32',always_2d=True)
         condition=project.condition_audio(wave,row)
+        reference=condition
+        if plan.get('audio_preparation'):
+            vocals,_=sf.read(audio_file(directory,'vocals.wav'),dtype='float32',always_2d=True)
+            reference=project.condition_audio(vocals,row)
         def audio(samples):return {'waveform':torch.from_numpy(samples.T.copy())[None], 'sample_rate':sr}
         def picture(name):
             with Image.open(directory/'refs'/name) as image:
@@ -337,7 +362,7 @@ class SegmentState:
                 'previous_latent':previous,'tail_token_start':tail,'fixed_prompt':plan['config'].get('fixed_prompt',template['268']['inputs']['prompt']),
                 'fps':24.0,'raw_prefix':prefix+'/video','latent_prefix':prefix+'/latent',
                 'preview_prefix':prefix+'/preview','crop_start':row['edit_start_frame'],'keep_frames':row['edit_frames'],
-                'lowres_scale':1. if segment_index else .5}
+                'lowres_scale':1. if segment_index else .5,'reference_audio':audio(reference)}
         if overlap.enabled(plan) and ('fixed_prompt' in plan['config'] or row.get('prompt_draft') or row.get('generation_prompt')):
             from .prompts import effective
             values['fixed_prompt']=effective(plan,row)

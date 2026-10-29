@@ -201,6 +201,11 @@
           "name": "filename_prefix",
           "type": "STRING",
           "links": []
+        },
+        {
+          "name": "reference_audio",
+          "type": "AUDIO",
+          "links": []
         }
       ],
       "properties": {
@@ -212,7 +217,8 @@
         "海外版",
         "ultra",
         "",
-        "subject_definitions:\n<Subject 1> is the speaking person in <Picture 1>, retaining their appearance and clothing.\n<Picture 1> is the composition reference for the person and surroundings.\n<Audio 1> is the supplied speech performed by <Subject 1> (S1).\n\nsummary:\n[reference generation + audio reuse] A single stationary recording of <Subject 1> speaking <Audio 1>, retaining the framing of <Picture 1> throughout.\n\nretention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - identity, clothing and position in the setting.\n<Picture 1> ([Shot 1] composition): fully_preserved - image boundaries, person size and background layout.\n<Audio 1>: fully_copy - complete speech timing and delivery.\n\ndetailed_description:\n[Shot 1] The camera remains on a stationary tripod. The framing and visible surroundings match <Picture 1>. The head and torso retain their proportions relative to the image. <Subject 1> (S1) speaks <Audio 1> with synchronized lips, natural expressions, occasional blinks and gentle conversational nods. Between phrases, the hands rest comfortably in their reference position. At a spoken emphasis, one relaxed hand makes a small explanatory gesture within the existing frame, then smoothly returns to rest. The elbows stay near the body, with relaxed pauses between gestures. Subtle breathing and small shoulder movements accompany the delivery. Lighting, skin texture and clothing remain consistent throughout the continuous recording.\n\noverall_soundscape:\nThe original room sound accompanying the supplied speech is retained.\n\nnon_diegetic_music:\nN/A\n"
+        "subject_definitions:\n<Subject 1> is the speaking person in <Picture 1>, retaining their appearance and clothing.\n<Picture 1> is the composition reference for the person and surroundings.\n<Audio 1> is the supplied speech performed by <Subject 1> (S1).\n\nsummary:\n[reference generation + audio reuse] A single stationary recording of <Subject 1> speaking <Audio 1>, retaining the framing of <Picture 1> throughout.\n\nretention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - identity, clothing and position in the setting.\n<Picture 1> ([Shot 1] composition): fully_preserved - image boundaries, person size and background layout.\n<Audio 1>: fully_copy - complete speech timing and delivery.\n\ndetailed_description:\n[Shot 1] The camera remains on a stationary tripod. The framing and visible surroundings match <Picture 1>. The head and torso retain their proportions relative to the image. <Subject 1> (S1) speaks <Audio 1> with synchronized lips, natural expressions, occasional blinks and gentle conversational nods. Between phrases, the hands rest comfortably in their reference position. At a spoken emphasis, one relaxed hand makes a small explanatory gesture within the existing frame, then smoothly returns to rest. The elbows stay near the body, with relaxed pauses between gestures. Subtle breathing and small shoulder movements accompany the delivery. Lighting, skin texture and clothing remain consistent throughout the continuous recording.\n\noverall_soundscape:\nThe original room sound accompanying the supplied speech is retained.\n\nnon_diegetic_music:\nN/A\n",
+        "直接使用"
       ],
       "title": "MiniMax H3 · Talking Avatar",
       "color": "#243447",

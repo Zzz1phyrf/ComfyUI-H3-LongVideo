@@ -25,13 +25,13 @@ def check_rh(data):
               'base_url': 'https://www.runninghub.ai' if data['region']=='海外版' else 'https://www.runninghub.cn',
               'instance_type': data.get('instance_type')}
     validate_config(config)
-    snapshot = freeze(Client(config).workflow())
+    snapshot = freeze(Client(config).workflow(),prepared_audio=True)
     sampler, reference = binding(snapshot['graph'])
     if data.get('independent', True) and snapshot['graph'][sampler]['class_type'] != 'SamplerCustom':
         raise ValueError('独立窗口口播需要标准K单采样，请选择口播RH工作流。')
     condition = snapshot['graph'][reference]
-    if condition['class_type'] != 'MiniMaxH3ReferenceToVideo' or 'ref_audios.ref_audio_0' not in condition['inputs']:
-        raise ValueError('口播工作流须使用Ref2VA，并连接AudioSeparation的人声参考。')
+    if condition['class_type'] != 'MiniMaxH3ReferenceToVideo' or not snapshot.get('prepared_audio'):
+        raise ValueError('口播工作流须使用Ref2VA，并连接参考人声。')
     return {'workflow_id':config['workflow_id'], 'sampling':summary(snapshot), 'submitted':False}
 
 

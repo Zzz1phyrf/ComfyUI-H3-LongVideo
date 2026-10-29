@@ -38,7 +38,7 @@ class ExternalResolutionTests(unittest.TestCase):
         self.assertNotIn('megapixels',{**schema['required'],**schema['optional']})
 
     def test_external_landscape_size_reaches_real_reader_and_is_frozen(self):
-        with tempfile.TemporaryDirectory() as tmp,patch.dict('sys.modules',folder_paths=types.SimpleNamespace(get_output_directory=lambda:tmp)),patch.object(node.canvas,'blocked',side_effect=lambda p:(p['id'],)+(None,)*27):
+        with tempfile.TemporaryDirectory() as tmp,patch.dict('sys.modules',folder_paths=types.SimpleNamespace(get_output_directory=lambda:tmp)),patch.object(node.canvas,'blocked',side_effect=lambda p:(p['id'],)+(None,)*28):
             kwargs=dict(audio={'waveform':torch.zeros(1,1,240000),'sample_rate':24000},
                         reference_image=torch.zeros(1,64,32,3),width=1024,height=576,prompt=public_canvas(),unique_id='5')
             pid=node.TalkingAvatar().prepare(**kwargs)['result'][0]

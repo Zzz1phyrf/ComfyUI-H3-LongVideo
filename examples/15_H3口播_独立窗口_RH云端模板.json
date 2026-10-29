@@ -643,7 +643,6 @@
           "name": "AUDIO",
           "type": "AUDIO",
           "links": [
-            9,
             15,
             29
           ]
@@ -967,48 +966,23 @@
     },
     {
       "id": 10006,
-      "type": "AudioSeparation",
+      "type": "LoadAudio",
       "pos": [
         850,
         820
       ],
       "size": [
         330,
-        166
+        136
       ],
       "flags": {},
-      "order": 20,
+      "order": 11,
       "mode": 0,
-      "inputs": [
-        {
-          "label": "audio",
-          "name": "audio",
-          "type": "AUDIO",
-          "link": 9
-        }
-      ],
+      "inputs": [],
       "outputs": [
         {
-          "label": "Bass",
-          "name": "Bass",
-          "type": "AUDIO",
-          "links": []
-        },
-        {
-          "label": "Drums",
-          "name": "Drums",
-          "type": "AUDIO",
-          "links": []
-        },
-        {
-          "label": "Other",
-          "name": "Other",
-          "type": "AUDIO",
-          "links": []
-        },
-        {
-          "label": "Vocals",
-          "name": "Vocals",
+          "label": "音频",
+          "name": "AUDIO",
           "type": "AUDIO",
           "links": [
             10
@@ -1017,14 +991,14 @@
       ],
       "properties": {
         "widget_ue_connectable": {},
-        "Node name for S&R": "AudioSeparation"
+        "Node name for S&R": "LoadAudio"
       },
       "widgets_values": [
-        "linear",
-        10,
-        0.1
+        "reference.wav",
+        null,
+        ""
       ],
-      "title": "参考人声 · Vocals → Ref2VA"
+      "title": "参考人声 · 项目已准备"
     },
     {
       "id": 10007,
@@ -1274,17 +1248,9 @@
       "IMAGE"
     ],
     [
-      9,
-      9000,
-      0,
-      10006,
-      0,
-      "AUDIO"
-    ],
-    [
       10,
       10006,
-      3,
+      0,
       268,
       8,
       "AUDIO"

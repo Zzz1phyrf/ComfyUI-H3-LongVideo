@@ -162,6 +162,15 @@ def run_project(root,pid,client,*,validate=validate_outputs,assemble=None,sleep=
                    else client.upload(folder/'condition.wav'))
             uploaded = {'attempt':attempt,'audio':audio,
                         'references':[client.upload(directory/'refs'/a['name']) for a in reference_assets(plan)]}
+            if plan.get('audio_preparation'):
+                from ..audio_preparation import DIRECT
+                uploaded['reference_audio']=audio
+                if plan['config']['audio_processing']!=DIRECT:
+                    voice,_=sf.read(audio_file(directory,'vocals.wav'),dtype='float32',always_2d=True)
+                    reference=folder/'reference.wav'
+                    sf.write(reference,condition_audio(voice,row),sr,subtype='FLOAT')
+                    uploaded['reference_audio']=(client.upload(reference,attempt=attempt) if plan['config'].get('backend')=='local'
+                                                 else client.upload(reference))
             if not unmasked(plan):uploaded['mask']=client.upload(directory/'refs/person_mask.png')
             previous = plan['segments'][index-1] if index and not overlap.enabled(plan) else None
             if previous:
