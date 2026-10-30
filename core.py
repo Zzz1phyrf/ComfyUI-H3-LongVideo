@@ -12,7 +12,6 @@ import uuid
 import numpy as np
 
 from .director_rules import default_config, validate_config
-from .storage import project_roots
 
 LOCK = threading.RLock()
 
@@ -21,13 +20,10 @@ def project_path(root, project_id):
     if not re.fullmatch(r"[0-9a-f]{32}", str(project_id)):
         raise ValueError("项目编号无效，请先运行音频分析节点。")
     root = Path(root).resolve()
-    for owner in project_roots(root):
-        result = (owner / project_id).resolve()
-        if result.parent != owner:
-            raise ValueError("项目路径越界。")
-        if (result/'state/segments.json').is_file():
-            return result
-    return root/project_id
+    result = (root / project_id).resolve()
+    if result.parent != root:
+        raise ValueError("项目路径越界。")
+    return result
 
 
 def inside(root, path):
@@ -371,19 +367,6 @@ def _sections(lines, starts, active, sr, duration, minimum=2):
 def segmentation(audio, sr, transcript, mode, maximum, target, mix_audio=None, return_analysis=False):
     if not 5 <= maximum <= 15 or not 5 <= target <= maximum:
         raise ValueError("首版测试范围：5 ≤ 目标时长 ≤ 最长时长 ≤ 15 秒。")
-    # Choose the duration budget before ranking acoustic cut quality. Otherwise
-    # a costly extra cut can make every target choose the same long ASR phrases.
-    minimum_samples = min(len(audio), math.ceil(4 * sr))
-    maximum_samples = math.floor(maximum * sr)
-    minimum_count = math.ceil(len(audio) / maximum_samples)
-    maximum_count = len(audio) // max(1, minimum_samples)
-    if minimum_count > maximum_count:
-        raise ValueError("音频无法完整拆成4秒至所设最长时长的片段，请增大最长时长。")
-    count = min(maximum_count, max(minimum_count, round(len(audio) / sr / target)))
-    # Allow nearby phrase endings (20% above target). Relax only as necessary
-    # to cover the full audio without a short tail, never beyond maximum.
-    preferred_samples = min(maximum_samples, max(math.floor(target * 1.2 * sr),
-                                                math.ceil(len(audio) / count)))
     starts, db = envelope(audio, sr)
     transcript = audit_asr_transcript(transcript, len(audio)/sr)
     all_lines = transcript.get("segments", [])
@@ -489,9 +472,8 @@ def segmentation(audio, sr, transcript, mode, maximum, target, mix_audio=None, r
         if 0 < point < len(audio) and point not in candidates:
             add(point, "估计词界回退", 12, ["词界回退，可能截断唱歌拖音"], "word_fallback", .28)
     # Preserve full coverage even for silence, ASR failure or sustained notes.
-    fallback_points = {round(t * sr) for t in np.arange(target, len(audio) / sr, target)}
-    fallback_points.update(round(i * len(audio) / count) for i in range(1, count))
-    for point in sorted(fallback_points):
+    for t in np.arange(target, len(audio) / sr, target):
+        point = round(t * sr)
         if point not in candidates:
             warnings = ["无可靠切点，按时长回退，必须检查"]
             i = min(len(db)-1, int(np.searchsorted(starts, point)))
@@ -509,9 +491,9 @@ def segmentation(audio, sr, transcript, mode, maximum, target, mix_audio=None, r
         costs[end] = float("inf")
         for start in reversed(points[:j]):
             duration = (end-start) / sr
-            if end-start > preferred_samples:
+            if duration > maximum:
                 break
-            if end-start < minimum_samples:
+            if duration < 3 and end != len(audio):
                 continue
             c = candidates[end]
             level = 0 if end == len(audio) else float(np.clip((c["db"]-quiet)/max(loud-quiet, 1), 0, 1))
@@ -520,6 +502,8 @@ def segmentation(audio, sr, transcript, mode, maximum, target, mix_audio=None, r
                 beat_cost = min(abs(end/sr-b) for b in beat_points) / max(60/(rhythm["tempo_bpm"] or 120), .2)
                 beat_cost = min(.5, beat_cost)*.35
             score = costs.get(start, float("inf")) + .5 + ((duration-target)/4)**2 + c["penalty"] + 2*level + beat_cost
+            if duration < 3:
+                score += 5
             if score < costs[end]:
                 costs[end], prev[end] = score, start
     if len(audio) not in prev:
@@ -1171,7 +1155,7 @@ def segment_brief(plan, row, framing, ending, move, previous_frame):
             ending_text = f"结束于{ending_text}，{ending_state}"
         subject = (_zh_performance(row.get('performance_direction', 'natural controlled performance'), mode)
                    if visual_type == "performance" else
-                   "人物以符合场景的自然动作回应音乐；用户指定的行走、转身、递物等剧情动作完整呈现，未指定时采用自然表情和身体动作，不表演歌词")
+                   "人物保持闭口，以视线、呼吸、头部、肩部和空闲手动作回应音乐，不表演歌词")
     return (
         f"画面任务：{task}\n"
         + f"声音关系：{sound}\n"
@@ -1204,7 +1188,7 @@ def preview_segment_brief(plan, index, visual_type):
 def brief_text(row):
     """Compose the text handed to downstream prompt nodes for one segment."""
     body = str(row.get("prompt") or "").strip()
-    note = str(row.get("shot_request", row.get("material_note")) or "").strip()
+    note = str(row.get("material_note") or "").strip()
     if not note or "素材说明：" in body:
         return body
     return f"素材说明：{note}\n{body}"
@@ -1416,7 +1400,6 @@ def decorate(plan, regenerate_prompts=True):
             framing, ending, move = state["camera_start"], state["camera_end"], state["camera_move"]
             row["camera"] = f"{framing}; {move}"
             row["prompt"] = segment_brief(plan, row, framing, ending, move, state["previous_end_framing"])
-            row["brief_source"] = "automatic"
         row.pop("h3_prompt", None)
         row.pop("h3_prompt_mode", None)
         row.pop('environment_brief', None)
@@ -1440,12 +1423,6 @@ def segment_fingerprint(row):
         data["refs"] = list(row["refs"])
     if row.get("final_prompt"):
         data["final_prompt"] = row["final_prompt"]
-    if row.get("shot_intent"):
-        data["shot_intent"] = row["shot_intent"]
-    if "shot_request" in row:
-        data["shot_request"] = row["shot_request"]
-    if row.get("brief_source") == "user":
-        data["brief_source"] = "user"
     for key in ('material_signature', 'expanded_prompt', 'expanded_key'):
         if key in row: data[key] = row[key]
     return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode()).hexdigest()
@@ -1464,9 +1441,6 @@ def archive_take(row, job):
 def request_regeneration(row, reason):
     """Mark only this segment stale while retaining its currently usable take."""
     job = row.get("job")
-    if job and job.get("backend") == "runninghub" and job.get("status") not in {"completed", "failed", "rejected"}:
-        raise ValueError("此段仍有未解决的RH任务，请先继续查询或绑定任务ID；没有丢弃任务或重复提交。")
-    row["regeneration_nonce"] = uuid.uuid4().hex
     if job and job.get("status") == "completed" and job.get("video"):
         row["needs_regeneration"] = True
         row["regeneration_reason"] = str(reason)
@@ -1477,81 +1451,11 @@ def request_regeneration(row, reason):
     row.pop("regeneration_reason", None)
 
 
-def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, materials=UNSET, split_time=UNSET, remove_cut=UNSET):
-    if remove_cut is not UNSET:
-        if split_time is not UNSET:
-            raise ValueError('不能同时新增和删除切点。')
-        from .mv_rh import require_settled
-        require_settled(plan)
-        updated = edit_plan(copy.deepcopy(plan), submitted, directory, reference_default_count, materials)
-        if type(remove_cut) is not int or not 0 <= remove_cut < len(updated['segments'])-1:
-            raise ValueError('请选择两个片段之间的切点；不能删除音频端点。')
-        index = remove_cut
-        left, right = updated['segments'][index:index+2]
-        duration = (right['end_sample']-left['start_sample']) / updated['sample_rate']
-        maximum = min(15., float(updated['max_seconds']))
-        if not 4 <= duration <= maximum:
-            raise ValueError(f'删除切点后合并段须为4–{maximum:g}秒；当前为{duration:.3f}秒。')
-        # Preserve the removed segment's settings and old results for recovery.
-        # The merged segment inherits the left segment's materials and shot type.
-        updated.setdefault('removed_segments', []).append(copy.deepcopy(right))
-        left['end_sample'] = right['end_sample']
-        left.update(prompt='', reason='手动删除切点', boundary_kind='manual', boundary_confidence=None,
-                    warnings=['已合并相邻片段，沿用前段素材；请重新试听并检查本段提示词'])
-        for key in ('final_prompt', 'expanded_prompt', 'expanded_key', 'text', 'asr_suspicious_text'):
-            left.pop(key, None)
-        del updated['segments'][index+1]
-        decorate(updated, regenerate_prompts=False)
-        request_regeneration(left, '相邻片段已合并，需重新生成')
-        changed = {i if i <= index else i-1 for i in updated.get('changed_segments', [])}
-        updated['changed_segments'] = sorted(changed | {index})
-        updated.pop('run_only_segment', None)
-        if updated.get('final_video'):updated['final_stale'] = True
-        return updated
-    if split_time is not UNSET:
-        # Apply the current draft and split as one transaction. Failure must not
-        # partially update the caller's plan or discard its existing takes.
-        from .mv_rh import require_settled
-        require_settled(plan)
-        updated = edit_plan(copy.deepcopy(plan), submitted, directory, reference_default_count, materials)
-        try:
-            seconds = float(split_time)
-            if not math.isfinite(seconds):raise ValueError()
-            cut = round(seconds * updated['sample_rate'])
-        except (TypeError, ValueError, OverflowError):
-            raise ValueError('切点时间必须是有效秒数。') from None
-        index = next((i for i, row in enumerate(updated['segments'])
-                      if row['start_sample'] < cut < row['end_sample']), None)
-        if index is None:raise ValueError('请在片段内部选择新切点，不能与已有切点或音频端点重合。')
-        left = updated['segments'][index]
-        sr = updated['sample_rate']
-        maximum = min(15., float(updated['max_seconds']))
-        lengths = ((cut-left['start_sample'])/sr, (left['end_sample']-cut)/sr)
-        if any(length < 4 or length > maximum for length in lengths):
-            raise ValueError(f'新增切点后两段都须为4–{maximum:g}秒；当前为{lengths[0]:.3f}秒和{lengths[1]:.3f}秒。')
-        right = copy.deepcopy(left)
-        for key in ('job', 'takes', 'replacement_previous_job', 'needs_regeneration',
-                    'regeneration_reason', 'regeneration_nonce', 'video_preview', 'failed_attempts'):
-            right.pop(key, None)
-        left['end_sample'], right['start_sample'] = cut, cut
-        for row in (left, right):
-            row.update(prompt='', reason='手动增加切点', boundary_kind='manual', boundary_confidence=None,
-                       warnings=['已拆分片段，请重新试听切点并检查本段提示词'])
-            for key in ('final_prompt', 'expanded_prompt', 'expanded_key', 'text', 'asr_suspicious_text'):
-                row.pop(key, None)
-        updated['segments'].insert(index+1, right)
-        decorate(updated, regenerate_prompts=False)
-        request_regeneration(left, '原片段已拆分，需重新生成')
-        request_regeneration(right, '新增片段')
-        changed = {i if i <= index else i+1 for i in updated.get('changed_segments', [])}
-        updated['changed_segments'] = sorted(changed | {index, index+1})
-        updated.pop('run_only_segment', None)
-        if updated.get('final_video'):updated['final_stale'] = True
-        return updated
+def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, materials=UNSET):
     if plan.get("run_status") in {"running", "pausing", "stopping", "merging"}:
         raise ValueError("请等当前任务停止后再修改分段。")
     if len(submitted) != len(plan["segments"]):
-        raise ValueError("分段数量已变化，请刷新；新增分段请使用“增加切点”。")
+        raise ValueError("首版支持移动切点；增删段请调整参数重新分析。")
     if reference_default_count is not UNSET:
         plan["reference_default_count"] = normalize_default_reference_count(
             reference_default_count)
@@ -1566,18 +1470,10 @@ def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, ma
     for i, (row, update) in enumerate(zip(plan["segments"], submitted)):
         end = plan["samples"] if i == len(submitted)-1 else round(float(update["end"]) * sr)
         changed = row["start_sample"] != previous or row["end_sample"] != end
-        if changed and not 4 <= (end-previous)/sr <= min(15., float(plan['max_seconds'])):
-            raise ValueError(f'调整切点后第{i+1}段须为4–{min(15., float(plan["max_seconds"])):g}秒。')
         prompt = str(update["prompt"])
         if not changed:
             validate_segment_brief(prompt)
-        if prompt != row.get("prompt", ""):
-            row["brief_source"] = "automatic" if update.get("brief_source") == "automatic" else "user"
         row.update(start_sample=previous, end_sample=end, prompt=prompt)
-        if "shot_intent" in update:
-            row["shot_intent"] = str(update.get("shot_intent") or "").strip()
-        if "shot_request" in update:
-            row["shot_request"] = str(update.get("shot_request") or "").strip()
         if "final_prompt" in update:
             row["final_prompt"] = str(update.get("final_prompt") or "")
         if "material_note" in update:
@@ -1622,12 +1518,6 @@ def fingerprint(plan):
             item["refs"] = list(row["refs"])
         if row.get("final_prompt"):
             item["final_prompt"] = row["final_prompt"]
-        if row.get("shot_intent"):
-            item["shot_intent"] = row["shot_intent"]
-        if "shot_request" in row:
-            item["shot_request"] = row["shot_request"]
-        if row.get("brief_source") == "user":
-            item["brief_source"] = "user"
         for key in ('material_signature', 'expanded_prompt', 'expanded_key'):
             if key in row: item[key] = row[key]
         data.append(item)
@@ -1636,12 +1526,3 @@ def fingerprint(plan):
     if plan.get("reference_default_count") is not None:
         data.append({"reference_default_count": int(plan["reference_default_count"])})
     return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode()).hexdigest()
-
-
-def segment_cache_key(plan, segment_index):
-    """Invalidate one segment's descendants without changing project approval."""
-    index = int(segment_index)
-    if not 0 <= index < len(plan["segments"]):
-        raise ValueError("分段编号超出范围。")
-    nonce = plan["segments"][index].get("regeneration_nonce", "")
-    return f"{fingerprint(plan)}:{index}:{nonce}"

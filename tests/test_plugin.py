@@ -100,7 +100,7 @@ class CoreTests(unittest.TestCase):
                  patch.object(nodes, "run_asr", return_value={"segments": [], "words": []}), \
                  patch.object(nodes, "segmentation", return_value=(rows, analysis)):
                 result = nodes.Analyze().analyze(
-                    audio, "singing", 15, 11, "", "", vocals=audio)
+                    audio, "speaking", 15, 11, "", "", vocals=audio)
             plan = core.read_plan(root, result["result"][0])
         self.assertEqual(plan["materials_version"], 1)
         self.assertEqual(plan["default_refs"], [])
@@ -128,8 +128,7 @@ class CoreTests(unittest.TestCase):
         script = (ROOT/"web"/"h3lv.js").read_text(encoding="utf-8")
         styles = (ROOT/"web"/"h3lv.css").read_text(encoding="utf-8")
         routes_source = (ROOT/"routes.py").read_text(encoding="utf-8")
-        self.assertNotIn('编辑本段导演简报', script)
-        self.assertIn('留空才使用自动简报', script)
+        self.assertIn('actionButton(promptActions, "编辑本段导演简报"', script)
         self.assertIn('"手写提示词（segment_prompt 直连，可选）"', script)
         self.assertIn('final_prompt: row.finalPrompt.value', script)
         self.assertIn("插件不扩写、不校验、不回退", script)
@@ -174,7 +173,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn('title: "无法重新分析分段"', script)
         self.assertNotIn('请在提示词小助手的“用户提示词”中填写素材说明', script)
         self.assertIn("async function openDirectorRules(owner)", script)
-        self.assertIn('const selectedMode = "singing"', script)
+        self.assertIn('const selectedMode = nodeMode === "speaking"', script)
         self.assertIn('fullConfig[selectedMode] = JSON.parse(config.value)', script)
         self.assertIn('{mode: selectedMode}', script)
         self.assertNotIn("formatters.length", script)
@@ -190,9 +189,8 @@ class CoreTests(unittest.TestCase):
         styles = (ROOT/"web"/"h3lv.css").read_text(encoding="utf-8")
         routes_source = (ROOT/"routes.py").read_text(encoding="utf-8")
         self.assertIn('actionButton(projectRow, "管理项目"', script)
-        self.assertIn('basePath="/h3lv"', script)
-        self.assertIn('request(`${basePath}/projects/manage`)', script)
-        self.assertIn('request(`${basePath}/projects/delete`', script)
+        self.assertIn('request("/h3lv/projects/manage")', script)
+        self.assertIn('request("/h3lv/projects/delete"', script)
         self.assertIn("同时删除最终合成视频", script)
         self.assertIn("最终合成视频默认保留", script)
         self.assertIn("全选当前筛选", script)
@@ -258,8 +256,8 @@ class CoreTests(unittest.TestCase):
 
     def test_unified_node_preserves_segment_output_contract(self):
         self.assertIs(nodes.NODE_CLASS_MAPPINGS["H3LVUnified"], nodes.Unified)
-        self.assertEqual(set(nodes.NODE_CLASS_MAPPINGS), {"H3LVUnified", "H3LVPromptExpand", "H3LVTalkingAvatar", "H3LVTalkingRH", "H3LVTalkingVideoMask", "H3LVTalkingClipLoader", "H3LVTalkingSegmentState", "H3LVTalkingMerge", "H3LVTalkingFrozenPrefix"})
-        self.assertEqual(nodes.NODE_DISPLAY_NAME_MAPPINGS["H3LVPromptExpand"], "MiniMax H3 · MV Prompt Expander")
+        self.assertEqual(set(nodes.NODE_CLASS_MAPPINGS), {"H3LVUnified", "H3LVPromptExpand"})
+        self.assertEqual(nodes.NODE_DISPLAY_NAME_MAPPINGS["H3LVPromptExpand"], "H3 长视频 · 分镜提示词生成器")
         self.assertNotIn("H3LVAnalyze", nodes.NODE_DISPLAY_NAME_MAPPINGS)
         self.assertNotIn("H3LVLoadSegment", nodes.NODE_DISPLAY_NAME_MAPPINGS)
         self.assertEqual(nodes.Unified.RETURN_TYPES, nodes.LoadSegment.RETURN_TYPES)
@@ -280,7 +278,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(required["director_mode"][0], "STRING")
         self.assertEqual(required["asr_device"][0], ["auto", "cuda", "cpu"])
         optional = nodes.Unified.INPUT_TYPES()["optional"]
-        self.assertEqual(set(optional), {"backend", "rh_workflow_id", "rh_region", "rh_instance_type","audio_processing"})
+        self.assertEqual(set(optional), {"vocals"})
         for removed in ("visual_brief", "performance_intensity", "director_note",
                         "reference_layout", "vocal_assignment", "reference_roles_json"):
             self.assertNotIn(removed, required)
@@ -469,7 +467,7 @@ class CoreTests(unittest.TestCase):
 
     def test_optional_ref2va_template_contract(self):
         expected = (ROOT/"ref2va_performance_rule.txt").read_text(encoding="utf-8")
-        self.assertIn("模式 (唱歌/singing)", expected)
+        self.assertIn("模式 (口播/speaking or 唱歌/singing)", expected)
         self.assertIn("镜头方案 and 表演节奏", expected)
         self.assertIn("user-written material description", expected)
         self.assertIn("legacy seven-field format", expected)
@@ -477,8 +475,8 @@ class CoreTests(unittest.TestCase):
         for forbidden in ("final assembly", "FFmpeg"):
             self.assertNotIn(forbidden, expected)
 
-    def test_mv_generation_preserves_prompt_assistant_rules(self):
-        for mode in ("singing",):
+    def test_generation_preserves_prompt_assistant_rules_in_both_modes(self):
+        for mode in ("singing", "speaking"):
             for custom in (False, True):
                 with self.subTest(mode=mode, custom=custom), tempfile.TemporaryDirectory() as root:
                     plan = sample_plan()
@@ -1125,10 +1123,10 @@ class CoreTests(unittest.TestCase):
     def test_ref2va_rule_maps_the_versioned_brief_without_redirection(self):
         rule = (ROOT/"ref2va_performance_rule.txt").read_text(encoding="utf-8")
         self.assertNotIn("H3LV_CAMERA_V1", rule)
-        self.assertIn("模式 (唱歌/singing)", rule)
-        self.assertNotIn("Speaking mode only:", rule)
-        self.assertIn("Singing MV:", rule)
-        self.assertIn("approved camera path", rule)
+        self.assertIn("模式 (口播/speaking or 唱歌/singing)", rule)
+        self.assertIn("Speaking mode only:", rule)
+        self.assertIn("Singing mode only:", rule)
+        self.assertIn("not a pixel-exact first-frame guarantee", rule)
         self.assertIn("镜头方案 and 表演节奏", rule)
         self.assertIn("legacy seven-field format", rule)
         self.assertIn("user-written material description", rule)
@@ -1162,9 +1160,9 @@ class CoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, patch.dict(sys.modules, {
                 "folder_paths": types.SimpleNamespace(get_output_directory=lambda: d)}):
             output = Path(d)
-            self.assertEqual(nodes.storage_root(), output/"H3LongVideo"/"MV")
-            self.assertEqual(nodes.data_root(), output/"H3LongVideo"/"MV"/"projects")
-            self.assertEqual(nodes.final_root(), output/"H3LongVideo"/"MV"/"final_videos")
+            self.assertEqual(nodes.storage_root(), output/"H3LongVideo")
+            self.assertEqual(nodes.data_root(), output/"H3LongVideo"/"projects")
+            self.assertEqual(nodes.final_root(), output/"H3LongVideo"/"final_videos")
             plan = sample_plan(); plan["approved"] = True
             directory = core.project_path(nodes.data_root(), plan["id"])
             (directory/"audio").mkdir(parents=True)
@@ -1175,7 +1173,7 @@ class CoreTests(unittest.TestCase):
             fake_torch = types.SimpleNamespace(from_numpy=lambda value: MagicMock())
             with patch.dict(sys.modules, {"torch": fake_torch}):
                 loaded = nodes.LoadSegment().load(plan["id"], 0)
-            self.assertEqual(loaded[3], f"H3LongVideo/MV/projects/{plan['id']}/takes/seg_0000")
+            self.assertEqual(loaded[3], f"H3LongVideo/projects/{plan['id']}/takes/seg_0000")
 
     def test_silence_and_short_audio_coverage(self):
         for samples in [70, 1300, 3680]:
@@ -1587,10 +1585,10 @@ class ReferenceImageTests(unittest.TestCase):
         self.assertIn("套用到所有分段", script)
         self.assertIn("renderRefs: renderReferences", script)
         self.assertIn('element("label", "本段画面", shotControl)', script)
-        self.assertIn("人物剧情和空镜不使用人声参考", script)
+        self.assertIn("选择后会立即重写本段导演简报", script)
         self.assertIn('request(endpoint("/brief-preview")', script)
         self.assertIn('visualTypeSelect.onchange = async () =>', script)
-        self.assertNotIn("切换画面类型会重写当前导演简报", script)
+        self.assertIn("切换画面类型会重写当前导演简报", script)
         self.assertNotIn('actionButton(controls, "保存草稿"', script)
         self.assertIn('title: "保存修改后关闭？"', script)
         self.assertIn('confirmText: "保存并确认后关闭"', script)
@@ -1601,7 +1599,7 @@ class ReferenceImageTests(unittest.TestCase):
         approve_source = approve_source.split('@routes.post("/h3lv/project/{project_id}/refs")', 1)[0]
         self.assertNotIn("require=True", approve_source)
         self.assertIn('brief_matches_visual_type:true', script)
-        self.assertIn('["atmosphere", "人物剧情（不演唱）"]', script)
+        self.assertIn('["atmosphere", "人物氛围表演"]', script)
         self.assertNotIn("画面类型", materials_script)
         self.assertIn("最多 6 张", materials_script)
         self.assertIn(".h3lv-default-materials-header", styles)

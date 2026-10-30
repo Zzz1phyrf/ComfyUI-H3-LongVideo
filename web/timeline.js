@@ -43,12 +43,7 @@ export function pcmWavePeaks(buffer, bins = 2048) {
   return peaks.map(value => Math.min(1, value/scale));
 }
 
-export function cutRange(start, end, maximum = 15) {
-  maximum = Math.min(15, maximum);
-  return {min: Math.max(start+4, end-maximum), max: Math.min(end-4, start+maximum)};
-}
-
-export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loadDetail, onSplit, onRemove) {
+export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loadDetail) {
   let project = null, view = {start: 0, span: 1}, dragIndex = -1, changed = false;
   let hover = null, pan = null, detail = null, detailKey = "", detailStatus = "";
   let timer = null, controller = null, disposed = false;
@@ -64,7 +59,7 @@ export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loa
     const {rows, selected} = getState();
     return {start: selected ? Number(rows[selected-1].end.value) : 0, end: Number(rows[selected]?.end.value || 0)};
   };
-  button(getState().singleTrack ? "全程" : "全曲", () => setView(0, getState().plan.duration));
+  button("全曲", () => setView(0, getState().plan.duration));
   button("− 缩小", () => zoom(2));
   button("＋ 放大", () => zoom(.5));
   button("当前段", () => { const b = bounds(); setView(b.start, b.end-b.start); });
@@ -74,34 +69,6 @@ export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loa
     const span = Math.min(8, plan.max_seconds, plan.duration);
     setView(cut-span/2, span);
   });
-  let cutInput, cutButton, cutHint, cutSelected = -1, splitting = false;
-  if (onSplit) {
-    cutInput = document.createElement('input');
-    cutInput.type = 'number'; cutInput.step = '.001'; cutInput.style.width = '110px';
-    cutInput.setAttribute('aria-label', '新切点时间（秒）');
-    toolbar.append(cutInput);
-    cutInput.oninput = () => draw();
-    cutButton = button('＋ 增加切点', async () => {
-      if (splitting || cutButton.disabled) return;
-      splitting = true; draw();
-      try { await onSplit(Number(cutInput.value)); }
-      catch (error) { alert(error.message || String(error)); }
-      finally { splitting = false; cutSelected = -1; draw(); }
-    });
-    cutHint = document.createElement('span'); cutHint.className = 'h3lv-timeline-readout'; toolbar.append(cutHint);
-  }
-  let removeButton, removeHint;
-  if (onRemove) {
-    removeButton = button('− 删除切点', async () => {
-      if (splitting || removeButton.disabled) return;
-      const {rows, selected} = getState(), index = Math.min(selected, rows.length-2);
-      splitting = true; draw();
-      try { await onRemove(index); }
-      catch (error) { alert(error.message || String(error)); }
-      finally { splitting = false; cutSelected = -1; draw(); }
-    });
-    removeHint = document.createElement('span'); removeHint.className = 'h3lv-timeline-readout'; toolbar.append(removeHint);
-  }
   const readout = document.createElement("span");
   readout.className = "h3lv-timeline-readout"; toolbar.append(readout);
   const navigation = document.createElement("input");
@@ -112,9 +79,7 @@ export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loa
   navigation.oninput = () => setView(Number(navigation.value), view.span);
   const hint = document.createElement("div");
   hint.className = "h3lv-help";
-  hint.textContent = "双击波形放大附近；Ctrl / ⌘ + 滚轮缩放；Shift + 滚轮横移。拖动彩色切点线调整，普通滚轮滚动页面。"+
-    (onSplit ? " 单击波形选择新切点，或输入秒数；拆分后两段均须4–15秒，新增后需保存并确认。" : '')+
-    (onRemove ? ` 点击彩色切点线，再点删除切点合并两侧片段；沿用前段${getState().singleTrack?'提示词':'素材'}，检查后保存并确认。` : '');
+  hint.textContent = "双击波形放大附近；Ctrl / ⌘ + 滚轮缩放；Shift + 滚轮横移。拖动彩色切点线调整，普通滚轮滚动页面。";
   navigation.after(hint);
   const geometry = () => ({left: 50, right: 18, top: 25, height: 178});
   const widthFor = () => Math.max(1, canvas.getBoundingClientRect().width);
@@ -137,7 +102,7 @@ export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loa
     const key = `${plan.id}:${view.start.toFixed(6)}:${view.span.toFixed(6)}`;
     if (key === detailKey) return;
     detailKey = key; detail = null; clearTimeout(timer); controller?.abort();
-    detailStatus = !loadDetail ? "波形概览" : view.span <= plan.max_seconds+1e-6 ? "局部波形加载中…" : `${getState().singleTrack?'全程':'全曲'}概览 · 继续放大可查看精细波形`;
+    detailStatus = view.span <= plan.max_seconds+1e-6 ? "局部波形加载中…" : "全曲概览 · 继续放大可查看精细波形";
     if (!loadDetail || view.span > plan.max_seconds+1e-6) return;
     const start = view.start, end = Math.min(plan.duration, start+view.span);
     controller = new AbortController();
@@ -170,26 +135,6 @@ export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loa
     if (!plan || !rows.length) return;
     if (project !== plan.id) {
       project = plan.id; view = {start: 0, span: plan.duration}; hover = null; dragIndex = -1;
-      cutSelected = -1;
-    }
-    if (cutInput) {
-      const b = bounds(), range = cutRange(b.start, b.end, plan.max_seconds);
-      if (cutSelected !== selected) { cutInput.value = ((b.start+b.end)/2).toFixed(3); cutSelected = selected; }
-      cutInput.min = range.min; cutInput.max = range.max;
-      const time = Number(cutInput.value);
-      cutButton.disabled = splitting || ['running','pausing','stopping','merging'].includes(plan.run_status) ||
-        plan.controller_active || range.min > range.max || cutInput.value === '' || !Number.isFinite(time) || time < range.min || time > range.max;
-      cutHint.textContent = range.min > range.max ? '当前段不足8秒，无法再拆分' :
-        `可加切点：${range.min.toFixed(3)}–${range.max.toFixed(3)}秒`;
-    }
-    if (removeButton) {
-      const index = Math.min(selected, rows.length-2), maximum = Math.min(15, plan.max_seconds);
-      const duration = index < 0 ? 0 : Number(rows[index+1].end.value)-(index ? Number(rows[index-1].end.value) : 0);
-      removeButton.disabled = splitting || ['running','pausing','stopping','merging'].includes(plan.run_status) ||
-        plan.controller_active || index < 0 || !Number.isFinite(duration) || duration < 4 || duration > maximum;
-      removeHint.textContent = index < 0 ? '仅一段，没有可删除的切点' :
-        `删除 ${Number(rows[index].end.value).toFixed(3)}s 切点：第${index+1}、${index+2}段合为${duration.toFixed(3)}秒`+
-        (duration > maximum ? `，超过${maximum}秒上限` : `，沿用前段${getState().singleTrack?'提示词':'素材'}`);
     }
     view = fitWindow(view.start, view.span, plan.duration);
     fetchDetail(plan);
@@ -202,9 +147,7 @@ export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loa
     const ctx = canvas.getContext("2d"), g = geometry();
     ctx.scale(ratio, ratio); ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = "#9ea8b7"; ctx.font = "12px sans-serif";
-    const singleTrack=getState().singleTrack===true;
-    ctx.fillText(singleTrack ? "原声" : "原曲", 12, singleTrack ? 116 : 74);
-    if(!singleTrack)ctx.fillText("人声", 12, 149);
+    ctx.fillText("原曲", 12, 74); ctx.fillText("人声", 12, 149);
     ctx.save(); ctx.beginPath(); ctx.rect(g.left, 0, Math.max(1, width-g.left-g.right), height); ctx.clip();
     ctx.fillStyle = "#11151c"; ctx.fillRect(g.left, g.top, width-g.left-g.right, g.height);
     const ends = rows.map(row => Number(row.end.value)), starts = [0, ...ends.slice(0, -1)];
@@ -219,8 +162,8 @@ export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loa
       ctx.fillStyle = "#c6a5ff"; ctx.font = "11px sans-serif"; ctx.fillText(section.kind, x1+4, g.top+14);
     }
     const waveform = detail || analysis?.waveform;
-    drawWave(ctx, waveform?.original, singleTrack ? 112 : 70, singleTrack ? 66 : 34, width, detail?.start || 0, detail?.end || plan.duration, "#6fb8ff");
-    if(!singleTrack)drawWave(ctx, waveform?.vocals, 145, 34, width, detail?.start || 0, detail?.end || plan.duration, "#7ee0b1");
+    drawWave(ctx, waveform?.original, 70, 34, width, detail?.start || 0, detail?.end || plan.duration, "#6fb8ff");
+    drawWave(ctx, waveform?.vocals, 145, 34, width, detail?.start || 0, detail?.end || plan.duration, "#7ee0b1");
     let lastLabel = -Infinity;
     starts.forEach((start, index) => {
       const left = Math.max(g.left, xFor(start, width)), right = Math.min(width-g.right, xFor(ends[index], width));
@@ -280,7 +223,6 @@ export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loa
       const {rows} = getState(), time = timeFor(event.clientX);
       const index = rows.findIndex(row => time <= Number(row.end.value));
       onSelect(index < 0 ? rows.length-1 : index);
-      if (cutInput) { cutInput.value = time.toFixed(3); cutSelected = getState().selected; }
     }
     draw();
   };
@@ -311,7 +253,7 @@ export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loa
       event.preventDefault(); setView(view.start+(event.deltaX || event.deltaY)/Math.max(1, widthFor()-68)*view.span, view.span);
     }
   }, {passive: false});
-  canvas.setAttribute("aria-label", getState().singleTrack ? "可缩放的口播原声波形；拖动切点调整分段" : "可缩放的原曲和人声波形；双击放大附近，拖动切点；也可使用分段结束时间输入框");
+  canvas.setAttribute("aria-label", "可缩放的原曲和人声波形；双击放大附近，拖动切点；也可使用分段结束时间输入框");
   const observer = new ResizeObserver(draw); observer.observe(canvas);
   canvas.drawTimeline = draw;
   canvas.disposeTimeline = () => { disposed = true; clearTimeout(timer); controller?.abort(); observer.disconnect(); };

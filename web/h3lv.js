@@ -1,18 +1,9 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import {alignProjectNode} from './node_ui.js';
 import { materialEditor } from "./materials.js";
 import { createTimeline, pcmWavePeaks } from "./timeline.js";
 import { generationOutputs } from "./video_outputs.js";
-import { syncHiddenWidgetConnections } from "./widget_visibility.js";
-import {busy, progressText, canvasProgressText} from "./progress.js?v=mv-canvas-20261028";
-import {setTalkingStatus as setWorkflowProgress} from "./talking_progress.js";
-
-function canvasProgress(node, text) {
-  if (!node || node.comfyClass !== 'H3LVUnified') return;
-  setWorkflowProgress(node,text);
-}
-import { downloadErrorLog, reportUiError, withUiLogging, renderFailure } from "./diagnostics.js";
+import { downloadErrorLog, reportUiError, withUiLogging } from "./diagnostics.js";
 
 if (!document.querySelector("link[data-h3lv-style]")) {
   const link = document.createElement("link");
@@ -27,11 +18,7 @@ async function request(path, body) {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
   });
   const result = await response.json();
-  if (!response.ok) {
-    const error = new Error(result.error || JSON.stringify(result));
-    error.diagnostic = result.error_info;
-    throw error;
-  }
+  if (!response.ok) throw new Error(result.error || JSON.stringify(result));
   return result;
 }
 
@@ -48,17 +35,11 @@ function actionButton(parent, label, action, className = "") {
   node.type = "button";
   node.onclick = async () => {
     node.disabled = true;
-    const originalLabel=node.textContent;
-    node.textContent='处理中…';
     try { await action(); } catch (error) {
       void reportUiError(error, {source: "h3lv", action: label});
-      if (error.diagnostic) {
-        const host = document.querySelector("#h3lv-panel .h3lv-error-card");
-        if (host) renderFailure(host, error.diagnostic);
-        else await messageDialog({title: "操作失败", message: `${error.message}\n${error.diagnostic.action}`, tone: "error"});
-      } else await messageDialog({title: "操作失败", message: error.message || String(error), tone: "error"});
+      await messageDialog({title: "操作失败", message: error.message || String(error), tone: "error"});
     }
-    finally { node.disabled = node.dataset.busy==='true'; if (node.textContent==='处理中…') node.textContent=originalLabel; }
+    finally { node.disabled = false; }
   };
   return node;
 }
@@ -116,13 +97,11 @@ function formatBytes(value) {
 function projectStatusLabel(value) {
   return ({draft:"草稿", running:"生成中", pausing:"暂停中", paused:"已暂停",
     stopping:"停止中", stopped:"已停止", merging:"合成中", completed:"已完成",
-    failed:"失败", generated:"待合并"})[value] || value;
+    failed:"失败"})[value] || value;
 }
 
-async function projectManagerDialog(currentId, basePath="/h3lv") {
-  const projects = await request(`${basePath}/projects/manage`);
-  const kind=basePath==='/h3talk' ? '口播' : '分析';
-  const contents=basePath==='/h3talk' ? '原声、切分记录、参考图、提示词草稿和分段视频' : '分析音频、切分记录、参考图、扩写缓存和分段视频';
+async function projectManagerDialog(currentId) {
+  const projects = await request("/h3lv/projects/manage");
   return new Promise(resolve => {
     const shade = element("div", undefined, document.body,
       "h3lv-shade h3lv-settings-shade h3lv-project-manager-shade");
@@ -130,12 +109,11 @@ async function projectManagerDialog(currentId, basePath="/h3lv") {
       "h3lv-settings-panel h3lv-project-manager-panel");
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-modal", "true");
-    const heading=basePath==='/h3talk' ? '管理口播项目' : '管理分析项目';
-    panel.setAttribute("aria-label", heading);
+    panel.setAttribute("aria-label", "管理分析项目");
     const title = element("div", undefined, panel, "h3lv-title-row");
-    element("h2", heading, title);
+    element("h2", "管理分析项目", title);
     const close = actionButton(title, "关闭", () => finish(null));
-    element("p", basePath==='/h3talk' ? '删除项目会清理原声、切分记录、参考图、提示词草稿和分段视频；最终合成视频默认保留。' : "删除项目会清理分析音频、切分记录、参考图、扩写缓存和分段视频；最终合成视频默认保留。",
+    element("p", "删除项目会清理分析音频、切分记录、参考图、扩写缓存和分段视频；最终合成视频默认保留。",
       panel, "h3lv-help h3lv-project-manager-help");
     const toolbar = element("div", undefined, panel, "h3lv-project-manager-toolbar");
     const filterLabel = element("label", "显示", toolbar);
@@ -164,13 +142,13 @@ async function projectManagerDialog(currentId, basePath="/h3lv") {
       const finalSize = includeFinal.checked ? chosen.reduce((sum, item) => sum + item.final_bytes, 0) : 0;
       const finalCopy = includeFinal.checked ? "同时删除这些项目关联的最终合成视频。" : "最终合成视频将保留。";
       if (!await confirmDialog({
-        title: `删除 ${chosen.length} 个${kind}项目？`,
-        message: `将永久删除所选项目的${contents}，预计释放 ${formatBytes(projectSize + finalSize)}。\n\n${finalCopy}`,
+        title: `删除 ${chosen.length} 个分析项目？`,
+        message: `将永久删除所选项目的分析音频、切分记录、参考图、扩写缓存和分段视频，预计释放 ${formatBytes(projectSize + finalSize)}。\n\n${finalCopy}`,
         confirmText: "确认删除", confirmClass: "stop", tone: "warning",
       })) return;
-      const result = await request(`${basePath}/projects/delete`,
+      const result = await request("/h3lv/projects/delete",
         {ids:chosen.map(item => item.id), delete_final:includeFinal.checked});
-      toast(`${kind}项目已删除`, `已释放约 ${formatBytes(result.reclaimed_bytes)}。`);
+      toast("分析项目已删除", `已释放约 ${formatBytes(result.reclaimed_bytes)}。`);
       finish(result);
     }, "stop");
     remove.disabled = true;
@@ -241,10 +219,36 @@ async function projectManagerDialog(currentId, basePath="/h3lv") {
   });
 }
 
-// Both node panels use this plugin-owned dialog without importing an extension twice.
-app.h3lvProjectManager=projectManagerDialog;
-app.h3lvMessageDialog=messageDialog;
-app.h3lvConfirmDialog=confirmDialog;
+function editPromptDialog(index, value) {
+  return new Promise(resolve => {
+    const shade = element("div", undefined, document.body,
+      "h3lv-shade h3lv-settings-shade h3lv-prompt-editor-shade");
+    const panel = element("div", undefined, shade, "h3lv-settings-panel h3lv-prompt-editor-panel");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    const title = element("div", undefined, panel, "h3lv-title-row");
+    element("h2", `编辑第 ${index + 1} 段导演简报`, title);
+    element("p", "导演简报会与本段多图、素材用途、画面类型和音频判断一起交给提示词扩写节点。可以逐行修改画面任务、声音关系、构图、主体动作和镜头运动。", panel, "h3lv-help");
+    const editor = element("textarea", undefined, panel, "h3lv-prompt-editor");
+    editor.value = value;
+    editor.spellcheck = false;
+    const buttons = element("div", undefined, panel, "h3lv-actions h3lv-confirm-actions");
+    let finished = false;
+    const finish = result => {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener("keydown", onKeyDown);
+      shade.remove();
+      resolve(result);
+    };
+    actionButton(buttons, "取消", () => finish(null));
+    actionButton(buttons, "应用到当前修改", () => finish(editor.value), "primary");
+    const onKeyDown = event => { if (event.key === "Escape") finish(null); };
+    window.addEventListener("keydown", onKeyDown);
+    shade.onclick = event => { if (event.target === shade) finish(null); };
+    queueMicrotask(() => editor.focus());
+  });
+}
 
 function chooseVideoOutput(outputs) {
   return new Promise(resolve => {
@@ -277,16 +281,6 @@ function chooseVideoOutput(outputs) {
 
 async function buildGenerationPayload() {
   const snapshot = await app.graphToPrompt();
-  const owners = Object.entries(snapshot.output).filter(([, node]) => node.class_type === "H3LVUnified");
-  if (owners.length === 1 && owners[0][1].inputs?.backend === "RunningHub") {
-    const videos = Object.entries(snapshot.output).filter(([, node]) =>
-      ["SaveVideo", "VHS_VideoCombine"].includes(node.class_type));
-    const videoId = videos.length === 1 ? videos[0][0] :
-      (videos.length ? await chooseVideoOutput(videos) : "");
-    if (videos.length && !videoId) throw new Error("已取消选择视频输出；没有提交生成任务。");
-    return {prompt:snapshot.output, workflow:snapshot.workflow,
-      loader_id:owners[0][0], video_id:videoId, client_id:api.clientId || ""};
-  }
   const {loaderId, outputs} = generationOutputs(snapshot.output);
   const videoId = outputs.length === 1 ? outputs[0][0] : await chooseVideoOutput(outputs);
   if (!videoId) throw new Error("已取消选择视频输出；没有提交生成任务。");
@@ -301,7 +295,7 @@ async function startApprovedSequence(owner, plan) {
     toast("顺序生成正在启动", "本次点击没有重复提交任务。");
     return;
   }
-  if (plan.controller_active !== false && ["running", "pausing", "stopping", "merging"].includes(plan.run_status)) {
+  if (["running", "pausing", "stopping", "merging"].includes(plan.run_status)) {
     toast("顺序生成正在进行", "本次点击没有重复提交任务。");
     return;
   }
@@ -328,28 +322,16 @@ async function startApprovedSequence(owner, plan) {
     }
     await request(`/h3lv/project/${plan.id}/run`, payload);
     clearVideoNodePreview(payload.video_id);
-    toast("已开始顺序生成", plan.generation_backend === "runninghub" ?
-      "RH任务及逐段预览可在分段审核面板查看。" : "分段进度可在审核面板或ComfyUI任务队列查看。");
+    toast("已开始顺序生成", "可在 ComfyUI 任务队列中查看进度；分段审核界面不会自动打开。");
   } finally {
     startingProjects.delete(plan.id);
   }
 }
 
-async function checkRunningHub() {
-  const payload = await buildGenerationPayload();
-  const result = await request("/h3lv/rh-check", payload);
-  const sources = {expansion: "MV Prompt Expander", segment_prompt: "本段手写提示词", literal: "Ref2VA固定文本"};
-  await messageDialog({title: "RH配置检查通过", message:
-    `工作流 ${result.workflow_id} 可读取，MV模板连线检查通过。\n云端 seed：${result.seed}；提示词来源：${sources[result.prompt_source] || result.prompt_source}。\n本次没有上传素材或提交生成。模型是否可加载、额度及实际画面效果仍需真实运行验证。`});
-}
-
 async function analyzeOnly(owner) {
-  if (owner.widgets?.find(item => item.name === "mode")?.value === "speaking") {
-    throw new Error("此旧工作流使用口播模式。请改用 MiniMax H3 · Talking Avatar；原项目和视频保留。");
-  }
   const snapshot = await app.graphToPrompt();
   const promptNode = snapshot.output?.[String(owner.id)];
-  if (!promptNode) throw new Error("没有在执行图中找到 MV Generator 节点。");
+  if (!promptNode) throw new Error("没有在执行图中找到 H3 一体化节点。");
   promptNode.inputs.project_id = "";
   promptNode.inputs.segment_index = 0;
   await api.queuePrompt(0, snapshot, {partialExecutionTargets: [String(owner.id)]});
@@ -383,8 +365,9 @@ async function reanalyzeProject(owner, {ask = true} = {}) {
 }
 
 async function openDirectorRules(owner) {
-  const selectedMode = "singing";
-  const modeLabel = "MV";
+  const nodeMode = owner?.widgets?.find(item => item.name === "mode")?.value;
+  const selectedMode = nodeMode === "speaking" ? "speaking" : "singing";
+  const modeLabel = selectedMode === "speaking" ? "口播" : "唱歌";
   document.getElementById("h3lv-rules")?.remove();
   const shade = element("div", undefined, document.body, "h3lv-shade h3lv-settings-shade");
   shade.id = "h3lv-rules";
@@ -392,7 +375,9 @@ async function openDirectorRules(owner) {
   const title = element("div", undefined, panel, "h3lv-title-row");
   element("h2", `${modeLabel}运镜规则`, title);
   actionButton(title, "关闭", () => shade.remove(), "h3lv-close");
-  const explanation = "歌曲视频的景别由 allowed_framings 控制，运镜由各能量级别的 energy_movements 控制。这里也可以调整机位角度及相邻运动关系。";
+  const explanation = selectedMode === "speaking"
+    ? "当前节点选择了 speaking。这里只编辑口播规则：连续固定机位和跨段一致构图。"
+    : "唱歌景别由 allowed_framings 控制，运镜由各能量级别的 energy_movements 控制。这里也可以调整机位角度及相邻运动关系。";
   element("p", `${explanation} 规则不判断图片内容，也不决定音频被切成几段；保存后只用于重新分析的新项目。`, panel, "h3lv-help");
   const rules = await request("/h3lv/rules");
   let fullConfig = JSON.parse(rules.config_text);
@@ -401,7 +386,7 @@ async function openDirectorRules(owner) {
   const configLabel = element("label", `${modeLabel}运镜配置（JSON）`, form);
   const config = element("textarea", undefined, configLabel, "h3lv-rule-editor h3lv-rule-config");
   config.value = JSON.stringify(fullConfig[selectedMode], null, 2);
-  config.rows = 28;
+  config.rows = selectedMode === "speaking" ? 10 : 28;
   const buttons = element("div", undefined, panel, "h3lv-actions");
   actionButton(buttons, "保存并校验", async () => {
     try {
@@ -415,12 +400,12 @@ async function openDirectorRules(owner) {
     fullConfig = JSON.parse(saved.config_text);
     config.value = JSON.stringify(fullConfig[selectedMode], null, 2);
     location.textContent = `当前模式：${modeLabel} · 保存位置：${saved.directory} · 版本 ${saved.revision}`;
-    await messageDialog({title: `${modeLabel}规则已保存`, message: "重新分析音频后，新项目会使用这套MV规则。"});
+    await messageDialog({title: `${modeLabel}规则已保存`, message: `另一套模式的规则没有改变。重新分析音频后，新项目会使用这套${modeLabel}规则。`});
   }, "primary");
   actionButton(buttons, `恢复${modeLabel}默认规则`, async () => {
     if (!await confirmDialog({
       title: `恢复${modeLabel}默认规则？`,
-      message: "恢复MV默认规则，已经生成的项目保留原规则。",
+      message: `只覆盖${modeLabel}规则，另一套模式和已经生成的项目不会改变。`,
       confirmText: "恢复默认",
       tone: "warning",
     })) return;
@@ -566,11 +551,8 @@ async function restoreFinalVideoPreview() {
 function statusText(plan) {
   const completed = plan.segments.filter(row => row.job?.status === "completed" && !needsReplacement(row)).length;
   const stale = plan.segments.filter(needsReplacement).length;
-  const state = {draft:"待确认", running:"生成中", completed:"已完成", failed:"失败", paused:"已暂停",
-    stopped:"已停止", pausing:"等待当前段完成后暂停", stopping:"等待当前段完成后停止", merging:"合并中"}[plan.run_status] || plan.run_status;
-  return `状态：${state} · ${plan.approved ? "方案已确认" : "待确认"} · ${completed}/${plan.segments.length} 段可用`+
-    `${stale ? ` · ${stale}段待重生成` : ""}${plan.final_stale ? " · 当前成片为旧版" : ""}${plan.error ? ` · ${plan.error_info?.summary || "操作失败，请查看下方原因"}` : ""}`+
-    (progressText(plan) ? `\n${progressText(plan)}` : '');
+  return `状态：${plan.run_status} · ${plan.approved ? "已确认可生成" : "待确认"} · ${completed}/${plan.segments.length} 段可用`+
+    `${stale ? ` · ${stale}段待重生成` : ""}${plan.final_stale ? " · 当前成片为旧版" : ""}${plan.error ? ` · ${plan.error}` : ""}`;
 }
 
 async function openReview(owner) {
@@ -581,11 +563,11 @@ async function openReview(owner) {
   shade.id = "h3lv-panel";
   shade.setAttribute("role", "dialog");
   shade.setAttribute("aria-modal", "true");
-  shade.setAttribute("aria-label", "MiniMax H3 · MV Generator");
+  shade.setAttribute("aria-label", "H3 长视频分段审核");
   const panel = element("div", undefined, shade, "h3lv-panel");
   const header = element("header", undefined, panel, "h3lv-header");
   const titleRow = element("div", undefined, header, "h3lv-title-row");
-  element("h2", "MiniMax H3 · MV Generator", titleRow);
+  element("h2", "H3 长视频 · 音频切分审核", titleRow);
   actionButton(titleRow, "关闭", async () => {
     if (dirty) {
       const decision = await confirmDialog({
@@ -664,8 +646,6 @@ async function openReview(owner) {
   }
 
   const status = element("div", "", header, "h3lv-status");
-  const errorCard = element("section", undefined, header, "h3lv-error-card");
-  errorCard.hidden = true;
   const controls = element("div", undefined, header, "h3lv-actions");
   const content = element("main", undefined, panel, "h3lv-content");
   const overview = element("section", undefined, content, "h3lv-overview");
@@ -762,10 +742,8 @@ async function openReview(owner) {
   function moveBoundary(index, proposed) {
     const start = index === 0 ? 0 : Number(rows[index-1].end.value);
     const nextEnd = Number(rows[index+1].end.value);
-    const maximum = Math.min(15, plan.max_seconds);
-    const lower = Math.max(start+4, nextEnd-maximum);
-    const upper = Math.min(start+maximum, nextEnd-4);
-    if (lower > upper) return;
+    const lower = Math.max(start+3, nextEnd-plan.max_seconds);
+    const upper = Math.min(start+plan.max_seconds, nextEnd-3);
     rows[index].end.value = Math.max(lower, Math.min(upper, proposed)).toFixed(3);
     refreshDraftDisplays();
     markDirty();
@@ -781,19 +759,6 @@ async function openReview(owner) {
         return pcmWavePeaks(await response.arrayBuffer());
       }));
       return {original: waves[0], vocals: waves[1]};
-    }, async time => {
-      await saveDraft(time);
-      await load();
-      const summary = projects.find(item => item.id === plan.id);
-      if (summary) summary.count = plan.segments.length;
-      populateProjects(plan.id);
-    }, async index => {
-      await saveDraft(undefined, index);
-      selected = index;
-      await load();
-      const summary = projects.find(item => item.id === plan.id);
-      if (summary) summary.count = plan.segments.length;
-      populateProjects(plan.id);
     });
 
   function renderCards() {
@@ -820,7 +785,7 @@ async function openReview(owner) {
         body.classList.add("has-preview");
         resultPanel = element("div", undefined, body, "h3lv-segment-result");
         const preview = element("figure", undefined, resultPanel, "h3lv-segment-preview");
-        element("figcaption", row.replacement_previous_job || needsReplacement(row) ? "上一版结果 · 新版成功后替换" : "当前分段结果", preview);
+        element("figcaption", "当前分段结果", preview);
         const video = element("video", undefined, preview);
         video.controls = true;
         video.preload = "metadata";
@@ -842,7 +807,7 @@ async function openReview(owner) {
       const end = document.createElement("input");
       end.type = "number"; end.step = ".01"; end.value = row.end;
       end.disabled = row.index === plan.segments.length-1;
-      end.min = row.start+4; end.max = row.start+Math.min(15,plan.max_seconds);
+      end.min = row.start+3; end.max = row.start+plan.max_seconds;
       end.oninput = () => {
         if (!Number.isFinite(Number(end.value))) return;
         refreshDraftDisplays(); markDirty(); updateSelected(selected, false); canvas.drawTimeline?.();
@@ -853,13 +818,12 @@ async function openReview(owner) {
       segmentAudio.controls = true;
       segmentAudio.preload = "metadata";
       segmentAudio.src = api.apiURL(endpoint(`/audio?index=${row.index}&revision=${plan.revision}`));
-      let note, rowRefs, renderReferences, materialControls, visualTypeSelect, shotIntent;
+      let note, rowRefs, renderReferences, materialControls, visualTypeSelect;
       if (plan.materials_version) {
         materialControls = materialEditor(inner, {projectId:plan.id, index:row.index,
           refs:row.refs || [], note:row.material_note || "",
           source:row.reference_source || (row.refs?.length ? "custom" : "default"),
-          defaults:() => ({refs:defaultEditor.refs, note:defaultEditor.getNote()}), changed:markDirty,
-          unified:true, shotRequest:row.shot_request, legacyIntent:row.shot_intent || ''});
+          defaults:() => ({refs:defaultEditor.refs, note:defaultEditor.getNote()}), changed:markDirty});
         note = materialControls.note; rowRefs = materialControls.refs; renderReferences = materialControls.renderRefs;
       } else {
       note = element("textarea", undefined, inner, "h3lv-material-note");
@@ -967,7 +931,7 @@ async function openReview(owner) {
         visualTypeSelect = element("select", undefined, shotLabel);
         const performanceLabel = plan.mode === "speaking" ? "人物口播" : "人物演唱";
         for (const [value, label] of [["performance", performanceLabel],
-          ["atmosphere", "人物剧情（不演唱）"], ["environment", "空镜环境"]]) {
+          ["atmosphere", "人物氛围表演"], ["environment", "空镜环境"]]) {
           const option = element("option", label, visualTypeSelect);
           option.value = value;
         }
@@ -975,32 +939,34 @@ async function openReview(owner) {
         const sectionName = {intro:"前奏", interlude:"间奏", outro:"尾奏"}[row.audio_section];
         const audioHint = row.audio_role === "vocal" ? "检测到识别人声" :
           (row.audio_role === "instrumental" ? `疑似${sectionName || "无人声段"}` : "人声状态需试听确认");
-        element("span", `${audioHint}；人物剧情和空镜不使用人声参考。`,
+        element("span", `音频判断：${audioHint}。选择后会立即重写本段导演简报；人物氛围和空镜不会使用人声参考。`,
           shotControl, "h3lv-shot-control-help");
       }
-      const advanced = element('details', undefined, inner, 'h3lv-shot-advanced');
-      const advancedSummary = element('summary', '高级设置', advanced);
-      element('p','“本段怎么拍”填写后按你的要求扩写，留空才使用自动简报。以下手写提示词仅用于直连接法。',advanced,'h3lv-help');
-      shotIntent=document.createElement('textarea');
-      if (!materialControls) {element('p','动作与运镜（旧项目）',advanced,'h3lv-help'); advanced.append(shotIntent);}
-      shotIntent.value=row.shot_intent || '';
-      shotIntent.placeholder='例如：女人走出房间，镜头缓慢跟随。留空则按图片和自动简报生成。';
-      shotIntent.oninput=markDirty;
+      const promptActions = element("div", undefined, inner, "h3lv-actions h3lv-prompt-actions");
       const prompt = document.createElement("textarea");
       prompt.value = row.prompt || "";
-      let briefSource=row.brief_source || 'legacy';
+      let promptEdited = false;
+      prompt.oninput = () => {promptEdited = true; markDirty();};
       if (visualTypeSelect) {
         let currentVisualType = visualTypeSelect.value;
         visualTypeSelect.onchange = async () => {
           const nextVisualType = visualTypeSelect.value;
           if (nextVisualType === currentVisualType) return;
+          if (promptEdited && !await confirmDialog({
+            title: "切换画面类型会重写当前导演简报",
+            message: "你已手动修改过这一段导演简报。继续切换将用新画面类型的规则结果覆盖它。",
+            confirmText: "重写导演简报",
+            tone: "warning",
+          })) {
+            visualTypeSelect.value = currentVisualType;
+            return;
+          }
           visualTypeSelect.disabled = true;
           try {
             const result = await request(endpoint("/brief-preview"), {
               revision:plan.revision, index:row.index, visual_type:nextVisualType});
             prompt.value = result.prompt;
-            briefSource='automatic';
-            updateAdvancedLabel();
+            promptEdited = false;
             currentVisualType = nextVisualType;
             markDirty();
           } catch (error) {
@@ -1011,39 +977,26 @@ async function openReview(owner) {
           }
         };
       }
-      const directPrompt = element("details", undefined, advanced, "h3lv-direct-prompt");
+      actionButton(promptActions, "编辑本段导演简报", async () => {
+        const updated = await editPromptDialog(row.index, prompt.value);
+        if (updated === null || updated === prompt.value) return;
+        prompt.value = updated;
+        prompt.dispatchEvent(new Event("input"));
+      }, "prompt-edit");
+      const directPrompt = element("details", undefined, inner, "h3lv-direct-prompt");
       element("summary", "手写提示词（segment_prompt 直连，可选）", directPrompt);
-      element("p", "此处文字由 MV Generator 节点的 segment_prompt 原样输出。默认多图扩写接法不读取这里；只有手动把 segment_prompt 接到 H3 的 prompt 时才使用。",
+      element("p", "此处文字由长视频节点的 segment_prompt 原样输出。默认多图扩写接法不读取这里；只有手动把 segment_prompt 接到 H3 的 prompt 时才使用。",
         directPrompt, "h3lv-help");
       const finalPrompt = element("textarea", undefined, directPrompt, "h3lv-direct-prompt-editor");
       finalPrompt.value = row.final_prompt || "";
       finalPrompt.placeholder = "粘贴或输入本段要直接发送给 H3 的提示词。插件不扩写、不校验、不回退。";
       finalPrompt.spellcheck = false;
-      function updateAdvancedLabel() {
-        advancedSummary.textContent = '高级设置' + (finalPrompt.value ? ' · 已有手写提示词' : '');
-      }
-      finalPrompt.oninput = () => {updateAdvancedLabel(); markDirty();};
-      updateAdvancedLabel();
-      rows.push({end, prompt, finalPrompt, shotIntent, getBriefSource:()=>briefSource, note, materialControls, visualType:visualTypeSelect,
+      finalPrompt.oninput = markDirty;
+      rows.push({end, prompt, finalPrompt, note, materialControls, visualType:visualTypeSelect,
         refs: rowRefs, renderRefs: renderReferences, duration, time,
         generationFrames, editFrames, audio:segmentAudio});
       details.push(card);
       const resultControls = element("div", undefined, resultPanel || inner, "h3lv-result-controls");
-      const live=element('p','',resultControls,'h3lv-live-progress');
-      live.dataset.index=String(row.index);
-      if (busy(plan) && plan.progress?.index===row.index) live.textContent=progressText(plan);
-      if (row.job?.backend === "runninghub") {
-        element("p", `RunningHub · ${row.job.task_id || "创建结果未知"}${row.job.provider_status ? ` · ${row.job.provider_status}` : ""}`, resultControls, "h3lv-job");
-        if (row.job.status === "creating_unknown") {
-          const taskId = element("input", undefined, resultControls);
-          taskId.placeholder = "核对RH任务列表后填写此段任务ID";
-          taskId.setAttribute("aria-label", "RH任务ID");
-          actionButton(resultControls, "绑定已有RH任务", async () => {
-            await request(endpoint("/rh-recover"), {index:row.index, task_id:taskId.value});
-            await load();
-          });
-        }
-      }
       if (row.job || needsReplacement(row)) {
         element("p", `生成状态：${row.job?.status || "待生成"}${needsReplacement(row) ? ` · ${row.regeneration_reason || "需要重新生成"}` : ""}`+
           `${row.job?.error ? ` · ${row.job.error}` : ""}`, resultControls, "h3lv-job");
@@ -1052,14 +1005,11 @@ async function openReview(owner) {
           if (!plan.approved) throw new Error("请先保存并确认分段方案。");
           if (!await confirmDialog({
             title: `重新生成第 ${row.index+1} 段？`,
-            message: "本次只生成当前段，保留旧成功版本。如果修改了RH云端采样、提示词来源等全局配置，其他旧段会标为待更新，继续整片生成时才重跑。",
+            message: "只重新生成当前段，其他完成段不会重跑；当前成功版本会保留，生成失败时可以恢复。",
             confirmText: "重新生成",
           })) return;
-          status.textContent=`第 ${row.index+1} 段 · 正在准备重做请求，尚未确认云端接收`;
-          canvasProgress(owner,status.textContent);
           const payload = await buildGenerationPayload();
           await request(endpoint("/regenerate"), {...payload, index: row.index});
-          toast('重做请求已接收',`第 ${row.index+1} 段开始准备；RH 是否接收请看阶段状态。`);
           await load();
         }, "segment-run");
       }
@@ -1123,38 +1073,16 @@ async function openReview(owner) {
     if (plan.final_preview) showFinalOnVideoNode(plan.final_preview, plan.id, plan.video_output_id);
     dirty = false; selected = Math.min(selected, plan.segments.length-1);
     status.textContent = statusText(plan);
-    canvasProgress(owner,canvasProgressText(plan));
-    renderFailure(errorCard, plan.error ? (plan.error_info || {
-      summary:"旧任务失败记录", reason:plan.error,
-      action:"旧记录可能没有保存节点详情，请下载错误日志核对；不能仅凭总错误判断为提示词问题。"
-    }) : null, {locate: (id, type) => {
-      if (dirty) {
-        toast("请先保存修改", "保存分段修改后再定位节点，避免丢失未保存内容。", "warn"); return;
-      }
-      const node = app.graph?.getNodeById(id);
-      if (!node || (type && node.comfyClass !== type)) {
-        toast("当前画布没有对应节点", "请打开生成时使用的本地工作流核对。", "warn"); return;
-      }
-      app.canvas.selectNode(node);
-      app.canvas.centerOnNode(node);
-      shade.style.display = "none";
-      toast("已定位节点", "修复后重新打开分段面板继续。");
-      canvas.disposeTimeline?.(); shade.remove();
-    }});
-    status.textContent += ` · ${plan.generation_backend === "runninghub" ? "RunningHub" : "本地"}`;
     status.classList.remove("is-dirty");
     const failedIndex = plan.segments.findIndex(row => row.job?.status === "failed");
     runButton.textContent = failedIndex >= 0 ? `▶ 重试第 ${failedIndex+1} 段并继续` :
-      "开始 / 继续生成";
-    runButton.disabled=busy(plan);
-    runButton.dataset.busy=String(busy(plan));
+      (["paused", "stopped"].includes(plan.run_status) ? "▶ 继续顺序生成" : "▶ 开始顺序生成");
     notice.textContent = analysis.available === false ? analysis.reason :
       `诊断：${analysis.phrases?.length || 0} 个识别句段 · ${analysis.sections?.length || 0} 个疑似无人声区 · `+
       `${analysis.rhythm?.tempo_bpm ? `约 ${analysis.rhythm.tempo_bpm} BPM（仅次级参考）` : "未取得稳定节拍参考"}`+
       ` · 运镜：${plan.mode === "speaking" ? "口播固定机位规则" : "唱歌动态规则"}`+
       `${analysis.legacy_notice ? ` · ${analysis.legacy_notice}` : ""}`;
     renderCards();
-    segmentsBody.querySelectorAll('.segment-run').forEach(button=>{button.disabled=busy(plan);button.dataset.busy=String(busy(plan));});
     updateSelected(selected);
     if (details[selected]) details[selected].open = true;
     if (plan.final_video && plan.final_preview?.filename) {
@@ -1175,27 +1103,17 @@ async function openReview(owner) {
     }
   }
 
-  async function saveDraft(splitTime, removeCut) {
+  async function saveDraft() {
     let revision = plan.revision;
-    if (dirty || splitTime !== undefined || removeCut !== undefined) {
+    if (dirty) {
       const saved = await request(endpoint("/edit"), {revision,
-        ...(splitTime !== undefined ? {split_time:splitTime} : {}),
-        ...(removeCut !== undefined ? {remove_cut:removeCut} : {}),
         reference_default_count: defaultSelect.value === "all" ? null : Number(defaultSelect.value),
         ...(plan.materials_version ? {materials:{refs:defaultEditor.refs, note:defaultEditor.getNote()}} : {}),
         segments: rows.map(row => ({end: Number(row.end.value), prompt: row.prompt.value,
-          shot_intent:row.shotIntent.value, brief_source:row.getBriefSource(),
-          ...(row.materialControls?.getRequest() !== undefined ? {shot_request:row.materialControls.getRequest()} : {}),
           final_prompt: row.finalPrompt.value,
           material_note: row.materialControls ? row.materialControls.getNote() : row.note.value, refs: row.refs,
           ...(row.materialControls ? {reference_source:row.materialControls.source.value,
             visual_type:row.visualType.value, brief_matches_visual_type:true} : {})}))});
-      if (splitTime !== undefined && saved.segments.length !== rows.length+1) {
-        throw new Error('后台尚未加载增加切点功能，请重启ComfyUI并刷新页面后重试。');
-      }
-      if (removeCut !== undefined && saved.segments.length !== rows.length-1) {
-        throw new Error('后台尚未加载删除切点功能，请重启ComfyUI并刷新页面后重试。');
-      }
       plan = saved; revision = saved.revision; dirty = false;
     }
     return revision;
@@ -1219,11 +1137,9 @@ async function openReview(owner) {
   actionButton(controls, "重新分析分段", async () => {
     await reanalyzeProject(owner);
   });
-  const runButton = actionButton(controls, "开始 / 继续生成", async () => {
+  const runButton = actionButton(controls, "▶ 开始顺序生成", async () => {
     if (dirty) throw new Error("请先保存修改并重新确认。");
     if (!plan?.approved) throw new Error("请先确认分段。");
-    status.textContent='正在准备提交请求，尚未确认生成任务接收';
-    canvasProgress(owner,status.textContent);
     const payload = await buildGenerationPayload();
     const failedIndex = plan.segments.findIndex(row => row.job?.status === "failed");
     if (failedIndex >= 0) {
@@ -1244,14 +1160,13 @@ async function openReview(owner) {
       payload.replace_snapshot = true;
     }
     await request(endpoint("/run"), payload);
-    toast('生成请求已接收','阶段状态会显示扩写、上传、排队、生成和合并进展。');
     clearVideoNodePreview(payload.video_id);
     await load();
   }, "run");
   actionButton(controls, "当前段完成后暂停", async () => {
     await request(endpoint("/pause"), {}); await load();
   }, "pause");
-  actionButton(controls, "停止后续生成", async () => {
+  actionButton(controls, "■ 停止后续生成", async () => {
     if (!await confirmDialog({
       title: "停止提交后续片段？",
       message: "当前正在生成的片段会正常完成，完成后不再提交新的片段。",
@@ -1261,9 +1176,7 @@ async function openReview(owner) {
     })) return;
     await request(endpoint("/stop"), {}); await load();
   }, "stop");
-  actionButton(controls, "仅重新合并", async () => {
-    status.textContent='已发出合并请求，正在等待处理结果；原成片保留。';
-    canvasProgress(owner,status.textContent);
+  actionButton(controls, "仅重新合成", async () => {
     await request(endpoint("/assemble"), {}); await load();
   });
   actionButton(controls, "刷新状态", load);
@@ -1278,10 +1191,6 @@ async function openReview(owner) {
     try {
       const latest = await request(endpoint());
       status.textContent = statusText(latest);
-      canvasProgress(owner,canvasProgressText(latest));
-      segmentsBody.querySelectorAll('.h3lv-live-progress').forEach(item=>{
-        item.textContent=busy(latest) && Number(item.dataset.index)===latest.progress?.index ? progressText(latest) : '';
-      });
       const oldDone = plan.segments.filter(row => row.job?.status === "completed").length;
       const newDone = latest.segments.filter(row => row.job?.status === "completed").length;
       if (latest.run_status !== plan.run_status || oldDone !== newDone) await load();
@@ -1293,35 +1202,10 @@ app.registerExtension({
   name: "PixelFantasy.H3LongVideo",
   afterConfigureGraph() {
     setTimeout(() => restoreFinalVideoPreview(), 0);
-    setTimeout(async () => {
-      for (const node of app.graph?._nodes || []) {
-        if (node.comfyClass !== 'H3LVUnified') continue;
-        const pid=node.properties?.h3lv_project || node.widgets?.find(w=>w.name==='project_id')?.value;
-        if (!/^[0-9a-f]{32}$/.test(pid || '')) continue;
-        try {canvasProgress(node,canvasProgressText(await request(`/h3lv/project/${pid}`)));}
-        catch {canvasProgress(node,'状态读取失败，请打开分段面板查看。');}
-      }
-    }, 0);
   },
   async setup() {
     if (!app.__h3lvFinalListenerInstalled) {
       app.__h3lvFinalListenerInstalled = true;
-      api.addEventListener('h3lv-progress', async event=>{
-        const data=event.detail || {};
-        const nodes=(app.graph?._nodes || []).filter(node=>node.comfyClass==='H3LVUnified' &&
-          (node.properties?.h3lv_project || node.widgets?.find(w=>w.name==='project_id')?.value)===data.project_id);
-        if (!nodes.length) return;
-        const text=progressText({...data,run_status:['completed','failed','paused'].includes(data.progress?.stage) ? data.progress.stage : 'running'});
-        for (const node of nodes) canvasProgress(node,text);
-        // The stage event has no completed jobs or task ID; read the saved state only.
-        try {
-          const latest=await request(`/h3lv/project/${data.project_id}`);
-          for (const node of nodes) {
-            const current=node.properties?.h3lv_project || node.widgets?.find(w=>w.name==='project_id')?.value;
-            if (current===data.project_id) canvasProgress(node,canvasProgressText(latest));
-          }
-        } catch {} // Keep the received stage if the read-only refresh is unavailable.
-      });
       api.addEventListener("h3lv-final", event => {
         const data = event.detail || {};
         showFinalOnVideoNode(data.preview, data.project_id, data.video_id);
@@ -1406,20 +1290,11 @@ app.registerExtension({
           if (widget) widget.value = values[index];
         });
       }
-      const result = oldConfigured?.call(this, info);
-      const audioMode=this.widgets?.find(widget=>widget.name==='audio_processing');
-      if(audioMode && !['直接使用','提取人声'].includes(audioMode.value))audioMode.value='提取人声';
-      const vocalsIndex = this.inputs?.findIndex(input => input.name === "vocals");
-      if (vocalsIndex >= 0) this.removeInput(vocalsIndex);
-      syncHiddenWidgetConnections(this);
-      alignProjectNode(this);
-      return result;
+      return oldConfigured?.call(this, info);
     };
     const oldCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
       const result = oldCreated?.apply(this, arguments);
-      const vocalsIndex = this.inputs?.findIndex(input => input.name === "vocals");
-      if (vocalsIndex >= 0) this.removeInput(vocalsIndex);
       const directorLabels = {
         asr_python: "语音识别 Python 覆盖（可选）",
         asr_model: "语音识别模型覆盖（可选）",
@@ -1428,32 +1303,22 @@ app.registerExtension({
       for (const item of this.widgets || []) {
         if (directorLabels[item.name]) item.label = directorLabels[item.name];
       }
-      for (const name of ["mode", "director_mode", "project_id", "segment_index"]) {
+      for (const name of ["director_mode", "project_id", "segment_index"]) {
         const internal = this.widgets?.find(item => item.name === name);
         setWidgetHidden(internal, true);
       }
-      const backendLabels = {backend:"生成后端",audio_processing:"音频处理", rh_workflow_id:"RH 工作流 ID",
-        rh_region:"RH 区域", rh_instance_type:"RH 实例"};
-      for (const item of this.widgets || []) {
-        if (backendLabels[item.name]) item.label = backendLabels[item.name];
-      }
-      for(const output of this.outputs || []) {
-        if(output.name==='original_audio_padded')output.label='分段原声';
-        if(output.name==='vocals_padded')output.label='参考人声';
+      const inputLabels = {vocals: "分离人声（可选）"};
+      for (const input of this.inputs || []) {
+        if (inputLabels[input.name]) input.label = inputLabels[input.name];
       }
       const rulesWidget = this.addWidget("button", "运镜规则：查看与修改", null,
         () => openDirectorRules(this).catch(error => messageDialog({
           title: "无法打开运镜规则", message: error.message, tone: "error"})));
       rulesWidget.serialize = false;
 
-      this.addWidget("button", "检查 RH 配置（不生成）", null,
-        () => checkRunningHub().catch(error => messageDialog({
-          title: "RH配置检查未通过", message: error.message, tone: "error"}))).serialize = false;
-
       const technicalWidgets = ["asr_python", "asr_model", "asr_device"]
         .map(name => this.widgets?.find(item => item.name === name)).filter(Boolean);
       for (const item of technicalWidgets) setWidgetHidden(item, true);
-      syncHiddenWidgetConnections(this);
       const reanalyzeWidget = this.addWidget("button", "重新分析并分段", null,
         () => reanalyzeProject(this).catch(error => messageDialog({
           title: "无法重新分析分段", message: error.message, tone: "error"})));
@@ -1465,8 +1330,7 @@ app.registerExtension({
       this.addWidget("button", "下载错误日志", null,
         () => downloadErrorLog().catch(error => messageDialog({
           title: "无法下载错误日志", message: error.message, tone: "error"}))).serialize = false;
-      canvasProgress(this,'尚未准备项目 · 请先重新分析并分段');
-      setTimeout(() => {alignProjectNode(this);resizeNodeToVisibleWidgets(this);}, 0);
+      setTimeout(() => resizeNodeToVisibleWidgets(this), 0);
       return result;
     };
     const oldExecuted = nodeType.prototype.onExecuted;

@@ -6,23 +6,6 @@ from pathlib import Path
 import site
 
 
-def load_audio(path):
-    """Read our managed WAV as the 16 kHz float32 array Whisper accepts."""
-    from math import gcd
-    import numpy as np
-    import soundfile as sf
-    from scipy.signal import resample_poly
-
-    wave, rate = sf.read(path, dtype="float32", always_2d=True)
-    if not len(wave):
-        raise ValueError("Transcription audio is empty.")
-    wave = wave.mean(axis=1)
-    if rate != 16000:
-        divisor = gcd(rate, 16000)
-        wave = resample_poly(wave, 16000//divisor, rate//divisor)
-    return np.ascontiguousarray(wave, dtype=np.float32)
-
-
 def missing_model_files(directory):
     """Check required local assets, including the tokenizer to avoid a hidden download."""
     root = Path(directory)
@@ -80,7 +63,7 @@ def main():
             compute_type="float16" if device == "cuda" else "int8",
             download_root=str(download_root), local_files_only=True)
         try:
-            iterator, info = model.transcribe(audio, language="zh", beam_size=5,
+            iterator, info = model.transcribe(args.audio, language="zh", beam_size=5,
                 temperature=0.0, word_timestamps=True, vad_filter=False,
                 condition_on_previous_text=False)
             segments = []
@@ -99,9 +82,6 @@ def main():
             del model
 
     try:
-        # Avoid faster-whisper 1.2.1's av.open(metadata_errors=...) path, which
-        # PyAV 19 removed. No shared av function or dependency is changed.
-        audio = load_audio(args.audio)
         model_path = resolve_model_path(args.model, download_root)
         if args.device == "cpu":
             result = transcribe("cpu")

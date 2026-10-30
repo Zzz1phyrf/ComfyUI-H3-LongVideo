@@ -11,8 +11,6 @@ def effective(plan, row, directory=None, require=False):
         raise ValueError('参考图来源无效。')
     names = plan.get('default_refs', []) if source == 'default' else row.get('refs', [])
     note = plan.get('default_material_note', '') if source == 'default' else row.get('material_note', '')
-    if 'shot_request' in row:
-        note = row['shot_request']
     names = normalize_reference_names(names, directory)
     kind = row.get('visual_type', 'performance')
     if kind not in ('performance', 'atmosphere', 'environment'):
@@ -26,18 +24,8 @@ def packet(plan, row, directory):
     from .core import reference_directory, inside
     value = effective(plan, row, directory, require=True)
     paths = [inside(reference_directory(directory), reference_directory(directory)/name) for name in value['refs']]
-    # Explicit shot requests and automatic direction are mutually exclusive.
-    # Retain historical briefs on disk, but never send them as hidden instructions.
-    from .core import segment_brief
-    intent = '' if 'shot_request' in row else str(row.get('shot_intent') or '').strip()
-    explicit = bool(value['material_note'] or intent)
-    brief = '' if explicit else segment_brief(plan, row, row.get('camera_start', 'medium shot'),
-                                             row.get('camera_end', 'medium shot'), row.get('camera_move', ''), '')
     return {**value, 'project_id': plan['id'], 'segment_index': row['index'],
-            'contract_version': 3 if 'shot_request' in row else 2,
-            'shot_intent': intent,
-            'brief_source': 'none' if explicit else 'automatic',
-            'mode': plan['mode'], 'brief': brief, 'duration': row['duration'],
+            'mode': plan['mode'], 'brief': row['prompt'], 'duration': row['duration'],
             'generation_frames': row['generation_frames'],
             'generation_seconds': row['generation_frames']/24,
             'audio_role': row.get('audio_role', 'uncertain'),

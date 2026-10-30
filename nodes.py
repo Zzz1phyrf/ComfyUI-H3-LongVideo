@@ -13,9 +13,8 @@ import uuid
 
 from . import director_rules
 from .diagnostics import logged
-from .storage import MV_PREFIX, output_path
-from .core import (audio_file, audit_asr_transcript, decorate, project_path,
-                   read_plan, segment_cache_key, segmentation, validate_segment_brief, write_plan)
+from .core import (audio_file, audit_asr_transcript, decorate, fingerprint, project_path,
+                   read_plan, segmentation, validate_segment_brief, write_plan)
 
 
 HDEMUCS_MODEL_URL = "https://download.pytorch.org/torchaudio/models/hdemucs_high_trained.pt"
@@ -26,7 +25,8 @@ HDEMUCS_VERIFIED_SIGNATURE = None
 
 
 def storage_root():
-    return output_path(MV_PREFIX)
+    import folder_paths
+    return Path(folder_paths.get_output_directory()) / "H3LongVideo"
 
 
 def data_root():
@@ -287,20 +287,18 @@ def run_asr(project):
 class Analyze:
     @classmethod
     def INPUT_TYPES(cls):
-        # Keep the serialized slot for existing singing workflows; hidden in UI.
-        return {"required": {"audio": ("AUDIO",), "mode": (["singing"],),
+        return {"required": {"audio": ("AUDIO",), "mode": (["singing", "speaking"],),
             "max_seconds": ("FLOAT", {"default": 15, "min": 5, "max": 15, "step": .1}),
             "target_seconds": ("FLOAT", {"default": 11, "min": 5, "max": 15, "step": .1}),
             "asr_python": ("STRING", {"default": ""}), "asr_model": ("STRING", {"default": ""}),
             "asr_device": (["auto", "cuda", "cpu"],),
             # Hidden and ignored compatibility slot retained for saved projects.
             "director_mode": ("STRING", {"default": "本地规则"}),
-            }, "optional": {"vocals": ("AUDIO",),
-                "audio_processing": (["直接使用","提取人声"], {"default":"提取人声"})}}
+            }, "optional": {"vocals": ("AUDIO",)}}
     RETURN_TYPES = ("STRING", "INT")
     RETURN_NAMES = ("project_id", "segment_count")
     FUNCTION = "analyze"
-    CATEGORY = "MiniMax H3"
+    CATEGORY = "像素幻想/H3 长视频"
     OUTPUT_NODE = True
 
     @classmethod
@@ -309,23 +307,25 @@ class Analyze:
 
     @logged("audio_analysis")
     def analyze(self, audio, mode, max_seconds, target_seconds, asr_python, asr_model,
-                asr_device="auto", director_mode="本地规则", vocals=None, audio_processing="提取人声"):
-        require_mv_mode(mode)
+                asr_device="auto", director_mode="本地规则", vocals=None):
         import soundfile as sf
         import numpy as np
         mix, sr = audio_array(audio)
         audio_seed = hashlib.sha256(np.ascontiguousarray(mix).tobytes()).hexdigest()[:16]
         rules = director_rules.read_rules(rules_path())
-        from .audio_preparation import cache_reference,validate_mode
-        validate_mode(audio_processing)
+        if vocals is not None:
+            voice, vsr = audio_array(vocals)
+            if vsr != sr or len(voice) != len(mix):
+                raise ValueError("原曲与人声必须采样率、样本数一致；请提供同版本未裁切的人声。")
+        else:
+            voice = separate(mix, sr) if mode=="singing" else mix.copy()
         project_id = uuid.uuid4().hex
         root = data_root()
         directory = project_path(root, project_id)
         for name in ("state", "audio", "takes", "cache", "work"):
             (directory/name).mkdir(parents=True, exist_ok=True)
         sf.write(audio_file(directory, "source.wav"), mix, sr, subtype="FLOAT")
-        prepared=cache_reference(directory,audio_processing,external=audio_array(vocals) if vocals is not None else None)
-        voice=sf.read(audio_file(directory,"vocals.wav"),dtype='float32',always_2d=True)[0]
+        sf.write(audio_file(directory, "vocals.wav"), voice, sr, subtype="FLOAT")
         transcript = audit_asr_transcript(run_asr(directory), len(voice)/sr)
         transcript_temp = directory/"state"/f".transcript-{uuid.uuid4().hex}.tmp"
         transcript_temp.write_text(
@@ -346,7 +346,6 @@ class Analyze:
             "revision": 1, "created": time.time(),
             "mode": mode, "max_seconds": float(max_seconds), "target_seconds": float(target_seconds),
             "sample_rate": sr, "samples": len(mix), "duration": len(mix)/sr,
-            "audio_processing":audio_processing,"audio_preparation":prepared,
             "materials_version": 1, "default_refs": [], "default_material_note": "",
             "director": {"mode": "rule", "performance_intensity": "auto",
                          "note": "", "rule_config": rules["config"],
@@ -379,13 +378,13 @@ class LoadSegment:
                     "filename_prefix", "segment_material") + tuple(f"image_{i+1}" for i in range(6)) \
                    + ("segment_prompt", "fps")
     FUNCTION = "load"
-    CATEGORY = "MiniMax H3"
+    CATEGORY = "像素幻想/H3 长视频"
 
     @classmethod
     def IS_CHANGED(cls, project_id, segment_index):
         try:
             plan = read_plan(data_root(), project_id)
-            return segment_cache_key(plan, segment_index)+str(plan.get("approved", False))
+            return fingerprint(plan)+str(plan.get("approved", False))
         except (ValueError, FileNotFoundError):
             return float("nan")
 
@@ -397,10 +396,6 @@ class LoadSegment:
         if not str(project_id).strip():
             raise ValueError("尚未分析音频。请先运行 H3 音频分析节点并确认分段。")
         plan = read_plan(data_root(), project_id)
-        require_mv_mode(plan.get("mode"))
-        if plan.get('audio_preparation'):
-            from .audio_preparation import verify_reference
-            verify_reference(project_path(data_root(),project_id),plan['audio_preparation'])
         if not plan.get("approved"):
             raise ValueError("音频已经分析，但分段尚未确认。请先在分段审核界面点击“保存并确认”。")
         if not 0 <= segment_index < len(plan["segments"]):
@@ -421,39 +416,33 @@ class LoadSegment:
         material = packet(plan, row, directory) if plan.get('materials_version') else {}
         pictures = images(material) if material else (None,)*6
         return (*outputs, row["generation_frames"],
-                f"{MV_PREFIX}/projects/{project_id}/takes/seg_{segment_index:04d}", material,
+                f"H3LongVideo/projects/{project_id}/takes/seg_{segment_index:04d}", material,
                 *pictures, str(row.get("final_prompt") or ""), 24.0)
 
 
 class Unified:
     """Analyze on native partial execution; load one approved segment during controller runs."""
-    DESCRIPTION = "歌曲MV的分段审核、人工微调、逐段预览和合并。默认执行本地画布，可选RunningHub已有工作流；RH采样配置在云端调整，提示词仍使用本地MV Prompt Expander或segment_prompt。"
     @classmethod
     def INPUT_TYPES(cls):
         analyze = Analyze.INPUT_TYPES()
         required = dict(analyze["required"])
         required.update(project_id=("STRING", {"default": ""}),
                         segment_index=("INT", {"default": 0, "min": 0, "max": 10000}))
-        return {"required": required, "optional": {
-            "backend": (["本地", "RunningHub"],),
-            "rh_workflow_id": ("STRING", {"default": "", "tooltip": "RunningHub工作流ID；本地模式留空。RH采样、seed和分辨率以云端工作流为准。"}),
-            "rh_region": (["海外版", "国内版"],),
-            "rh_instance_type": (["ultra", "plus", "default"],),
-            "audio_processing": (["直接使用","提取人声"], {"default":"提取人声"})}}
+        return {"required": required, "optional": analyze.get("optional", {})}
 
     RETURN_TYPES = LoadSegment.RETURN_TYPES
     RETURN_NAMES = LoadSegment.RETURN_NAMES
     FUNCTION = "process"
-    CATEGORY = "MiniMax H3"
+    CATEGORY = "像素幻想/H3 长视频"
     OUTPUT_NODE = True
 
     @classmethod
-    def IS_CHANGED(cls, project_id="", segment_index=0, **kwargs):
+    def IS_CHANGED(cls, project_id="", **kwargs):
         if str(project_id).strip():
             try:
                 plan = read_plan(data_root(), project_id)
                 if plan.get("approved"):
-                    return segment_cache_key(plan, segment_index)
+                    return fingerprint(plan)
             except (ValueError, FileNotFoundError):
                 pass
         return float("nan")
@@ -461,24 +450,20 @@ class Unified:
     @logged("long_video_node")
     def process(self, audio, mode, max_seconds, target_seconds, asr_python, asr_model,
                 asr_device="auto", director_mode="本地规则", project_id="", segment_index=0,
-                vocals=None, backend="本地", rh_workflow_id="", rh_region="海外版", rh_instance_type="ultra", audio_processing="提取人声"):
-        require_mv_mode(mode)
+                vocals=None):
         if str(project_id).strip():
             try:
                 plan = read_plan(data_root(), project_id)
                 if plan.get("approved"):
-                    if audio_processing!=plan.get('audio_processing','提取人声'):
-                        raise ValueError('音频处理已改变，请重新分析并创建新项目；旧片段保留。')
                     return LoadSegment().load(project_id, int(segment_index))
             except FileNotFoundError:
                 pass
         analyzed = Analyze().analyze(audio, mode, max_seconds, target_seconds,
-                                     asr_python, asr_model, asr_device, director_mode,
-                                     audio_processing=audio_processing)
+                                     asr_python, asr_model, asr_device, director_mode, vocals)
         # Native Run targets only this node. These placeholders are not sent downstream;
         # the approved controller run replaces them with the selected segment outputs.
         return {"ui": analyzed["ui"],
-                "result": (audio, audio, 0, "", {}, *((None,)*6), "", 24.0)}
+                "result": (audio, vocals or audio, 0, "", {}, *((None,)*6))}
 
 
 def math_ceil_samples(frames, sr):
@@ -487,30 +472,5 @@ def math_ceil_samples(frames, sr):
 
 from .expansion import PromptExpand
 
-
-def require_mv_mode(mode):
-    if mode != "singing":
-        raise ValueError("MV Generator 仅用于歌曲视频。口播请使用 MiniMax H3 · Talking Avatar；旧口播项目和文件保留。")
-
-
 NODE_CLASS_MAPPINGS = {"H3LVUnified": Unified, "H3LVPromptExpand": PromptExpand}
-NODE_DISPLAY_NAME_MAPPINGS = {"H3LVUnified": "MiniMax H3 · MV Generator", "H3LVPromptExpand": "MiniMax H3 · MV Prompt Expander"}
-
-from .talking_rh import TalkingRH, TalkingAvatar
-NODE_CLASS_MAPPINGS["H3LVTalkingRH"] = TalkingRH
-NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingRH"] = "MiniMax H3 · Talking Avatar (Legacy)"
-NODE_CLASS_MAPPINGS["H3LVTalkingAvatar"] = TalkingAvatar
-NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingAvatar"] = "MiniMax H3 · Talking Avatar"
-from .talking_rh.local import StaticVideoMask
-NODE_CLASS_MAPPINGS["H3LVTalkingVideoMask"] = StaticVideoMask
-NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingVideoMask"] = "H3口播内部静态遮罩"
-from .talking_rh.local_weights import OwnedClipLoader
-NODE_CLASS_MAPPINGS["H3LVTalkingClipLoader"] = OwnedClipLoader
-NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingClipLoader"] = "H3口播内部CLIP读取"
-from .talking_rh.canvas import SegmentState, TalkingMerge, FrozenPrefix
-NODE_CLASS_MAPPINGS["H3LVTalkingSegmentState"] = SegmentState
-NODE_CLASS_MAPPINGS["H3LVTalkingMerge"] = TalkingMerge
-NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingSegmentState"] = "H3口播分段状态"
-NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingMerge"] = "MiniMax H3 · Talking Merge"
-NODE_CLASS_MAPPINGS["H3LVTalkingFrozenPrefix"] = FrozenPrefix
-NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingFrozenPrefix"] = "H3口播 · 冻结前缀校验恢复"
+NODE_DISPLAY_NAME_MAPPINGS = {"H3LVUnified": "H3 长视频 · 音频分析与顺序生成", "H3LVPromptExpand": "H3 长视频 · 分镜提示词生成器"}

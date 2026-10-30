@@ -130,9 +130,9 @@ class DiagnosticsTests(unittest.TestCase):
         controller = importlib.import_module("h3lv_test.controller")
         with patch.object(nodes, "audio_array", side_effect=ValueError("invalid audio")):
             with self.assertRaisesRegex(ValueError, "invalid audio"):
-                nodes.Unified().process(None, "singing", 15, 10, "", "", "auto")
+                nodes.Unified().process(None, "speaking", 15, 10, "", "", "auto")
         packet = {"project_id": "abc", "segment_index": 2, "paths": ["fixture.png"], "hashes": ["fixture"],
-                  "material_note": "", "visual_type": "performance", "mode": "singing",
+                  "material_note": "", "visual_type": "performance", "mode": "speaking",
                   "brief": "PRIVATE-PROMPT", "duration": 10, "generation_frames": 242,
                   "generation_seconds": 242 / 24, "cache_dir": self.directory.name + "/cache",
                   "audio_role": "vocal", "audio_section": "vocal", "audio_role_reason": "fixture"}
