@@ -13,7 +13,8 @@ import uuid
 
 from . import director_rules
 from .diagnostics import logged
-from .core import (audio_file, audit_asr_transcript, decorate, fingerprint, project_path,
+from .core import (MAX_SEGMENT_SECONDS, MIN_ANALYSIS_SECONDS, audio_file, audit_asr_transcript,
+                   decorate, fingerprint, project_path,
                    read_plan, segmentation, validate_segment_brief, write_plan)
 
 
@@ -288,8 +289,10 @@ class Analyze:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"audio": ("AUDIO",), "mode": (["singing", "speaking"],),
-            "max_seconds": ("FLOAT", {"default": 15, "min": 5, "max": 15, "step": .1}),
-            "target_seconds": ("FLOAT", {"default": 11, "min": 5, "max": 15, "step": .1}),
+            "max_seconds": ("FLOAT", {"default": 15, "min": MIN_ANALYSIS_SECONDS,
+                                      "max": MAX_SEGMENT_SECONDS, "step": .1}),
+            "target_seconds": ("FLOAT", {"default": 11, "min": MIN_ANALYSIS_SECONDS,
+                                         "max": MAX_SEGMENT_SECONDS, "step": .1}),
             "asr_python": ("STRING", {"default": ""}), "asr_model": ("STRING", {"default": ""}),
             "asr_device": (["auto", "cuda", "cpu"],),
             # Hidden and ignored compatibility slot retained for saved projects.

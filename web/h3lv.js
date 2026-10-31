@@ -442,6 +442,28 @@ function needsReplacement(row) {
   return Boolean(row.needs_regeneration && row.job?.status === "completed" && row.job?.video);
 }
 
+// Wide-to-tight order matches the 景别 dropdown in the review panel.
+const SHOT_SIZES = [
+  ["full shot", "全身景（头顶至双脚完整入画）"],
+  ["medium shot", "中景（腰部以上）"],
+  ["medium close-up", "中近景（胸部以上）"],
+  ["close-up", "近景（头部与肩部）"],
+];
+
+function shotSizeFromBrief(text) {
+  const line = String(text || "").split("\n").find(item => item.trim().startsWith("开场构图"));
+  if (!line) return "";
+  const body = line.slice(line.indexOf("：")+1).trim().slice(0, 60);
+  const matched = [...SHOT_SIZES].sort((a, b) => b[1].length-a[1].length)
+    .find(([, label]) => body.includes(label));
+  return matched ? matched[0] : "";
+}
+
+function shotSizeShort(key) {
+  const found = SHOT_SIZES.find(item => item[0] === key);
+  return found ? found[1].split("（")[0] : "";
+}
+
 function outputPreviewUrl(preview) {
   const query = new URLSearchParams({
     filename: preview.filename,
@@ -556,6 +578,15 @@ function statusText(plan) {
 }
 
 async function openReview(owner) {
+  // 状态与项目列表必须在建 DOM 之前就绪：面板一插入 body 就能点“关闭”，
+  // 若此时还停在 await 上，回调里的 dirty/canvas 会撞上 let/const 的 TDZ。
+  let plan = null;
+  let analysis = null;
+  let rows = [];
+  let details = [];
+  let dirty = false;
+  let selected = 0;
+  let projects = await request("/h3lv/projects");
   const previous = document.getElementById("h3lv-panel");
   previous?.querySelector("canvas")?.disposeTimeline?.();
   previous?.remove();
@@ -587,7 +618,6 @@ async function openReview(owner) {
   const projectRow = element("div", undefined, header, "h3lv-project-row");
   const selectLabel = element("label", "分析项目", projectRow);
   const select = element("select", undefined, selectLabel);
-  let projects = await request("/h3lv/projects");
   function populateProjects(preferredId = select.value) {
     select.replaceChildren();
     for (const project of projects) {
@@ -647,6 +677,63 @@ async function openReview(owner) {
 
   const status = element("div", "", header, "h3lv-status");
   const controls = element("div", undefined, header, "h3lv-actions");
+  // 上限与 core.MAX_SEGMENT_SECONDS 保持一致；后端会再校验一次，这里只作输入提示。
+  const LIMIT_CEILING = 149;
+  const limitRow = element("div", undefined, header, "h3lv-limit-row");
+  const maxLimitLabel = element("label", "单段上限（秒）", limitRow);
+  const maxLimitInput = document.createElement("input");
+  maxLimitInput.type = "number"; maxLimitInput.step = ".1";
+  maxLimitInput.min = "5"; maxLimitInput.max = String(LIMIT_CEILING);
+  maxLimitLabel.append(maxLimitInput);
+  const targetLimitLabel = element("label", "目标时长（秒）", limitRow);
+  const targetLimitInput = document.createElement("input");
+  targetLimitInput.type = "number"; targetLimitInput.step = ".1";
+  targetLimitInput.min = "5"; targetLimitInput.max = String(LIMIT_CEILING);
+  targetLimitLabel.append(targetLimitInput);
+  const limitHint = element("span", "", limitRow, "h3lv-limit-hint");
+
+  // 控件必须全部建好后再绑定 handler 与状态同步，否则会撞上 const 的 TDZ。
+  function syncLimitControls() {
+    const ready = Boolean(plan?.segments?.length);
+    limitRow.hidden = !ready;
+    if (!ready) return;
+    maxLimitInput.value = String(plan.max_seconds ?? 15);
+    targetLimitInput.value = String(plan.target_seconds ?? plan.max_seconds ?? 15);
+    limitHint.textContent = `当前单段最长 ${plan.max_seconds ?? 15} 秒；改大后即可把切点拖到更长，`
+      + `不会重切已有分段（最多 ${LIMIT_CEILING} 秒）。`;
+  }
+
+  async function applyLimits() {
+    if (!plan) return;
+    const maxSeconds = Number(maxLimitInput.value);
+    const targetSeconds = Number(targetLimitInput.value);
+    try {
+      if (!Number.isFinite(maxSeconds) || !Number.isFinite(targetSeconds))
+        throw new Error("时长必须是数字。");
+      // 切点可能有未保存的改动，先落盘再改参数，避免版本号冲突。
+      const revision = await saveDraft();
+      plan = await request(endpoint("/limits"),
+        {revision, max_seconds:maxSeconds, target_seconds:targetSeconds});
+      // 同步节点参数，免得下次“重新分析分段”又回到 15 秒。
+      for (const [name, value] of [["max_seconds", maxSeconds], ["target_seconds", targetSeconds]]) {
+        const nodeWidget = owner.widgets?.find(item => item.name === name);
+        if (nodeWidget) nodeWidget.value = value;
+      }
+      owner.setDirtyCanvas?.(true, true);
+      await load();
+      toast("单段时长已更新",
+        `单段上限 ${plan.max_seconds} 秒，目标 ${plan.target_seconds} 秒；现在可以把切点拖到 ${plan.max_seconds} 秒。`,
+        "success");
+    } catch (error) {
+      syncLimitControls();
+      throw error;
+    }
+  }
+
+  const limitFailed = error => toast("时长未修改", String(error?.message || error), "error");
+  maxLimitInput.onchange = () => applyLimits().catch(limitFailed);
+  targetLimitInput.onchange = () => applyLimits().catch(limitFailed);
+
   const content = element("main", undefined, panel, "h3lv-content");
   const overview = element("section", undefined, content, "h3lv-overview");
   element("p", "先看整曲切点和风险，再逐段试听。调整完成后保存并确认；在生成工作流中点击绿色按钮启动完整循环。", overview, "h3lv-help");
@@ -673,14 +760,9 @@ async function openReview(owner) {
   const defaultMaterials = element("details", undefined, content, "h3lv-default-materials");
   let defaultEditor = null;
   const segmentsBody = element("section", undefined, content, "h3lv-segments");
-  let plan = null;
-  let analysis = null;
-  let rows = [];
-  let details = [];
-  let dirty = false;
-  let selected = 0;
   const endpoint = (suffix = "") => `/h3lv/project/${encodeURIComponent(select.value)}${suffix}`;
   const state = () => ({plan, analysis, rows, selected});
+  const MIN_SEGMENT_SECONDS = 1;
 
   function markDirty() {
     dirty = true;
@@ -739,11 +821,22 @@ async function openReview(owner) {
       item.generationFrames.textContent = `${generationFrames} 生成帧`;
     });
   }
+  let capHintAt = 0;
+  function hintCapReached() {
+    const now = Date.now();
+    if (now - capHintAt < 4000) return;
+    capHintAt = now;
+    toast("已到单段上限",
+      `当前单段最长 ${plan.max_seconds} 秒；在面板上方把“单段上限”改大即可继续拖长。`, "warn");
+  }
   function moveBoundary(index, proposed) {
     const start = index === 0 ? 0 : Number(rows[index-1].end.value);
     const nextEnd = Number(rows[index+1].end.value);
     const lower = Math.max(start+3, nextEnd-plan.max_seconds);
     const upper = Math.min(start+plan.max_seconds, nextEnd-3);
+    // 只有被 max_seconds 挡住才提示，被相邻段 3 秒下限挡住时不提。
+    if (proposed > upper+1e-6 && Math.abs(upper-(start+plan.max_seconds)) < 1e-6) hintCapReached();
+    if (proposed < lower-1e-6 && Math.abs(lower-(nextEnd-plan.max_seconds)) < 1e-6) hintCapReached();
     rows[index].end.value = Math.max(lower, Math.min(upper, proposed)).toFixed(3);
     refreshDraftDisplays();
     markDirty();
@@ -771,6 +864,8 @@ async function openReview(owner) {
       const time = element("span", `${row.start.toFixed(3)}—${row.end.toFixed(3)}s`, main, "h3lv-time");
       const duration = element("span", `${row.duration.toFixed(3)}s`, main, "h3lv-duration");
       element("span", row.reason || "未标注切点原因", summary, "h3lv-reason");
+      const summaryShot = row.shot_size_manual || row.shot_size || shotSizeFromBrief(row.prompt);
+      if (summaryShot) element("span", shotSizeShort(summaryShot), summary, "h3lv-chip neutral");
       if (needsReplacement(row)) element("span", "待重生成", summary, "h3lv-chip risk");
       else if (row.job?.status) element("span", row.job.status, summary, "h3lv-chip neutral");
       card.ontoggle = () => {
@@ -942,10 +1037,56 @@ async function openReview(owner) {
         element("span", `音频判断：${audioHint}。选择后会立即重写本段导演简报；人物氛围和空镜不会使用人声参考。`,
           shotControl, "h3lv-shot-control-help");
       }
-      const promptActions = element("div", undefined, inner, "h3lv-actions h3lv-prompt-actions");
+      // 导演简报的隐藏承载字段；景别控件会先于它写入，因此提前声明。
       const prompt = document.createElement("textarea");
-      prompt.value = row.prompt || "";
       let promptEdited = false;
+      const framingControl = element("div", undefined, inner, "h3lv-shot-control");
+      const framingLabel = element("label", "本段景别", framingControl);
+      const framingSelect = element("select", undefined, framingLabel);
+      for (const [value, label] of SHOT_SIZES) {
+        const option = element("option", label, framingSelect);
+        option.value = value;
+      }
+      const framing = {manual: row.shot_size_manual || ""};
+      const automaticFraming = () => shotSizeFromBrief(row.prompt) || row.shot_size ||
+        (plan.mode === "speaking" ? plan.director?.rule_config?.speaking?.framing || "" : "");
+      framingSelect.value = framing.manual || automaticFraming();
+      const framingHint = element("span", "", framingControl, "h3lv-shot-control-help");
+      const framingReset = actionButton(framingControl, "恢复自动", () => applyShotSize(""),
+        "reference-copy");
+      function syncFramingHint() {
+        framingHint.textContent = framing.manual
+          ? "已锁定该景别。保存后按它重写本段及后续分段的导演简报，开场构图会跟着改。"
+          : "默认读取本段导演简报“开场构图”的景别；下拉可覆盖并写入导演简报。";
+        framingReset.hidden = !framing.manual;
+      }
+      async function applyShotSize(value) {
+        const shown = framingSelect.value;
+        framingSelect.disabled = true;
+        try {
+          const result = await request(endpoint("/brief-preview"), {revision:plan.revision,
+            index:row.index,
+            visual_type:visualTypeSelect ? visualTypeSelect.value : (row.visual_type || "performance"),
+            shot_size:value});
+          framing.manual = value;
+          framingSelect.value = value || shotSizeFromBrief(result.prompt)
+            || automaticFraming() || shown;
+          prompt.value = result.prompt;
+          promptEdited = false;
+          syncFramingHint();
+          markDirty();
+        } catch (error) {
+          framingSelect.value = shown;
+          await messageDialog({title:"景别更新失败", message:error.message || String(error), tone:"error"});
+        } finally {
+          framingSelect.disabled = false;
+        }
+      }
+      framingSelect.onchange = () => applyShotSize(framingSelect.value);
+      framingReset.hidden = true;
+      syncFramingHint();
+      const promptActions = element("div", undefined, inner, "h3lv-actions h3lv-prompt-actions");
+      prompt.value = row.prompt || "";
       prompt.oninput = () => {promptEdited = true; markDirty();};
       if (visualTypeSelect) {
         let currentVisualType = visualTypeSelect.value;
@@ -992,8 +1133,36 @@ async function openReview(owner) {
       finalPrompt.placeholder = "粘贴或输入本段要直接发送给 H3 的提示词。插件不扩写、不校验、不回退。";
       finalPrompt.spellcheck = false;
       finalPrompt.oninput = markDirty;
+      const structure = element("div", undefined, inner, "h3lv-actions h3lv-segment-structure");
+      element("span", "分段结构", structure, "h3lv-audio-label");
+      actionButton(structure, "＋ 拆分本段", async () => {
+        const start = Number(row.start);
+        const stop = Number(end.value);
+        const middle = Math.round((start+stop)/2*1000)/1000;
+        if (stop-start < 2*MIN_SEGMENT_SECONDS) throw new Error(
+          `本段只有 ${(stop-start).toFixed(2)} 秒，拆分后每段至少需要 ${MIN_SEGMENT_SECONDS} 秒。`);
+        if (!await confirmDialog({
+          title: `在第 ${row.index+1} 段中间新增一个分段？`,
+          message: `会在 ${middle.toFixed(3)}s 插入新切点，把本段一分为二；两段都会重算导演简报，参考图沿用本段。`
+            + "\n\n保存后可以用卡片里的结束时间或波形拖动新切点。",
+          confirmText: "插入切点",
+        })) return;
+        await applyStructureChange("/split", {index: row.index, time: middle});
+      }, "segment-split");
+      actionButton(structure, "删除本段", async () => {
+        if (plan.segments.length <= 1) throw new Error("至少需要保留一个分段。");
+        if (!await confirmDialog({
+          title: `删除第 ${row.index+1} 段？`,
+          message: "删除后这一段的时长会并入相邻分段，原曲仍然完整覆盖；合并后超过最长时长的分段不能删除。",
+          confirmText: "删除并合并",
+          tone: "warning",
+        })) return;
+        await applyStructureChange("/remove", {index: row.index});
+      }, "segment-remove");
+      element("span", "新增分段等于在本段中间插入一个切点；删除分段会并入相邻分段，原曲不会被截断。",
+        structure, "h3lv-shot-control-help");
       rows.push({end, prompt, finalPrompt, note, materialControls, visualType:visualTypeSelect,
-        refs: rowRefs, renderRefs: renderReferences, duration, time,
+        shotSize:() => framing.manual, refs: rowRefs, renderRefs: renderReferences, duration, time,
         generationFrames, editFrames, audio:segmentAudio});
       details.push(card);
       const resultControls = element("div", undefined, resultPanel || inner, "h3lv-result-controls");
@@ -1033,6 +1202,7 @@ async function openReview(owner) {
     if (!select.value) {
       status.textContent = "还没有分析项目，请先运行 H3 音频分析节点。";
       notice.textContent = "没有可审核的项目。";
+      limitRow.hidden = true;
       return;
     }
     plan = await request(endpoint());
@@ -1041,6 +1211,7 @@ async function openReview(owner) {
         segments:plan.segments.map(row => ({...row, reference_source:row.refs?.length ? "custom" : "default"}))});
     }
     syncDefaultReferenceControl();
+    syncLimitControls();
     const defaultOpen = defaultMaterials.open;
     defaultMaterials.replaceChildren();
     const defaultHeader = element("summary", undefined, defaultMaterials, "h3lv-default-materials-header");
@@ -1103,6 +1274,13 @@ async function openReview(owner) {
     }
   }
 
+  async function applyStructureChange(path, body) {
+    // 增删分段由服务端重排序列，先把未保存的切点和简报落盘。
+    const revision = await saveDraft();
+    await request(endpoint(path), {revision, ...body});
+    await load();
+  }
+
   async function saveDraft() {
     let revision = plan.revision;
     if (dirty) {
@@ -1111,6 +1289,7 @@ async function openReview(owner) {
         ...(plan.materials_version ? {materials:{refs:defaultEditor.refs, note:defaultEditor.getNote()}} : {}),
         segments: rows.map(row => ({end: Number(row.end.value), prompt: row.prompt.value,
           final_prompt: row.finalPrompt.value,
+          shot_size: row.shotSize ? row.shotSize() : "",
           material_note: row.materialControls ? row.materialControls.getNote() : row.note.value, refs: row.refs,
           ...(row.materialControls ? {reference_source:row.materialControls.source.value,
             visual_type:row.visualType.value, brief_matches_visual_type:true} : {})}))});

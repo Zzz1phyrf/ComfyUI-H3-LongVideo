@@ -34,6 +34,12 @@ def inside(root, path):
 
 
 REFERENCE_MIRROR_ROOT = "H3LV"
+# Widget ceiling for max_seconds/target_seconds, aligned with the H3 sampler:
+# its "length" input tops out at 3600 frames, and frames_for(149s) = 3592 frames,
+# still inside that cap. 149s exceeds the model's trained range (~124-362 frames,
+# i.e. ~5-15s), so longer segments cost quality; that is the user's call, not a hard block.
+MAX_SEGMENT_SECONDS = 149.0
+MIN_ANALYSIS_SECONDS = 5.0
 MAX_SEGMENT_REFERENCES = 6
 REFERENCE_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 MAX_REFERENCE_BYTES = 32 * 1024 * 1024
@@ -365,8 +371,9 @@ def _sections(lines, starts, active, sr, duration, minimum=2):
 
 
 def segmentation(audio, sr, transcript, mode, maximum, target, mix_audio=None, return_analysis=False):
-    if not 5 <= maximum <= 15 or not 5 <= target <= maximum:
-        raise ValueError("首版测试范围：5 ≤ 目标时长 ≤ 最长时长 ≤ 15 秒。")
+    maximum, target = float(maximum), float(target)
+    if not MIN_ANALYSIS_SECONDS <= target <= maximum:
+        raise ValueError("目标时长必须不小于 5 秒，且不超过最长时长；单段时长不设 15 秒上限。")
     starts, db = envelope(audio, sr)
     transcript = audit_asr_transcript(transcript, len(audio)/sr)
     all_lines = transcript.get("segments", [])
@@ -922,23 +929,32 @@ def _arc_ending_angle(angle, direction, allowed_angles):
     return candidate if candidate in allowed_angles else angle
 
 
-def camera_sequence(mode, rows, director=None):
-    """Plan the full editorial sequence from relative audio evidence and prior camera state."""
+def camera_sequence(mode, rows, director=None, overrides=None):
+    """Plan the full editorial sequence from relative audio evidence and prior camera state.
+
+    ``overrides`` maps a segment index to a framing the user picked in the review
+    panel. An override only replaces the opening shot size of that segment; the
+    movement family, the ending shot size and every following segment are still
+    planned from the resulting camera state, so continuity stays readable.
+    """
     prefs = director or {"performance_intensity": "auto", "note": "",
                          "rule_config": default_config()}
+    overrides = dict(overrides or {})
     rules = validate_config(prefs.get("rule_config") or default_config())
     if mode == "speaking":
         speaking = rules["speaking"]
         framing, angle, movement = speaking["framing"], speaking["angle"], speaking["movement"]
         camera_move = "a steady locked-off camera" if movement == "steady" else movement
         return [{
-            "camera_start": framing, "camera_end": framing,
+            "camera_start": overrides.get(index, framing),
+            "camera_end": overrides.get(index, framing),
             "camera_start_angle": angle, "camera_end_angle": angle,
             "camera_move": camera_move,
             "entry_cut_strategy": "opening" if index == 0 else "locked-camera continuity cut",
             "entry_cut_risk": "low", "entry_cut_reason": "the fixed-camera composition is unchanged",
             "entry_motion_state": "still", "exit_motion_state": "still",
-            "previous_end_framing": framing, "previous_end_angle": angle,
+            "previous_end_framing": overrides.get(index - 1, framing) if index else framing,
+            "previous_end_angle": angle,
             "exit_cut_strategy": "locked-camera continuity cut" if index + 1 < len(rows) else "ending",
             "camera_move_family": "steady", "camera_move_direction": "", "camera_move_type": "steady",
             "relative_energy": "medium",
@@ -948,7 +964,9 @@ def camera_sequence(mode, rows, director=None):
     singing = rules["singing"]
     # Singing composition and movement now come from the editable local rules.
     size_order = ["close-up", "medium close-up", "medium shot", "full shot"]
-    sizes = [size for size in size_order if size in singing["allowed_framings"]]
+    forced = {key: value for key, value in overrides.items() if value}
+    sizes = [size for size in size_order
+             if size in singing["allowed_framings"] or size in forced.values()]
     angles = list(singing["allowed_angles"])
     seed_key = f"{prefs.get('schedule_seed', 'h3lv')}|{prefs.get('rule_revision', 'legacy')}"
     bands = energy_bands(rows)
@@ -959,6 +977,8 @@ def camera_sequence(mode, rows, director=None):
         framing, angle = _start_composition(
             index, band, rows, sizes, previous_end, states, angles=angles,
             seed_key=seed_key, avoid_axis_cross=singing.get("avoid_direct_axis_cross", True))
+        if forced.get(index):
+            framing = forced[index]
         ending, family, direction, move, entry_motion, exit_motion, movement_type = _movement_for(
             framing, angle, band, "auto", sizes, states,
             rules=singing, seed_key=seed_key)
@@ -1000,6 +1020,53 @@ def framing_crop(framing):
 
 def _zh_framing(value):
     return {"close-up": "近景（头部与肩部）", "medium close-up": "中近景（胸部以上）", "medium shot": "中景（腰部以上）", "full shot": "全身景（头顶至双脚完整入画）"}.get(value, value)
+
+
+# Wide-to-tight order used by the 景别 dropdown in the review panel.
+SHOT_SIZES = ("full shot", "medium shot", "medium close-up", "close-up")
+SHOT_SIZE_LABELS = {
+    "full shot": "全身景（头顶至双脚完整入画）",
+    "medium shot": "中景（腰部以上）",
+    "medium close-up": "中近景（胸部以上）",
+    "close-up": "近景（头部与肩部）",
+}
+SHOT_SIZE_BY_LABEL = {label: key for key, label in SHOT_SIZE_LABELS.items()}
+
+SHOT_SIZE_ALIASES = {
+    "全身景": "full shot", "全景": "full shot", "full": "full shot",
+    "中景": "medium shot", "medium": "medium shot",
+    "中近景": "medium close-up", "近中景": "medium close-up", "medium close": "medium close-up",
+    "近景": "close-up", "特写": "close-up", "close": "close-up",
+    **{key: key for key in SHOT_SIZES},
+    **SHOT_SIZE_BY_LABEL,
+}
+
+
+def normalize_shot_size(value):
+    """Accept a canonical framing key or the Chinese label shown in the panel."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text in SHOT_SIZE_ALIASES:
+        return SHOT_SIZE_ALIASES[text]
+    raise ValueError(f"景别无效：{text}。可选项为全身景、中景、中近景、近景。")
+
+
+def shot_size_from_brief(text):
+    """Read the opening shot size back out of a saved director brief."""
+    for line in str(text or "").splitlines():
+        name, _, content = line.partition("：")
+        if name.strip() != "开场构图":
+            continue
+        content = content.strip()
+        # Longest label first so 中近景 is never matched as 近景.
+        for label in sorted(SHOT_SIZE_LABELS.values(), key=len, reverse=True):
+            if label in content[:48]:
+                return SHOT_SIZE_BY_LABEL[label]
+        for alias in sorted(SHOT_SIZE_ALIASES, key=len, reverse=True):
+            if content.startswith(alias):
+                return SHOT_SIZE_ALIASES[alias]
+    return ""
 
 
 def _zh_angle(value):
@@ -1116,12 +1183,17 @@ def segment_brief(plan, row, framing, ending, move, previous_frame):
     visual_type = row.get("visual_type", "performance")
     audio_role = row.get("audio_role", "uncertain")
     section = _audio_section_zh(row.get("audio_section"))
+    # Only a user-picked 景别 rewrites the fixed-camera and empty-scene openings;
+    # projects that never touch the dropdown keep their previous wording.
+    locked = bool(row.get("shot_size_manual"))
     if visual_type == "environment":
         task = "空镜环境"
         sound = (f"疑似{section}；不出现人物，不要求口型同步，只按本段音乐节奏组织环境变化"
                  if audio_role == "instrumental" else
                  "不出现人物，不要求口型同步；原曲由最终工作流恢复")
-        opening = "沿参考场景既有构图开场，保持空间结构、地标、材质、灯光和透视关系"
+        opening = (f"以{_zh_framing(framing)}沿参考场景既有构图开场，保持空间结构、地标、材质、灯光和透视关系"
+                   if locked else
+                   "沿参考场景既有构图开场，保持空间结构、地标、材质、灯光和透视关系")
         subject = "仅呈现指定环境及其原有可见元素，不新增人物、字幕、歌词文字或图形覆盖"
         camera = _environment_camera(row)
         ending_text = "结束在可自然承接下一分段的空间构图，保持参考场景身份和光线连续"
@@ -1130,7 +1202,9 @@ def segment_brief(plan, row, framing, ending, move, previous_frame):
         sound = ("人物跟随本段人声做自然可见口型，停顿和呼吸与音频一致"
                  if visual_type == "performance" else
                  "人物不说话、不做口型，只以视线、呼吸和克制动作回应本段声音")
-        opening = "沿用参考画面的原有构图，保持人物位置、人物尺度、身体可见范围、头顶留白和裁切边界"
+        opening = (f"{_zh_framing(framing)}构图，沿用参考画面的人物身份、服装与环境，保持人物位置、头顶留白和裁切边界"
+                   if locked else
+                   "沿用参考画面的原有构图，保持人物位置、人物尺度、身体可见范围、头顶留白和裁切边界")
         subject = ("自然口播，保留眨眼、呼吸和克制的小幅头部、肩部与手势动作"
                    if visual_type == "performance" else
                    "人物保持闭口，以自然眨眼、呼吸、视线和小幅身体动作维持画面生命感")
@@ -1166,7 +1240,7 @@ def segment_brief(plan, row, framing, ending, move, previous_frame):
     )
 
 
-def preview_segment_brief(plan, index, visual_type):
+def preview_segment_brief(plan, index, visual_type, shot_size=None):
     """Render one visual-type alternative without mutating the saved plan."""
     if visual_type not in {"performance", "atmosphere", "environment"}:
         raise ValueError("画面类型无效。")
@@ -1177,10 +1251,16 @@ def preview_segment_brief(plan, index, visual_type):
     rows = plan.get("segments") or []
     if not 0 <= index < len(rows):
         raise ValueError("分段编号无效。")
-    state = camera_sequence(plan["mode"], rows, director_preferences(plan))[index]
+    override = normalize_shot_size(shot_size)
+    state = camera_sequence(plan["mode"], rows, director_preferences(plan),
+                            overrides={index: override} if override else None)[index]
     row = copy.deepcopy(rows[index])
     row.update(state)
     row["visual_type"] = visual_type
+    if override:
+        row["shot_size_manual"] = override
+    else:
+        row.pop("shot_size_manual", None)
     return segment_brief(plan, row, state["camera_start"], state["camera_end"],
                          state["camera_move"], state["previous_end_framing"])
 
@@ -1381,7 +1461,9 @@ def decorate(plan, regenerate_prompts=True):
             row["visual_type"] = ("atmosphere"
                                   if plan["mode"] == "singing" and context["role"] == "instrumental"
                                   else "performance")
-    camera_states = camera_sequence(plan["mode"], rows, prefs)
+    camera_states = camera_sequence(plan["mode"], rows, prefs, overrides={
+        index: row["shot_size_manual"] for index, row in enumerate(rows)
+        if row.get("shot_size_manual")})
     for i, row in enumerate(rows):
         start, end = int(row["start_sample"]), int(row["end_sample"])
         duration = (end-start)/sr
@@ -1393,6 +1475,8 @@ def decorate(plan, regenerate_prompts=True):
             raise ValueError("分段过短，未达到一帧。")
         row.update(index=i, start=start/sr, end=end/sr, duration=duration,
                    edit_frames=edit_end-edit_start, generation_frames=frames_for(duration, edit_end-edit_start))
+        # The planned opening shot size, used as the dropdown default in the panel.
+        row["shot_size"] = camera_states[i]["camera_start"]
         needs_brief = regenerate_prompts or not row.get("prompt")
         if needs_brief:
             state = camera_states[i]
@@ -1451,11 +1535,53 @@ def request_regeneration(row, reason):
     row.pop("regeneration_reason", None)
 
 
+def update_limits(plan, max_seconds=UNSET, target_seconds=UNSET):
+    """Change the per-segment duration caps without re-cutting the timeline.
+
+    The panel drags, the end-time input and the merge check all read
+    plan["max_seconds"], so a project analysed under the old 15s default stays
+    stuck at 15s until this value is raised here.
+    """
+    def resolve(value, key):
+        if value is UNSET:
+            stored = plan.get(key)
+            if stored is None:
+                raise ValueError("项目缺少时长参数，请重新分析音频。")
+            return float(stored)
+        if value is None or str(value).strip() == "":
+            raise ValueError("时长不能为空。")
+        try:
+            number = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("时长必须是数字。") from exc
+        if not math.isfinite(number):
+            raise ValueError("时长必须是有效数字。")
+        return number
+
+    maximum = resolve(max_seconds, "max_seconds")
+    target = resolve(target_seconds, "target_seconds")
+    if not MIN_ANALYSIS_SECONDS <= target <= maximum:
+        raise ValueError("要求 5 ≤ 目标时长 ≤ 最长时长。")
+    if maximum > MAX_SEGMENT_SECONDS:
+        raise ValueError(f"最长时长最多 {MAX_SEGMENT_SECONDS:g} 秒。")
+    sr = float(plan["sample_rate"])
+    longest = max(((int(row["end_sample"]) - int(row["start_sample"])) / sr
+                   for row in plan["segments"]), default=0.0)
+    if longest > maximum + 1e-6:
+        raise ValueError(
+            f"已有一段长 {longest:.2f} 秒，最长时长不能低于它；请先缩短那段再调小上限。")
+    if (maximum, target) == (float(plan["max_seconds"]), float(plan["target_seconds"])):
+        return plan
+    plan.update(max_seconds=maximum, target_seconds=target,
+                revision=int(plan.get("revision", 0)) + 1)
+    return plan
+
+
 def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, materials=UNSET):
     if plan.get("run_status") in {"running", "pausing", "stopping", "merging"}:
         raise ValueError("请等当前任务停止后再修改分段。")
     if len(submitted) != len(plan["segments"]):
-        raise ValueError("首版支持移动切点；增删段请调整参数重新分析。")
+        raise ValueError("切点移动与当前分段数量不一致。增删分段请使用“拆分本段”或“删除本段”。")
     if reference_default_count is not UNSET:
         plan["reference_default_count"] = normalize_default_reference_count(
             reference_default_count)
@@ -1467,6 +1593,7 @@ def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, ma
         plan['default_refs'] = normalize_reference_names(materials.get('refs', []), directory)
         plan['default_material_note'] = str(materials.get('note', '')).strip()
     previous = 0
+    shot_index = None
     for i, (row, update) in enumerate(zip(plan["segments"], submitted)):
         end = plan["samples"] if i == len(submitted)-1 else round(float(update["end"]) * sr)
         changed = row["start_sample"] != previous or row["end_sample"] != end
@@ -1474,6 +1601,19 @@ def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, ma
         if not changed:
             validate_segment_brief(prompt)
         row.update(start_sample=previous, end_sample=end, prompt=prompt)
+        if "shot_size" in update:
+            value = normalize_shot_size(update.get("shot_size"))
+            before = str(row.get("shot_size_manual") or "")
+            # 面板会把当前显示的景别原样回传；未锁定且与自动划分一致时不算修改。
+            if value and not before and value == str(row.get("shot_size") or ""):
+                value = ""
+            if value != before:
+                if value:
+                    row["shot_size_manual"] = value
+                else:
+                    row.pop("shot_size_manual", None)
+                if shot_index is None:
+                    shot_index = i
         if "final_prompt" in update:
             row["final_prompt"] = str(update.get("final_prompt") or "")
         if "material_note" in update:
@@ -1495,6 +1635,10 @@ def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, ma
             row["warnings"] = ["用户调整边界，歌词关联和节奏标注需重新检查"]
             row["prompt"] = ""
         previous = end
+    if shot_index is not None:
+        # 景别改变会重排本段开场以及后一段的衔接，逐段重算导演简报。
+        for row in plan["segments"][shot_index:]:
+            row["prompt"] = ""
     plan.update(approved=False, run_status="draft", revision=plan.get("revision", 0)+1)
     decorate(plan, regenerate_prompts=False)
     changed = []
@@ -1506,6 +1650,101 @@ def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, ma
         plan["final_stale"] = True
     plan["changed_segments"] = changed
     return plan
+
+
+MIN_SEGMENT_SECONDS = 1.0
+
+
+def _require_editable(plan):
+    if plan.get("run_status") in {"running", "pausing", "stopping", "merging"}:
+        raise ValueError("请等当前任务停止后再修改分段。")
+
+
+def _reset_generated_state(row):
+    """Drop results that no longer describe the new boundaries."""
+    for key in ("job", "takes", "failed_attempts", "needs_regeneration",
+                "regeneration_reason", "expanded_prompt", "expanded_key",
+                "video_preview", "material_signature"):
+        row.pop(key, None)
+    row["prompt"] = ""
+
+
+def _finish_structure_edit(plan, changed, reason):
+    plan.update(approved=False, run_status="draft", revision=plan.get("revision", 0)+1)
+    decorate(plan, regenerate_prompts=False)
+    plan["changed_segments"] = sorted({int(index) for index in changed
+                                       if 0 <= int(index) < len(plan["segments"])})
+    if plan.get("final_video"):
+        plan["final_stale"] = True
+    return plan
+
+
+def split_segment(plan, index, time, reason="手动新增分段"):
+    """Insert one boundary inside a segment; both halves keep its assets and 景别."""
+    _require_editable(plan)
+    rows = plan["segments"]
+    try:
+        index = int(index)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("分段编号无效。") from exc
+    if not 0 <= index < len(rows):
+        raise ValueError("分段编号无效。")
+    sr = float(plan["sample_rate"])
+    row = rows[index]
+    start, end = int(row["start_sample"]), int(row["end_sample"])
+    try:
+        point = round(float(time) * sr)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("新切点时间无效。") from exc
+    margin = int(round(MIN_SEGMENT_SECONDS * sr))
+    if point - start < margin or end - point < margin:
+        raise ValueError(
+            f"第 {index+1} 段拆分后每段至少需要 {MIN_SEGMENT_SECONDS:g} 秒，"
+            f"请把新切点放在 {start/sr+MIN_SEGMENT_SECONDS:.3f}—{end/sr-MIN_SEGMENT_SECONDS:.3f}s 之间。")
+    working = copy.deepcopy(plan)
+    head = working["segments"][index]
+    tail = copy.deepcopy(head)
+    for part in (head, tail):
+        _reset_generated_state(part)
+        part["boundary_kind"] = "manual"
+        part["boundary_confidence"] = None
+        part["reason"] = reason
+        part["warnings"] = ["用户新增切点，歌词关联和节奏标注需重新检查"]
+    head["end_sample"] = point
+    tail["start_sample"] = point
+    working["segments"][index:index+1] = [head, tail]
+    return _finish_structure_edit(working, [index, index+1], reason)
+
+
+def remove_segment(plan, index, reason="手动删除分段"):
+    """Merge one segment into its neighbour so the audio stays fully covered."""
+    _require_editable(plan)
+    rows = plan["segments"]
+    if len(rows) <= 1:
+        raise ValueError("至少需要保留一个分段。")
+    try:
+        index = int(index)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("分段编号无效。") from exc
+    if not 0 <= index < len(rows):
+        raise ValueError("分段编号无效。")
+    left, right = (index, index+1) if index < len(rows)-1 else (index-1, index)
+    working = copy.deepcopy(plan)
+    rows = working["segments"]
+    merged, absorbed = rows[left], rows[right]
+    duration = (int(absorbed["end_sample"]) - int(merged["start_sample"])) / float(plan["sample_rate"])
+    if duration > float(working["max_seconds"]) + 1e-9:
+        raise ValueError(
+            f"合并后第 {left+1} 段约 {duration:.2f} 秒，超过最长时长 {working['max_seconds']:g} 秒；"
+            "请先缩短相邻分段，或把该段的结束时间往前拖。")
+    _reset_generated_state(merged)
+    merged["end_sample"] = int(absorbed["end_sample"])
+    merged["boundary_kind"] = "manual"
+    merged["boundary_confidence"] = None
+    merged["reason"] = reason
+    merged["warnings"] = ["用户删除分段并合并边界，歌词关联和节奏标注需重新检查"]
+    del rows[right]
+    return _finish_structure_edit(working, [left], reason)
 
 
 def fingerprint(plan):

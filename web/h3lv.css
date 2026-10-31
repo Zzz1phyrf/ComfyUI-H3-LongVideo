@@ -261,6 +261,12 @@
 .h3lv-reference-tool:hover:not(:disabled) { border-color: #7e8b9f; background: #333b47; }
 .h3lv-reference-empty { margin: 9px 0 0; color: #9aa5b4; font-size: 12px; }
 .h3lv-project-row .h3lv-default-references select { min-width: 150px; margin-left: 8px; }
+.h3lv-limit-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin: 2px 0 6px; color: #adb7c6; font-size: 12px; }
+.h3lv-limit-row[hidden] { display: none; }
+.h3lv-limit-row input { width: 88px; margin-left: 6px; padding: 5px 8px;
+  border: 1px solid #566274; border-radius: 6px; background: #11151c; color: #edf1f7; }
+.h3lv-limit-row .h3lv-limit-hint { color: #8c96a5; }
 .h3lv-button.reference-copy { border-color: #7e8b9f; color: #e6ecf5; background: #2f3641; }
 .h3lv-button.reference-copy:hover { border-color: #9aa8bc; background: #39414e; }
 .h3lv-default-materials {
@@ -318,6 +324,13 @@
   background: #252c35; color: #edf1f7;
 }
 .h3lv-shot-control-help { color: #aeb8c6; font-size: 12px; }
+.h3lv-segment-structure {
+  margin-top: 14px; padding: 10px 12px; align-items: center;
+  border: 1px dashed #414c5b; border-radius: 7px; background: #151b22;
+}
+.h3lv-segment-structure .segment-split { border-color: #3f7fbf; color: #cfe6ff; }
+.h3lv-segment-structure .segment-remove { border-color: #8b4448; color: #ffd2d5; background: #3a2226; }
+.h3lv-segment-structure .segment-remove:hover { border-color: #b8565c; background: #472a2e; }
 .h3lv-prompt-actions { margin-top: 10px; }
 .h3lv-direct-prompt {
   margin-top: 12px; border: 1px solid #425563; border-radius: 7px; background: #151b22;

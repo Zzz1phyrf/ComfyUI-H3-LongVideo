@@ -11,9 +11,9 @@ from . import director_rules
 from .diagnostics import download_log, record_error, record_event
 from .core import (LOCK, REFERENCE_MIRROR_ROOT, UNSET, archive_take, audio_file, edit_plan, fingerprint, inside, preview_bounds,
                    output_preview, project_path, read_plan, read_project_transcript,
-                   preview_segment_brief, reference_directory, remove_reference,
-                   request_regeneration, segmentation,
-                   state_file, store_reference, write_plan)
+                   preview_segment_brief, reference_directory, remove_reference, remove_segment,
+                   request_regeneration, segmentation, split_segment,
+                   state_file, store_reference, update_limits, write_plan)
 from .nodes import data_root, final_root, rules_path, storage_root
 
 RANGE_HEADER = re.compile(r"\s*bytes=(\d*)-(\d*)\s*")
@@ -99,6 +99,15 @@ def byte_range(header, total):
     if start >= total or start > end:
         return None
     return start, min(end, total - 1)
+
+
+def refresh_segment_text(plan, transcript):
+    """Re-attach recognised lyrics after any boundary change."""
+    for row in plan["segments"]:
+        row["text"] = " / ".join(
+            s["text"] for s in transcript["segments"]
+            if row["start"] <= (s["start"]+s["end"])/2 < row["end"])
+    return plan
 
 
 def register_routes():
@@ -337,8 +346,51 @@ def register_routes():
             transcript, _ = read_project_transcript(project_path(root, pid), plan)
             plan = edit_plan(plan, payload["segments"], project_path(root, pid),
                              payload.get("reference_default_count", UNSET), payload.get("materials", UNSET))
-            for row in plan["segments"]:
-                row["text"] = " / ".join(s["text"] for s in transcript["segments"] if row["start"] <= (s["start"]+s["end"])/2 < row["end"])
+            refresh_segment_text(plan, transcript)
+            write_plan(root, plan)
+        return web.json_response(plan)
+
+    @routes.post("/h3lv/project/{project_id}/split")
+    @endpoint
+    async def split(request):
+        payload = await request.json()
+        root, pid = data_root(), request.match_info["project_id"]
+        with LOCK:
+            plan = read_plan(root, pid)
+            if int(payload.get("revision", -1)) != plan["revision"]:
+                raise ValueError("方案已被另一个窗口修改，请刷新。")
+            transcript, _ = read_project_transcript(project_path(root, pid), plan)
+            plan = split_segment(plan, payload.get("index"), payload.get("time"))
+            refresh_segment_text(plan, transcript)
+            write_plan(root, plan)
+        return web.json_response(plan)
+
+    @routes.post("/h3lv/project/{project_id}/remove")
+    @endpoint
+    async def remove(request):
+        payload = await request.json()
+        root, pid = data_root(), request.match_info["project_id"]
+        with LOCK:
+            plan = read_plan(root, pid)
+            if int(payload.get("revision", -1)) != plan["revision"]:
+                raise ValueError("方案已被另一个窗口修改，请刷新。")
+            transcript, _ = read_project_transcript(project_path(root, pid), plan)
+            plan = remove_segment(plan, payload.get("index"))
+            refresh_segment_text(plan, transcript)
+            write_plan(root, plan)
+        return web.json_response(plan)
+
+    @routes.post("/h3lv/project/{project_id}/limits")
+    @endpoint
+    async def limits(request):
+        payload = await request.json()
+        root, pid = data_root(), request.match_info["project_id"]
+        with LOCK:
+            plan = read_plan(root, pid)
+            if int(payload.get("revision", -1)) != plan["revision"]:
+                raise ValueError("方案已被另一个窗口修改，请刷新。")
+            plan = update_limits(plan, payload.get("max_seconds", UNSET),
+                                 payload.get("target_seconds", UNSET))
             write_plan(root, plan)
         return web.json_response(plan)
 
@@ -352,7 +404,8 @@ def register_routes():
             if int(payload.get("revision", -1)) != plan["revision"]:
                 raise ValueError("项目已变化，请刷新后重试。")
             text = preview_segment_brief(
-                plan, payload.get("index"), str(payload.get("visual_type") or ""))
+                plan, payload.get("index"), str(payload.get("visual_type") or ""),
+                payload.get("shot_size"))
         return web.json_response({"prompt": text})
 
     @routes.post("/h3lv/project/{project_id}/approve")
