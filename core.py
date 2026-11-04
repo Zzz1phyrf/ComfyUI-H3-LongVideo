@@ -1412,7 +1412,8 @@ def decorate(plan, regenerate_prompts=True):
     return plan
 
 
-def segment_fingerprint(row):
+def segment_fingerprint(plan, row):
+    from .materials import final_prompt
     data = {k: row.get(k) for k in (
         "start_sample", "end_sample", "prompt", "generation_frames", "edit_frames")}
     # Only add the new keys when they carry content, so projects saved before
@@ -1421,8 +1422,10 @@ def segment_fingerprint(row):
         data["material_note"] = row["material_note"]
     if row.get("refs"):
         data["refs"] = list(row["refs"])
-    if row.get("final_prompt"):
-        data["final_prompt"] = row["final_prompt"]
+    # Resolve the project default so editing it marks the segments that inherit it.
+    handwritten = final_prompt(plan, row)
+    if handwritten:
+        data["final_prompt"] = handwritten
     for key in ('material_signature', 'expanded_prompt', 'expanded_key'):
         if key in row: data[key] = row[key]
     return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode()).hexdigest()
@@ -1451,16 +1454,21 @@ def request_regeneration(row, reason):
     row.pop("regeneration_reason", None)
 
 
-def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, materials=UNSET):
+def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, materials=UNSET,
+              default_final_prompt=UNSET):
     if plan.get("run_status") in {"running", "pausing", "stopping", "merging"}:
         raise ValueError("请等当前任务停止后再修改分段。")
     if len(submitted) != len(plan["segments"]):
         raise ValueError("首版支持移动切点；增删段请调整参数重新分析。")
+    sr = plan["sample_rate"]
+    # Capture the previous state before any project-level default changes, so editing
+    # the inherited handwritten prompt still marks the segments that follow it.
+    old_signatures = [segment_fingerprint(plan, row) for row in plan["segments"]]
     if reference_default_count is not UNSET:
         plan["reference_default_count"] = normalize_default_reference_count(
             reference_default_count)
-    sr = plan["sample_rate"]
-    old_signatures = [segment_fingerprint(row) for row in plan["segments"]]
+    if default_final_prompt is not UNSET:
+        plan["default_final_prompt"] = str(default_final_prompt or "")
     if materials is not UNSET:
         from .materials import effective
         plan['materials_version'] = 1
@@ -1476,6 +1484,10 @@ def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, ma
         row.update(start_sample=previous, end_sample=end, prompt=prompt)
         if "final_prompt" in update:
             row["final_prompt"] = str(update.get("final_prompt") or "")
+        if "final_prompt_source" in update:
+            from .materials import final_prompt_source
+            row["final_prompt_source"] = str(update.get("final_prompt_source") or "custom")
+            final_prompt_source(plan, row)
         if "material_note" in update:
             row["material_note"] = str(update.get("material_note") or "").strip()
         if "refs" in update:
@@ -1499,7 +1511,7 @@ def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, ma
     decorate(plan, regenerate_prompts=False)
     changed = []
     for index, (row, old_signature) in enumerate(zip(plan["segments"], old_signatures)):
-        if segment_fingerprint(row) != old_signature:
+        if segment_fingerprint(plan, row) != old_signature:
             changed.append(index)
             request_regeneration(row, "切点或提示词已修改")
     if changed and plan.get("final_video"):
@@ -1509,6 +1521,7 @@ def edit_plan(plan, submitted, directory=None, reference_default_count=UNSET, ma
 
 
 def fingerprint(plan):
+    from .materials import final_prompt
     data = []
     for row in plan["segments"]:
         item = {k: row.get(k) for k in ("start_sample", "end_sample", "prompt")}
@@ -1516,8 +1529,9 @@ def fingerprint(plan):
             item["material_note"] = row["material_note"]
         if row.get("refs"):
             item["refs"] = list(row["refs"])
-        if row.get("final_prompt"):
-            item["final_prompt"] = row["final_prompt"]
+        handwritten = final_prompt(plan, row)
+        if handwritten:
+            item["final_prompt"] = handwritten
         for key in ('material_signature', 'expanded_prompt', 'expanded_key'):
             if key in row: item[key] = row[key]
         data.append(item)

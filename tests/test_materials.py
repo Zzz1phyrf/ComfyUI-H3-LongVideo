@@ -1,11 +1,12 @@
 import copy
 import importlib
 import io
+import json
 from pathlib import Path
 import re
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from PIL import Image
 from test_plugin import core, controller, nodes, sample_plan
 
@@ -63,6 +64,72 @@ class MaterialTests(unittest.TestCase):
         self.assertFalse(core.state_file(
             core.project_path(root, plan['id']), 'queue_snapshot.json').exists())
 
+    def test_material_project_without_reference_node_leaves_the_graph_untouched(self):
+        prompt = {'266': {'class_type': 'H3LVUnified', 'inputs': {}},
+                  '267': {'class_type': 'ImageResizeKJv2', 'inputs': {'image': ['266', 5]}},
+                  '272': {'class_type': 'CreateVideo', 'inputs': {'images': ['267', 0]}}}
+        before = copy.deepcopy(prompt)
+        controller.apply_segment_references(prompt, self.plan,
+                                            self.plan['segments'][0], self.directory)
+        self.assertEqual(prompt, before)
+
+    def test_required_reference_count_follows_the_consumed_outputs(self):
+        row = self.plan['segments'][0]
+        first_frame = {'266': {'class_type': 'H3LVUnified', 'inputs': {}},
+                       '267': {'class_type': 'ImageResizeKJv2', 'inputs': {'image': ['266', 5]}}}
+        self.assertEqual(controller.required_reference_count(self.plan, row, first_frame, '266'), 1)
+        none_used = {'266': {'class_type': 'H3LVUnified', 'inputs': {}},
+                     '272': {'class_type': 'CreateVideo', 'inputs': {'images': ['122', 0]}}}
+        self.assertEqual(controller.required_reference_count(self.plan, row, none_used, '266'), 0)
+        reference_node = {'266': {'class_type': 'H3LVUnified', 'inputs': {}},
+                          '136': {'class_type': 'MiniMaxH3ReferenceToVideo', 'inputs': {
+                              'ref_images.ref_image_0': ['266', 5]}}}
+        self.assertEqual(controller.required_reference_count(
+            self.plan, row, reference_node, '266'), 1)
+        canvas_plan = copy.deepcopy(self.plan)
+        canvas_plan.pop('materials_version', None)
+        self.assertEqual(controller.required_reference_count(
+            canvas_plan, row, first_frame, '266'), 0)
+
+    def test_generation_preflight_reports_the_consumed_picture_count(self):
+        plan = copy.deepcopy(self.plan)
+        plan['default_refs'] = []
+        for row in plan['segments']:
+            row.update(reference_source='default', refs=[])
+        prompt = {'266': {'class_type': 'H3LVUnified', 'inputs': {}},
+                  '267': {'class_type': 'ImageResizeKJv2', 'inputs': {'image': ['266', 6]}}}
+        with self.assertRaisesRegex(ValueError, '第 1、2、3 段至少需要 2 张参考图'):
+            controller.validate_generation_materials(plan, self.directory, None, prompt, '266')
+
+    def test_generation_starts_when_the_canvas_reads_no_picture_output(self):
+        root = self.directory/'projects'
+        plan = copy.deepcopy(self.plan)
+        plan['default_refs'] = []
+        for row in plan['segments']:
+            row.update(reference_source='default', refs=[])
+        plan['approved'] = True
+        plan['approved_fingerprint'] = core.fingerprint(plan)
+        core.write_plan(root, plan)
+        prompt = {'266': {'class_type': 'H3LVUnified', 'inputs': {}},
+                  '122': {'class_type': 'VAEDecode', 'inputs': {}},
+                  '272': {'class_type': 'CreateVideo', 'inputs': {'images': ['122', 0], 'fps': 30.0}},
+                  '273': {'class_type': 'SaveVideo', 'inputs': {'video': ['272', 0]}}}
+        def capture_task(coroutine):
+            coroutine.close()
+            return MagicMock()
+        with patch.object(controller.asyncio, 'create_task', side_effect=capture_task):
+            controller.start(root, plan['id'], {'loader_id': '266', 'video_id': '273',
+                                                'prompt': prompt}, MagicMock())
+        self.addCleanup(controller.TASKS.pop, plan['id'], None)
+        snapshot = json.loads(core.state_file(
+            core.project_path(root, plan['id']), 'queue_snapshot.json').read_text(encoding='utf-8'))
+        self.assertEqual(snapshot['video_id'], '273')
+        controller.bind_video_output(snapshot['prompt'], snapshot['loader_id'],
+                                    snapshot['video_id'])
+        self.assertEqual(snapshot['prompt']['272']['inputs']['fps'],
+                         ['266', controller.FPS_OUTPUT_INDEX])
+        self.assertEqual(snapshot['prompt']['273']['inputs']['filename_prefix'], ['266', 3])
+
     def test_packet_allows_empty_material_note(self):
         self.plan['default_material_note'] = ''
         packet = materials.packet(self.plan, self.plan['segments'][0], self.directory)
@@ -102,6 +169,24 @@ class MaterialTests(unittest.TestCase):
         self.assertEqual(float(result[1]['waveform'].abs().sum()),0)
         self.assertEqual(result[-2], 'user text exactly')
         self.assertEqual(result[-1], 24.0)
+
+    def test_segment_prompt_follows_the_project_default(self):
+        import numpy as np
+        root = self.directory/'projects'
+        self.plan['approved'] = True
+        self.plan['default_final_prompt'] = 'shared default prompt'
+        self.plan['segments'][0]['final_prompt_source'] = 'default'
+        self.plan['segments'][1]['final_prompt'] = 'segment text'
+        self.plan['segments'][1]['final_prompt_source'] = 'custom'
+        core.write_plan(root, self.plan)
+        fake = {'paths':[], 'brief':'test', 'material_note':''}
+        with patch.object(nodes,'data_root',return_value=root), \
+             patch('soundfile.read',return_value=(np.ones((1000,1),dtype=np.float32),100)), \
+             patch.object(materials,'packet',return_value=fake):
+            inherited = nodes.LoadSegment().load(self.plan['id'],0)
+            own = nodes.LoadSegment().load(self.plan['id'],1)
+        self.assertEqual(inherited[-2], 'shared default prompt')
+        self.assertEqual(own[-2], 'segment text')
 
     def test_vision_cache_and_context_invalidation(self):
         packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)

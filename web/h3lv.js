@@ -461,6 +461,47 @@ function referenceSlotLimit() {
   return limit;
 }
 
+function graphLinkById(linkId) {
+  const graph = app.graph;
+  if (typeof graph?.getLink === "function") {
+    const link = graph.getLink(linkId);
+    if (link) return link;
+  }
+  return graph?.links?.[linkId] || (graph?._links?.get ? graph._links.get(linkId) : null);
+}
+
+function canvasReferenceDemand(loader) {
+  if (!loader) return {kind: "unknown", required: 0, driven: 0};
+  const driven = new Set();
+  const consumed = new Set();
+  for (const node of app.graph?._nodes || []) {
+    for (const input of node.inputs || []) {
+      if (input.link == null) continue;
+      const link = graphLinkById(input.link);
+      if (!link || String(link.origin_id) !== String(loader.id)) continue;
+      const origin = Number(link.origin_slot);
+      if (!Number.isInteger(origin) || origin < 5 || origin > 10) continue;
+      const isReferenceSlot = node.comfyClass === "MiniMaxH3ReferenceToVideo" &&
+        /^ref_images\.ref_image_\d+$/.test(String(input.name || ""));
+      (isReferenceSlot ? driven : consumed).add(origin-5);
+    }
+  }
+  if (driven.size) return {kind: "materials", required: 1, driven: driven.size};
+  if (!consumed.size) return {kind: "none", required: 0, driven: 0};
+  return {kind: "canvas", required: Math.max(...consumed)+1, driven: consumed.size};
+}
+
+function referenceDemandText(demand) {
+  if (demand.kind === "unknown") return "参考图：无法确定（画布上的长视频节点不唯一）";
+  if (demand.kind === "materials") {
+    return `参考图：由上传素材提供（参考节点使用前 ${demand.driven} 路图像输出）`;
+  }
+  if (demand.kind === "canvas") {
+    return `参考图：画布已接出 image_1–image_${demand.required}，每段至少需要 ${demand.required} 张`;
+  }
+  return "参考图：画布未接出图像输出，生成时不会使用参考图";
+}
+
 function referencePreviewUrl(projectId, name) {
   return api.apiURL(`/h3lv/project/${encodeURIComponent(projectId)}/refs/${encodeURIComponent(name)}`);
 }
@@ -672,6 +713,7 @@ async function openReview(owner) {
   selectedAudio.preload = "metadata";
   const defaultMaterials = element("details", undefined, content, "h3lv-default-materials");
   let defaultEditor = null;
+  let defaultDirectPrompt = null;
   const segmentsBody = element("section", undefined, content, "h3lv-segments");
   let plan = null;
   let analysis = null;
@@ -837,8 +879,9 @@ async function openReview(owner) {
       const referenceList = element("div", undefined, referenceBlock, "h3lv-reference-list");
       rowRefs = Array.isArray(row.refs) ? [...row.refs] : [];
       if (!referenceLimit) {
-        element("p", "当前工作流还没有接出 ref_image 槽位：请先在画布上用“加载图像”节点依次接到 "
-          + "MiniMax H3 视频参考节点的 ref_image_0、ref_image_1……每接一个槽位，可用的参考图就多一张。",
+        element("p", "当前工作流没有接出 ref_image 槽位：顺序生成不会提交参考图，可以直接开始；"
+          + "需要参考图时，用“加载图像”节点依次接到 MiniMax H3 视频参考节点的 "
+          + "ref_image_0、ref_image_1……每接一个槽位，可用的参考图就多一张。",
           referenceBlock, "h3lv-reference-empty");
       }
       renderReferences = () => {
@@ -909,7 +952,7 @@ async function openReview(owner) {
           fileInput.click();
         }, "reference-add");
       addButton.disabled = !referenceLimit;
-      addButton.title = referenceLimit ? "" : "当前画布没有接出 ref_image 槽位";
+      addButton.title = referenceLimit ? "" : "当前画布没有接出 ref_image 槽位，本段上传的图不会提交给 H3";
       actionButton(referenceHeader, "套用到所有分段", async () => {
         if (!await confirmDialog({
           title: "把本段的参考图套用到所有分段？",
@@ -987,12 +1030,46 @@ async function openReview(owner) {
       element("summary", "手写提示词（segment_prompt 直连，可选）", directPrompt);
       element("p", "此处文字由长视频节点的 segment_prompt 原样输出。默认多图扩写接法不读取这里；只有手动把 segment_prompt 接到 H3 的 prompt 时才使用。",
         directPrompt, "h3lv-help");
+      const promptSourceRow = element("div", undefined, directPrompt, "h3lv-actions");
+      const promptSourceLabel = element("label", "手写提示词来源 ", promptSourceRow);
+      const promptSource = element("select", undefined, promptSourceLabel);
+      for (const [id, title] of [["default", "沿用项目默认"], ["custom", "本段自定义"]]) {
+        element("option", title, promptSource).value = id;
+      }
+      promptSource.value = row.final_prompt_source ||
+        (String(row.final_prompt || "").trim() ? "custom" : "default");
       const finalPrompt = element("textarea", undefined, directPrompt, "h3lv-direct-prompt-editor");
-      finalPrompt.value = row.final_prompt || "";
-      finalPrompt.placeholder = "粘贴或输入本段要直接发送给 H3 的提示词。插件不扩写、不校验、不回退。";
+      let ownFinalPrompt = row.final_prompt || "";
+      const copyPrompt = actionButton(promptSourceRow, "复制默认到本段", () => {
+        ownFinalPrompt = projectFinalPrompt();
+        promptSource.value = "custom";
+        renderFinalPrompt();
+        markDirty();
+      }, "prompt-copy");
+      function projectFinalPrompt() {
+        return String(defaultDirectPrompt?.get?.() ?? "");
+      }
+      function renderFinalPrompt() {
+        const linked = promptSource.value === "default";
+        const inherited = projectFinalPrompt();
+        finalPrompt.value = linked ? inherited : ownFinalPrompt;
+        finalPrompt.disabled = Boolean(linked);
+        finalPrompt.placeholder = linked
+          ? (inherited.trim() ? "" : "项目默认手写提示词为空，本段不会输出手写提示词。")
+          : "粘贴或输入本段要直接发送给 H3 的提示词。插件不扩写、不校验、不回退。";
+        copyPrompt.disabled = !linked || !inherited.trim();
+        copyPrompt.title = !linked ? "当前已经是本段自定义"
+          : (inherited.trim() ? "复制项目默认手写提示词到本段" : "项目默认手写提示词为空");
+      }
+      promptSource.onchange = () => { renderFinalPrompt(); markDirty(); };
       finalPrompt.spellcheck = false;
-      finalPrompt.oninput = markDirty;
-      rows.push({end, prompt, finalPrompt, note, materialControls, visualType:visualTypeSelect,
+      finalPrompt.oninput = () => {
+        if (promptSource.value === "custom") ownFinalPrompt = finalPrompt.value;
+        markDirty();
+      };
+      renderFinalPrompt();
+      rows.push({end, prompt, finalPrompt, promptSource, renderFinalPrompt,
+        getFinalPrompt: () => ownFinalPrompt, note, materialControls, visualType:visualTypeSelect,
         refs: rowRefs, renderRefs: renderReferences, duration, time,
         generationFrames, editFrames, audio:segmentAudio});
       details.push(card);
@@ -1067,6 +1144,23 @@ async function openReview(owner) {
         await load();
       });
     }
+    const defaultPromptBlock = element("section", undefined, defaultMaterials, "h3lv-default-direct-prompt");
+    element("h4", "项目默认手写提示词（可选）", defaultPromptBlock);
+    element("p", "填写一次，所有选择“沿用项目默认”的分段自动同步；只有把 segment_prompt 接到 H3 prompt 时才生效。"
+      + "修改后沿用默认的分段会标记为待重新生成。", defaultPromptBlock, "h3lv-help");
+    const defaultPromptEditor = element("textarea", undefined, defaultPromptBlock,
+      "h3lv-direct-prompt-editor");
+    defaultPromptEditor.value = plan.default_final_prompt || "";
+    defaultPromptEditor.placeholder = "粘贴或输入项目默认要直接发送给 H3 的提示词。插件不扩写、不校验、不回退。";
+    defaultPromptEditor.spellcheck = false;
+    defaultPromptEditor.oninput = () => {
+      markDirty();
+      rows.forEach(item => item.renderFinalPrompt?.());
+    };
+    defaultDirectPrompt = {
+      value: defaultPromptEditor,
+      get: () => defaultPromptEditor.value,
+    };
     analysis = await request(endpoint("/analysis"));
     if (widget) widget.value = plan.id;
     owner.properties = {...owner.properties, h3lv_project: plan.id};
@@ -1077,11 +1171,12 @@ async function openReview(owner) {
     const failedIndex = plan.segments.findIndex(row => row.job?.status === "failed");
     runButton.textContent = failedIndex >= 0 ? `▶ 重试第 ${failedIndex+1} 段并继续` :
       (["paused", "stopped"].includes(plan.run_status) ? "▶ 继续顺序生成" : "▶ 开始顺序生成");
-    notice.textContent = analysis.available === false ? analysis.reason :
+    notice.textContent = (analysis.available === false ? analysis.reason :
       `诊断：${analysis.phrases?.length || 0} 个识别句段 · ${analysis.sections?.length || 0} 个疑似无人声区 · `+
       `${analysis.rhythm?.tempo_bpm ? `约 ${analysis.rhythm.tempo_bpm} BPM（仅次级参考）` : "未取得稳定节拍参考"}`+
       ` · 运镜：${plan.mode === "speaking" ? "口播固定机位规则" : "唱歌动态规则"}`+
-      `${analysis.legacy_notice ? ` · ${analysis.legacy_notice}` : ""}`;
+      `${analysis.legacy_notice ? ` · ${analysis.legacy_notice}` : ""}`) +
+      ` · ${referenceDemandText(canvasReferenceDemand(owner))}`;
     renderCards();
     updateSelected(selected);
     if (details[selected]) details[selected].open = true;
@@ -1108,9 +1203,10 @@ async function openReview(owner) {
     if (dirty) {
       const saved = await request(endpoint("/edit"), {revision,
         reference_default_count: defaultSelect.value === "all" ? null : Number(defaultSelect.value),
+        default_final_prompt: defaultDirectPrompt?.get?.() ?? "",
         ...(plan.materials_version ? {materials:{refs:defaultEditor.refs, note:defaultEditor.getNote()}} : {}),
         segments: rows.map(row => ({end: Number(row.end.value), prompt: row.prompt.value,
-          final_prompt: row.finalPrompt.value,
+          final_prompt: row.getFinalPrompt(), final_prompt_source: row.promptSource.value,
           material_note: row.materialControls ? row.materialControls.getNote() : row.note.value, refs: row.refs,
           ...(row.materialControls ? {reference_source:row.materialControls.source.value,
             visual_type:row.visualType.value, brief_matches_visual_type:true} : {})}))});

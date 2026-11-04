@@ -21,13 +21,14 @@ export function materialEditor(parent, {projectId, index = 0, refs = [], note = 
   const list = el("div", box); list.className = "h3lv-reference-list";
   const actions = el("div", box); actions.className = "h3lv-actions";
   const upload = el("input", box); upload.type = "file"; upload.accept = "image/*"; upload.multiple = true; upload.hidden = true;
-  const add = el("button", actions, "＋ 上传图片（最多 6 张）"); add.type = "button"; add.className = "h3lv-button";
+  const add = el("button", actions, "＋ 上传图片（最多 6 张，可不上传）"); add.type = "button"; add.className = "h3lv-button";
   add.onclick = () => upload.click();
   const mention = el("button", actions, "@ 引用图片"); mention.type = "button"; mention.className = "h3lv-button h3lv-mention-button";
   const textarea = el("textarea", box); textarea.className = "h3lv-material-note"; textarea.value = note;
   textarea.placeholder = "输入 @ 选择图片，例如：@图1 为人物三视图，@图2 为背景；三视图是同一个人。";
   const picker = el("div", box); picker.className = "h3lv-mention-picker"; picker.hidden = true;
-  const hint = el("p", box, "输入 @ 或点击“引用图片”可插入图片引用；图片重排时引用会跟随原图。"); hint.className = "h3lv-help";
+  const hint = el("p", box, "输入 @ 或点击“引用图片”可插入图片引用；图片重排时引用会跟随原图。"
+    + "本段不上传图片时，按画布已接出的参考图接线生成；画布也没有接出参考图时不会提交参考图。"); hint.className = "h3lv-help";
   let customNote = note;
   let uploading = false;
   let mentionRange = null;

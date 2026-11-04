@@ -11,3 +11,4 @@ settings.json
 output/
 input/
 models/
+.codebuddy/
