@@ -498,6 +498,8 @@ NODE_CLASS_MAPPINGS = {"H3LVUnified": Unified, "H3LVPromptExpand": PromptExpand}
 NODE_DISPLAY_NAME_MAPPINGS = {"H3LVUnified": "MiniMax H3 · MV Generator", "H3LVPromptExpand": "MiniMax H3 · MV Prompt Expander"}
 
 from .talking_rh import TalkingRH, TalkingAvatar
+from .talking_rh.references import ReferenceCapture
+NODE_CLASS_MAPPINGS["H3LVTalkingReferenceCapture"] = ReferenceCapture
 NODE_CLASS_MAPPINGS["H3LVTalkingRH"] = TalkingRH
 NODE_DISPLAY_NAME_MAPPINGS["H3LVTalkingRH"] = "MiniMax H3 · Talking Avatar (Legacy)"
 NODE_CLASS_MAPPINGS["H3LVTalkingAvatar"] = TalkingAvatar

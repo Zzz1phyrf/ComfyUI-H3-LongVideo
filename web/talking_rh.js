@@ -5,6 +5,7 @@ import {talkingStatus} from './talking_status.js';
 import {setTalkingStatus} from './talking_progress.js';
 import {alignProjectNode} from './node_ui.js';
 import {downloadErrorLog,reportUiError} from './diagnostics.js';
+import {referenceBranch,captureReference} from './reference_sync.js';
 
 const projectId=node=>node.widgets?.find(w=>w.name==='project_id')?.value;
 const validId=id=>/^[0-9a-f]{32}$/.test(id || '');
@@ -108,6 +109,53 @@ async function analyze(node,{ask=true}={}) {
   node.__talkingPreparing=true;status(node,'正在准备音频与分段 · 旧项目和成片保留');
   try{await api.queuePrompt(0,snapshot,{partialExecutionTargets:[String(node.id)]});}
   catch(error){node.__talkingPreparing=false;throw error;}
+}
+
+async function syncReference(node,expectedId=projectId(node)) {
+  if(node.__talkingReferenceSync)throw new Error('正在读取当前参考图，请等待完成。');
+  function checkOwner() {
+    if(!(app.graph?._nodes || []).includes(node) || projectId(node)!==expectedId)
+      throw new Error('工作流或项目已切换，已停止同步参考图。');
+  }
+  checkOwner();node.__talkingReferenceSync=true;
+  try {
+    const plan=await currentProject(node);
+    if(!plan)throw new Error('请先分析音频分段。');
+    if(plan.config?.talking_profile!=='fl2va-flat-rh-v1')return {status:'unchanged',plan};
+    if(plan.controller_active)throw new Error('正在生成的项目继续使用原图，请等任务结束或暂停后再换图。');
+    const branch=referenceBranch(await app.graphToPrompt(),node.id,`h3talk-reference-${crypto.randomUUID()}`);
+    checkOwner();status(node,'正在读取画布参考图 · 保留音频与切点');
+    node.__talkingReferenceAbort=new AbortController();
+    let image;
+    try{image=await captureReference(api,branch,{signal:node.__talkingReferenceAbort.signal});}
+    finally{delete node.__talkingReferenceAbort;}
+    async function checkCurrent() {
+      checkOwner();
+      if(referenceBranch(await app.graphToPrompt(),node.id).signature!==branch.signature)
+        throw new Error('读取期间画布参考图发生变化，请重新同步。');
+      checkOwner();
+    }
+    await checkCurrent();
+    const body={image,expected_fingerprint:plan.editing_fingerprint};
+    let result=await request(`/h3talk/project/${expectedId}/reference`,body);
+    if(result.status==='confirmation_required') {
+      const options={title:'换图并创建重做版本？',
+        message:'当前项目已有生成记录。使用新图需要重新生成全部分段；音频、已保存切点和提示词保留，旧项目与视频完整保留。',confirmText:'使用新图创建重做版本'};
+      if(!(app.h3lvConfirmDialog?await app.h3lvConfirmDialog(options):window.confirm(options.message)))
+        return {status:'cancelled',plan};
+      await checkCurrent();
+      result=await request(`/h3talk/project/${expectedId}/reference`,{...body,confirmed_sha256:result.candidate_sha256});
+    }
+    await checkCurrent();node.__talkingReferenceSignature=branch.signature;
+    if(result.status==='forked') {
+      node.widgets.find(w=>w.name==='project_id').value=result.plan.id;
+      node.setDirtyCanvas?.(true,true);
+    }
+    status(node,result.status==='forked'?'已使用新图创建重做版本 · 切点保留，旧项目保留':
+      result.status==='updated'?'参考图已更新 · 音频和切点保持不变':talkingStatus(result.plan));
+    syncTalkingVideo(node,result.plan);
+    return result;
+  } finally {node.__talkingReferenceSync=false;}
 }
 
 function hideUnusedLegacyMask(node) {
@@ -249,6 +297,21 @@ async function showPanel(node) {
   close.onclick = () => overlay.remove();
   const frame = document.createElement("iframe"); frame.src = `/h3talk/project/${pid}/panel?client_id=${encodeURIComponent(api.clientId || "")}`;
   frame.__h3talkAnalyze=()=>analyze(node);
+  frame.__h3talkCancelReference=()=>{
+    if(!node.__talkingReferenceAbort)return false;
+    node.__talkingReferenceAbort.abort();return true;
+  };
+  frame.__h3talkSyncReference=async expectedId=>{
+    const result=await syncReference(node,expectedId);
+    if(result.status==='forked')await showPanel(node);
+    return result;
+  };
+  frame.__h3talkReferenceState=async expectedId=>{
+    if(!(app.graph?._nodes || []).includes(node) || projectId(node)!==expectedId)return 'different-workflow';
+    const branch=referenceBranch(await app.graphToPrompt(),node.id);
+    return node.__talkingReferenceSignature===branch.signature?'checked':
+      node.__talkingReferenceSignature?'changed':'unchecked';
+  };
   Object.assign(frame.style,{width:"100%",height:"calc(100% - 48px)",border:0,borderRadius:"12px"});
   select.onchange=()=>{
   if(frame.contentWindow?.h3talkHasUnsavedChanges?.()) {select.value=projectId(node);void showMessage({title:'尚有未保存的修改',message:'请先保存切点或提示词修改，再切换项目。'});return;}

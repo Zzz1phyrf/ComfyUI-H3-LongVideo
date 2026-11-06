@@ -225,7 +225,7 @@ def register():
         async def action():
             plan=read_plan(root(),request.match_info['pid']);directory=project_path(root(),plan['id'])
             kind=request.match_info['kind']
-            paths={'audio':audio_file(directory,'source.wav'),'reference':directory/'refs/reference_0.png',
+            paths={'audio':audio_file(directory,'source.wav'),'reference':inside(directory/'refs',directory/'refs'/plan['assets'][0]['name']),
                    'mask':directory/'refs/person_mask.png'}
             if kind=='mask' and project.unmasked(plan):raise ValueError('此项目未使用人物空间遮罩。')
             if kind=='final':
@@ -247,6 +247,18 @@ def register():
             return web.json_response({'path':revealed})
         return await endpoint(request,action)
 
+    @routes.post('/h3talk/project/{pid}/reference')
+    async def reference(request):
+        async def action():
+            from . import references
+            data=await request.json()
+            picture=await asyncio.to_thread(references.read_capture,data.get('image'))
+            result=await asyncio.to_thread(references.update,root(),request.match_info['pid'],picture,
+                data.get('expected_fingerprint'),confirmed_sha256=data.get('confirmed_sha256'))
+            result['plan']=public(result['plan'])
+            return web.json_response(result)
+        return await endpoint(request,action)
+
     @routes.post('/h3talk/project/{pid}/{action}')
     async def post(request):
         async def action():
@@ -259,6 +271,8 @@ def register():
                         plan['run_status']='stopping' if plan.get('stop_requested') else 'pausing'
                     write_plan(root(),plan)
                 elif name=='run':
+                    if data.get('expected_fingerprint') not in (None,project.fingerprint(plan)):
+                        raise ValueError('参考图或切点已在其他窗口改变，请重新核对后生成。')
                     client_id=str(data.get('client_id') or '')[:128]
                     runner.start(root(),pid,client_id=client_id)
                 else:

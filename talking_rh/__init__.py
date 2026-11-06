@@ -202,15 +202,22 @@ class TalkingRH:
             raise ValueError('分段目标时长超出支持范围。')
         signature.update(json.dumps(config,sort_keys=True).encode())
         input_id=signature.hexdigest()
+        reference_changed=False
         if str(project_id).strip():
             plan=read_plan(root(),project_id.strip())
-            if plan.get('kind')!='talking_rh' or plan.get('input_fingerprint')!=input_id:
-                raise ValueError('输入素材或配置已变化。请点击“新建项目”以保留旧项目和输出。')
+            from .references import inputs_match, original, same_picture
+            if plan.get('kind')!='talking_rh':raise ValueError('项目类型与口播不一致。')
+            if plan.get('input_fingerprint')!=input_id or plan.get('reference_revision'):
+                if inputs_match(root(),plan,wave,sr,pictures,config,check_picture=False):
+                    reference_changed=not same_picture(original(project.project_path(root(),plan['id']),plan['assets'][0]),pictures[0])
+                else:
+                    if not flat.enabled(plan):raise ValueError('输入素材或配置已变化。请新建项目以保留旧项目和输出。')
+                    raise ValueError('音频或生成配置已变化，请重新分析并分段来新建项目；只换图可在分段面板同步，旧项目和输出保留。')
         else:
             plan=project.prepare(root(),wave,sr,pictures,None if mask is None else mask[0],config,input_id)
         result=(canvas.blocked(plan) if execution_mode=='画布' or flat_new and prompt is not None else
                 (plan['id'],plan.get('final_video',''),len(plan['segments']),*(None for _ in canvas.FIELDS)))
-        return {'ui':{'talking_rh_project':[plan['id']],'talking_rh_open_review':[not plan.get('approved')],
+        return {'ui':{'talking_rh_project':[plan['id']],'talking_rh_open_review':[reference_changed or not plan.get('approved')],
                       'text':['口播项目已准备，请打开分段审核，试听后保存并确认。']},
                 'result':result}
 

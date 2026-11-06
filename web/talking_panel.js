@@ -11,9 +11,13 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
   const promptEdits=new Map();
   let rowsSignature='';
   let cutNotice='',closing=false;
+  let referenceState='unchecked';
   window.h3talkHasUnsavedChanges=()=>dirty || promptDirty;
   async function closePanel(close) {
-    if(pending){fail(new Error('请等待当前保存操作完成后再关闭。'));return;}
+    if(pending){
+      if(window.frameElement?.__h3talkCancelReference?.()){close.__h3talkOriginalClose?.();return;}
+      fail(new Error('请等待当前保存操作完成后再关闭。'));return;
+    }
     if(closing)return;
     closing=true;
     try {
@@ -256,6 +260,14 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     $('pause').disabled=!active || plan.run_status==='merging' || pending;$('stop').disabled=!active || plan.run_status==='merging' || pending;$('refresh').disabled=pending;
     $('assemble').hidden=false;$('assemble').disabled=active || pending || dirty || promptDirty || !plan.approved || plan.segments.some(r=>r.job?.status!=='completed');
     $('reanalyze').disabled=active || pending || dirty || promptDirty || regenerating;
+    $('sync-reference').disabled=active || pending || dirty || promptDirty || !anchored() || !window.frameElement?.__h3talkSyncReference;
+    const referenceUrl=base+'/file/reference?v='+encodeURIComponent(plan.assets?.[0]?.sha256 || 'original');
+    if($('reference').getAttribute('src')!==referenceUrl)$('reference').src=referenceUrl;
+    $('reference-note').textContent=active?'当前任务已固定使用下图，运行中换图不会影响本次任务。':
+      referenceState==='different-workflow'?'请切回此项目所属口播工作流后生成。':
+      referenceState==='invalid'?'画布参考图输入不完整，请检查图片与连线后再生成。':
+      referenceState==='changed'?'画布参考图设置已变化；生成前会读取新图，保留已保存切点。':
+      (plan.parent_project?'已使用新图创建重做版本，旧项目保留。':'')+'生成前会读取画布当前参考图；只换图不用重新分析。更换音频或生成配置仍需重新分析。';
     $('restore').hidden=!regenerating;$('restore').disabled=active || pending || dirty || promptDirty || !plan.regeneration_can_restore;
     $('regeneration-note').hidden=!regenerating;
     $('regeneration-note').textContent=regenerating?`第${plan.regeneration.index+1}段${redoSingle()?'':'及后续'}已加入重做。点击“开始 / 继续生成”才提交任务；可取消重做恢复旧结果。`:'';
@@ -294,12 +306,30 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     await perform('approve');
   }
   async function refresh() {
-    try{if(!pending){apply(await request(''));if(promptVersions && promptSignature!==promptKey(plan))await loadPrompts();}}catch(error){fail(error);}
+    try{if(!pending){
+      const state=window.frameElement?.__h3talkReferenceState;
+      if(state && anchored())try{referenceState=await state(pid);}catch{referenceState='invalid';}
+      apply(await request(''));if(promptVersions && promptSignature!==promptKey(plan))await loadPrompts();
+    }}catch(error){fail(error);}
+  }
+  async function syncReferenceForRun(run=false) {
+    if(pending || dirty || promptDirty)return;
+    if(!anchored()){if(run)await perform('run',{client_id:new URLSearchParams(location.search).get('client_id') || ''});return;}
+    const sync=window.frameElement?.__h3talkSyncReference;
+    if(!sync){fail(new Error('请从口播节点打开分段面板，生成前需要核对画布参考图。'));return;}
+    pending=true;actionError='';apply(plan);
+    try {
+      const result=await sync(pid);
+      if(result.status==='cancelled' || result.status==='forked')return;
+      pending=false;referenceState='checked';apply(result.plan,true);
+      if(run)await perform('run',{client_id:new URLSearchParams(location.search).get('client_id') || '',expected_fingerprint:result.plan.editing_fingerprint});
+    } catch(error){fail(error);}finally{pending=false;apply(plan);}
   }
   $('audio').src=base+'/file/audio';$('reference').src=base+'/file/reference';
   $('approve').onclick=saveCuts;
   $('reset-cuts').onclick=()=>{dirty=false;actionError='';apply(plan,true);};
-  $('run').onclick=()=>perform('run',{client_id:new URLSearchParams(location.search).get('client_id') || ''});$('pause').onclick=()=>perform('pause');$('stop').onclick=async()=>{
+  $('sync-reference').onclick=()=>syncReferenceForRun();
+  $('run').onclick=()=>syncReferenceForRun(true);$('pause').onclick=()=>perform('pause');$('stop').onclick=async()=>{
     const confirm=window.parent?.comfyAPI?.app?.app?.h3lvConfirmDialog;
     const options={title:'停止提交后续片段？',message:'当前正在生成的片段会正常完成，完成后不再提交新的片段。',confirmText:'停止后续生成',confirmClass:'stop',tone:'warning'};
     if(confirm?!await confirm(options):!window.confirm(options.message))return;
