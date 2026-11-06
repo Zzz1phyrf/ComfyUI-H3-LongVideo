@@ -346,3 +346,7 @@
 .h3lv-status { white-space: pre-line; }
 .h3lv-live-progress { color: #6fddff; font-weight: 600; }
 .h3lv-shot-intent { width: 100%; min-height: 70px; box-sizing: border-box; background: #151d23; color: #e4edf3; border: 1px solid #40515e; border-radius: 5px; padding: 9px; }
+.h3lv-project-settings { margin: 16px 0; padding: 12px 14px; border: 1px solid #3f4855; border-radius: 8px; background: #20252d; }
+.h3lv-project-settings summary { cursor: pointer; color: #b9c4d2; }
+.h3lv-project-settings p { white-space: pre-line; overflow-wrap: anywhere; }
+.h3lv-project-settings input, .h3lv-project-settings select { padding: 6px 9px; border: 1px solid #566274; border-radius: 6px; background: #11151c; color: #edf1f7; }

@@ -40,7 +40,7 @@ button, input, select, textarea { font: inherit; }
 .h3talk-settings { margin: 16px 0; padding: 12px 14px; border: 1px solid #3f4855; border-radius: 8px; background: #20252d; }
 .h3talk-settings summary { cursor: pointer; color: #b9c4d2; }
 .h3talk-settings p { white-space: pre-line; overflow-wrap: anywhere; margin: 8px 0 0; }
-.h3talk-page input { padding: 6px 9px; border: 1px solid #566274; border-radius: 6px; background: #11151c; color: #edf1f7; }
+.h3talk-page input, #recover-index { padding: 6px 9px; border: 1px solid #566274; border-radius: 6px; background: #11151c; color: #edf1f7; }
 #recover-index { width: 90px; } #recover-id { width: min(260px, 100%); }
 body.h3talk-standalone { padding: 2vh 3vw; background: rgba(0,0,0,.7); }
 .h3talk-standalone .h3talk-page { width: min(1440px,100%); min-height: 96vh; margin: auto; border: 1px solid #4b5666; border-radius: 12px; overflow: clip; background: #1b1f26; }

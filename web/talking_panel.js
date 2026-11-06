@@ -286,7 +286,14 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     if(!$('mask').hidden && !$('mask').getAttribute('src'))$('mask').src=base+'/file/mask';
     const frozen=plan.sampling_summary;
     $('summary').textContent=`seed ${plan.config.seed} · ${(frozen?.models || []).join('，')}`+(frozen?`\n${frozen.loras.map(l=>`${l.name} × ${l.strength}`).join('，')}`:'');
-    $('project-path').textContent=`项目ID：${plan.id}`;$('cloud-recovery').hidden=local;$('recover').disabled=active || pending || dirty || promptDirty;
+    $('project-path').textContent=`项目ID：${plan.id}`;$('cloud-recovery').hidden=local;
+    const unknown=plan.segments.map((row,index)=>({row,index})).filter(({row})=>row.job?.status==='creating_unknown');
+    const previous=$('recover-index').value;$('recover-index').replaceChildren();
+    for(const {index} of unknown){const option=element('option',`第 ${index+1} 段`,$('recover-index'));option.value=String(index+1);}
+    if(unknown.some(({index})=>String(index+1)===previous))$('recover-index').value=previous;
+    $('recover-notice').textContent=unknown.length?'绑定后，点击顶部“开始 / 继续生成”查询并获取原任务结果。':'当前没有创建结果未知的RH任务，无需手动绑定。';
+    $('recover').disabled=active || pending || dirty || promptDirty || !unknown.length;
+    $('recover-index').disabled=$('recover').disabled;$('recover-id').disabled=$('recover').disabled;
     $('result').hidden=!plan.final_video;$('reveal-final').disabled=!plan.final_video || pending;$('final-path').textContent=plan.final_video || '';
     if(plan.final_video){$('result').hidden=false;$('result-note').textContent=plan.final_stale?'这是修改前的成片，待新分段生成后重新合并。':'完整成片';const url=base+'/file/final?version='+encodeURIComponent(plan.final_video);if($('video').dataset.version!==url){$('video').src=url;$('video').dataset.version=url;}}
     timeline?.drawTimeline();

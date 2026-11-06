@@ -457,6 +457,16 @@ function needsReplacement(row) {
   return Boolean(row.needs_regeneration && row.job?.status === "completed" && row.job?.video);
 }
 
+function segmentStatus(row) {
+  if (needsReplacement(row)) return '待重做';
+  return {completed:'已完成',failed:'生成失败',rejected:'提交被拒绝',creating_unknown:'创建结果未知',
+    submitted:'已提交，待获取结果',queued:'排队中',running:'正在生成',creating:'正在提交'}[row.job?.status] || '待生成';
+}
+
+function recoveryRows(plan) {
+  return plan.segments.filter(row=>row.job?.backend==='runninghub' && row.job.status==='creating_unknown');
+}
+
 function outputPreviewUrl(preview) {
   const query = new URLSearchParams({
     filename: preview.filename,
@@ -704,6 +714,37 @@ async function openReview(owner) {
   const defaultMaterials = element("details", undefined, content, "h3lv-default-materials");
   let defaultEditor = null;
   const segmentsBody = element("section", undefined, content, "h3lv-segments");
+  const projectSettings = element('details', undefined, content, 'h3lv-project-settings');
+  element('summary', '项目设置与生成参数', projectSettings);
+  const settingsText = element('p', '', projectSettings, 'h3lv-notice');
+  projectSettings.ontoggle = async () => {
+    if (!projectSettings.open || !plan) return;
+    const id=plan.id;
+    settingsText.textContent='正在读取已保存的生成参数…';
+    try {
+      const value=await request(endpoint('/settings'));
+      if (plan.id!==id) return;
+      settingsText.textContent=`项目ID：${value.project_id}\n${value.fps} fps · 单段最长 ${plan.max_seconds} 秒`+
+        (value.recorded ? `\n生成后端：${value.backend}${value.workflow_id ? ` · RH 工作流ID：${value.workflow_id}` : ''}\n以下为最近一次生成保存的参数；新任务使用提交时的工作流配置。\n`+
+          value.nodes.map(node=>`${node.type} #${node.id}：`+Object.entries(node.values).map(([key,val])=>`${key}=${val}`).join(' · ')).join('\n') : '\n尚无生成参数记录；首次生成时读取工作流配置。');
+    } catch(error) {if(plan.id===id)settingsText.textContent=error.message;}
+  };
+  const recovery = element('details', undefined, content, 'h3lv-project-settings');
+  element('summary', 'RH 异常任务恢复', recovery);
+  element('p','仅创建结果未知时，核实RH任务列表后绑定已有任务ID。下载失败或已有任务ID时，直接点击顶部“开始 / 继续生成”。',recovery,'h3lv-help');
+  const recoveryNotice=element('p','',recovery,'h3lv-notice');
+  const recoveryActions=element('div',undefined,recovery,'h3lv-actions');
+  const recoveryIndex=element('select',undefined,recoveryActions);
+  recoveryIndex.setAttribute('aria-label','恢复段号');
+  const recoveryId=element('input',undefined,recoveryActions);
+  recoveryId.placeholder='RH任务ID';recoveryId.setAttribute('aria-label','RH任务ID');
+  const recoverButton=actionButton(recoveryActions,'绑定任务ID',async()=>{
+    if(dirty || busy(plan))throw new Error('请先保存修改，并等待当前任务停止。');
+    const index=Number(recoveryIndex.value);
+    if(!recoveryRows(plan).some(row=>row.index===index))throw new Error('没有创建结果未知的RH任务可绑定。');
+    await request(endpoint('/rh-recover'),{index,task_id:recoveryId.value});
+    recoveryId.value='';await load();
+  });
   let plan = null;
   let analysis = null;
   let rows = [];
@@ -819,8 +860,7 @@ async function openReview(owner) {
       const time = element("span", `${row.start.toFixed(3)}—${row.end.toFixed(3)}s`, main, "h3lv-time");
       const duration = element("span", `${row.duration.toFixed(3)}s`, main, "h3lv-duration");
       element("span", row.reason || "未标注切点原因", summary, "h3lv-reason");
-      if (needsReplacement(row)) element("span", "待重生成", summary, "h3lv-chip risk");
-      else if (row.job?.status) element("span", row.job.status, summary, "h3lv-chip neutral");
+      element("span", segmentStatus(row), summary, needsReplacement(row) ? "h3lv-chip risk" : "h3lv-chip neutral");
       card.ontoggle = () => {
         if (!card.open) return;
         details.forEach(other => { if (other !== card) other.open = false; });
@@ -1048,36 +1088,19 @@ async function openReview(owner) {
       if (busy(plan) && plan.progress?.index===row.index) live.textContent=progressText(plan);
       if (row.job?.backend === "runninghub") {
         element("p", `RunningHub · ${row.job.task_id || "创建结果未知"}${row.job.provider_status ? ` · ${row.job.provider_status}` : ""}`, resultControls, "h3lv-job");
-        if (row.job.status === "creating_unknown") {
-          const taskId = element("input", undefined, resultControls);
-          taskId.placeholder = "核对RH任务列表后填写此段任务ID";
-          taskId.setAttribute("aria-label", "RH任务ID");
-          actionButton(resultControls, "绑定已有RH任务", async () => {
-            await request(endpoint("/rh-recover"), {index:row.index, task_id:taskId.value});
-            await load();
-          });
-        }
+        if (row.job.status === "creating_unknown") element('p','请在面板底部“RH 异常任务恢复”中绑定已有任务ID。',resultControls,'h3lv-help');
       }
       if (row.job || needsReplacement(row)) {
-        element("p", `生成状态：${row.job?.status || "待生成"}${needsReplacement(row) ? ` · ${row.regeneration_reason || "需要重新生成"}` : ""}`+
+        element("p", `生成状态：${segmentStatus(row)}${needsReplacement(row) ? ` · ${row.regeneration_reason || "需要重新生成"}` : ""}`+
           `${row.job?.error ? ` · ${row.job.error}` : ""}`, resultControls, "h3lv-job");
-        actionButton(resultControls, "重新生成本段", async () => {
+        actionButton(resultControls, "将本段加入重做", async () => {
           if (dirty) throw new Error("请先保存并确认当前修改。");
           if (!plan.approved) throw new Error("请先保存并确认分段方案。");
-          if (!await confirmDialog({
-            title: `重新生成第 ${row.index+1} 段？`,
-            message: "本次按画布选择的生成后端重做当前段，保留旧成功版本。如果修改了采样、提示词来源等全局配置，其他旧段会标为待更新，继续整片生成时才重跑。",
-            confirmText: "重新生成",
-          })) return;
-          status.textContent=`第 ${row.index+1} 段 · 正在准备重做请求，尚未提交生成`;
-          canvasProgress(owner,status.textContent);
-          const payload = await buildGenerationPayload();
-          await request(endpoint("/regenerate"), {...payload, index: row.index});
-          toast('重做请求已接收',payload.prompt[payload.loader_id].inputs.backend === 'RunningHub'
-            ? `第 ${row.index+1} 段按 RH 生成；云端是否接收请看阶段状态。`
-            : `第 ${row.index+1} 段按本地生成；执行进度请看阶段状态或 ComfyUI 任务队列。`);
+          await request(endpoint("/retry"), {index: row.index});
+          toast('已加入重做','点击顶部“开始 / 继续生成”执行。当前结果保留。');
           await load();
         }, "segment-run");
+        element('p','加入后，点击顶部“开始 / 继续生成”执行。当前结果保留。',resultControls,'h3lv-help');
       }
       if (row.takes?.length) {
         actionButton(resultControls, `恢复上一版（${row.takes.length}）`, async () => {
@@ -1102,6 +1125,16 @@ async function openReview(owner) {
       return;
     }
     plan = await request(endpoint());
+    settingsText.textContent=`项目ID：${plan.id}`;
+    if(projectSettings.open)void projectSettings.ontoggle();
+    recovery.hidden=plan.generation_backend!=='runninghub' && !plan.segments.some(row=>row.job?.backend==='runninghub');
+    const unknown=recoveryRows(plan);
+    recoveryIndex.replaceChildren();
+    for(const row of unknown){const option=element('option',`第 ${row.index+1} 段`,recoveryIndex);option.value=String(row.index);}
+    recoveryNotice.textContent=unknown.length ? '绑定后，点击顶部“开始 / 继续生成”查询并获取原任务结果。' : '当前没有创建结果未知的RH任务，无需手动绑定。';
+    recoverButton.disabled=busy(plan) || dirty || !unknown.length;
+    recoverButton.dataset.busy=String(recoverButton.disabled);
+    recoveryIndex.disabled=recoverButton.disabled;recoveryId.disabled=recoverButton.disabled;
     if (!plan.materials_version && !plan.segments.some(row => row.job)) {
       plan = await request(endpoint("/edit"), {revision:plan.revision, materials:{refs:[], note:""},
         segments:plan.segments.map(row => ({...row, reference_source:row.refs?.length ? "custom" : "default"}))});

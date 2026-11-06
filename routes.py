@@ -22,6 +22,30 @@ from .mv_rh import pending, require_settled
 RANGE_HEADER = re.compile(r"\s*bytes=(\d*)-(\d*)\s*")
 
 
+def generation_settings(root, project_id):
+    """Expose only displayable parameters from the saved generation snapshot."""
+    read_plan(root, project_id)
+    path = project_path(root, project_id)/"state"/"queue_snapshot.json"
+    result = {"project_id": project_id, "fps": 24, "recorded": path.is_file(), "nodes": []}
+    if not path.is_file():
+        return result
+    snapshot = json.loads(path.read_text(encoding="utf-8"))
+    remote = snapshot.get("backend") == "runninghub"
+    result["backend"] = "RunningHub" if remote else "本地"
+    if remote:
+        result["workflow_id"] = snapshot.get("remote", {}).get("workflow_id", "")
+    graph = snapshot.get("remote_graph", {}) if remote else snapshot.get("prompt", {})
+    fields = {"unet_name", "ckpt_name", "clip_name", "vae_name", "lora_name", "strength_model",
+              "seed", "noise_seed", "steps", "cfg", "sampler_name", "scheduler", "denoise",
+              "width", "height", "megapixels", "aspect_ratio", "transition_step", "lowres_scale"}
+    for node_id, node in graph.items():
+        values = {key: value for key, value in node.get("inputs", {}).items()
+                  if key in fields and isinstance(value, (str, int, float, bool))}
+        if values:
+            result["nodes"].append({"id": node_id, "type": node.get("class_type", ""), "values": values})
+    return result
+
+
 def path_bytes(path):
     path = Path(path)
     if path.is_file():
@@ -336,6 +360,11 @@ def register_routes():
             preview_job = preview_job or job
             row["video_preview"] = output_preview(comfy_output(data_root()), preview_job.get("preview_video") or preview_job.get("video"))
         return web.json_response(plan)
+
+    @routes.get("/h3lv/project/{project_id}/settings")
+    @endpoint
+    async def get_settings(request):
+        return web.json_response(generation_settings(data_root(), request.match_info["project_id"]))
 
     @routes.get("/h3lv/project/{project_id}/analysis")
     @endpoint
