@@ -146,7 +146,12 @@ async function syncReference(node,expectedId=projectId(node)) {
       await checkCurrent();
       result=await request(`/h3talk/project/${expectedId}/reference`,{...body,confirmed_sha256:result.candidate_sha256});
     }
-    await checkCurrent();node.__talkingReferenceSignature=branch.signature;
+    try{await checkCurrent();}
+    catch(error) {
+      await showMessage({title:'未启动生成',message:`参考图核对已完成，但当前工作流或图片发生了变化。请回到原工作流，从项目列表选择 ${result.plan.id.slice(0,8)} 后核对再生成。旧项目和视频保留。`});
+      return {...result,status:'detached'};
+    }
+    node.__talkingReferenceSignature=branch.signature;
     if(result.status==='forked') {
       node.widgets.find(w=>w.name==='project_id').value=result.plan.id;
       node.setDirtyCanvas?.(true,true);

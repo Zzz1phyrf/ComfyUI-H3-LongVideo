@@ -12,6 +12,7 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
   let rowsSignature='';
   let cutNotice='',closing=false;
   let referenceState='unchecked';
+  let actionRevision=0;
   window.h3talkHasUnsavedChanges=()=>dirty || promptDirty;
   async function closePanel(close) {
     if(pending){
@@ -291,7 +292,7 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     timeline?.drawTimeline();
   }
   async function perform(action,body={}) {
-    if(pending)return false;pending=true;actionError='';apply(plan);
+    if(pending)return false;pending=true;actionRevision++;actionError='';apply(plan);
     try {
       const value=await request(action,body);
       if(action==='prompt'){promptEdits.delete(body.index);promptDirty=promptEdits.size>0;}
@@ -306,10 +307,13 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     await perform('approve');
   }
   async function refresh() {
+    const revision=actionRevision;
     try{if(!pending){
       const state=window.frameElement?.__h3talkReferenceState;
       if(state && anchored())try{referenceState=await state(pid);}catch{referenceState='invalid';}
-      apply(await request(''));if(promptVersions && promptSignature!==promptKey(plan))await loadPrompts();
+      const value=await request('');
+      if(pending || revision!==actionRevision)return;
+      apply(value);if(promptVersions && promptSignature!==promptKey(plan))await loadPrompts();
     }}catch(error){fail(error);}
   }
   async function syncReferenceForRun(run=false) {
@@ -317,10 +321,10 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     if(!anchored()){if(run)await perform('run',{client_id:new URLSearchParams(location.search).get('client_id') || ''});return;}
     const sync=window.frameElement?.__h3talkSyncReference;
     if(!sync){fail(new Error('请从口播节点打开分段面板，生成前需要核对画布参考图。'));return;}
-    pending=true;actionError='';apply(plan);
+    pending=true;actionRevision++;actionError='';apply(plan);
     try {
       const result=await sync(pid);
-      if(result.status==='cancelled' || result.status==='forked')return;
+      if(!['updated','unchanged'].includes(result.status))return;
       pending=false;referenceState='checked';apply(result.plan,true);
       if(run)await perform('run',{client_id:new URLSearchParams(location.search).get('client_id') || '',expected_fingerprint:result.plan.editing_fingerprint});
     } catch(error){fail(error);}finally{pending=false;apply(plan);}

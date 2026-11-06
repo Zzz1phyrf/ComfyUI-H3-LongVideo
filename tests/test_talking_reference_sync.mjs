@@ -57,7 +57,7 @@ test('closing while waiting for capture cancels continuation and removes listene
 
 const parent=fs.readFileSync(new URL('../web/talking_rh.js',import.meta.url),'utf8');
 const syncCode=parent.slice(parent.indexOf('async function syncReference('),parent.indexOf('function hideUnusedLegacyMask('));
-function syncRuntime({confirm=true,response='updated',busy=false,changeDuringCapture=false}={}) {
+function syncRuntime({confirm=true,response='updated',busy=false,changeDuringCapture=false,switchAfterCommit=false}={}) {
   const id='a'.repeat(32),newId='b'.repeat(32),calls=[];
   const owner={id:5,widgets:[{name:'project_id',value:id}],setDirtyCanvas(){}};
   const plan={id,config:{talking_profile:'fl2va-flat-rh-v1'},editing_fingerprint:'old',controller_active:busy};
@@ -66,11 +66,12 @@ function syncRuntime({confirm=true,response='updated',busy=false,changeDuringCap
   const request=async(path,body)=>{
     calls.push({path,body});
     if(response==='confirmation_required' && !body.confirmed_sha256)return {status:response,candidate_sha256:'candidate',plan};
+    if(switchAfterCommit)app.graph._nodes=[];
     return {status:response==='confirmation_required'?'forked':response,plan:{...plan,id:response==='confirmation_required'?newId:id}};
   };
   const capture=async()=>{captures++;if(changeDuringCapture)current.output['1'].inputs.image='changed.png';return {filename:'capture.png',type:'temp'};};
-  const fn=Function('app','api','projectId','currentProject','referenceBranch','captureReference','request','status','talkingStatus','syncTalkingVideo',
-    syncCode+';return syncReference;')(app,{},node=>node.widgets[0].value,async()=>plan,referenceBranch,capture,request,()=>{},()=>'',()=>{});
+  const fn=Function('app','api','projectId','currentProject','referenceBranch','captureReference','request','status','talkingStatus','syncTalkingVideo','showMessage',
+    syncCode+';return syncReference;')(app,{},node=>node.widgets[0].value,async()=>plan,referenceBranch,capture,request,()=>{},()=>'',()=>{},async()=>{});
   return {fn,owner,app,calls,id,newId,get captures(){return captures;}};
 }
 test('actual node sync updates unrendered project and preserves its binding',async()=>{
@@ -94,22 +95,46 @@ test('active generation, changed picture during capture, or wrong tab cannot upd
     await assert.rejects(r.fn(r.owner));assert.equal(r.calls.length,0);
   }
 });
+test('switching tabs after server commit reports saved project without binding or starting another workflow',async()=>{
+  const r=syncRuntime({response:'confirmation_required',switchAfterCommit:true});
+  const result=await r.fn(r.owner);
+  assert.equal(result.status,'detached');assert.equal(result.plan.id,r.newId);
+  assert.equal(r.owner.widgets[0].value,r.id);
+});
 
 const panel=fs.readFileSync(new URL('../web/talking_panel.js',import.meta.url),'utf8');
 const runCode=panel.slice(panel.indexOf('  async function syncReferenceForRun('),panel.indexOf("  $('audio').src="));
 test('actual panel Run syncs before submission and never submits old project on cancel/fork/failure',async()=>{
-  for(const outcome of ['updated','unchanged','forked','cancelled','failed','missing']) {
+  for(const outcome of ['updated','unchanged','forked','cancelled','failed','missing','detached']) {
     const calls=[];
     const win={frameElement:outcome==='missing'?{}:{__h3talkSyncReference:async()=>{
       calls.push('sync');if(outcome==='failed')throw new Error('capture failed');
       return {status:outcome,plan:{editing_fingerprint:'verified'}};
     }}};
     const run=Function('window','perform','apply','fail','location','URLSearchParams',
-      "let pending=false,dirty=false,promptDirty=false,actionError='',referenceState='',plan={};const pid='p',anchored=()=>true;"+
+      "let pending=false,dirty=false,promptDirty=false,actionError='',referenceState='',plan={},actionRevision=0;const pid='p',anchored=()=>true;"+
       runCode+';return syncReferenceForRun;')(win,async(action,body)=>calls.push([action,body]),()=>{},()=>{}, {search:''},URLSearchParams);
     await run(true);
     const submitted=calls.filter(x=>Array.isArray(x));
     assert.equal(submitted.length,['updated','unchanged'].includes(outcome)?1:0,outcome);
     if(submitted.length){assert.equal(calls[0],'sync');assert.equal(submitted[0][1].expected_fingerprint,'verified');}
   }
+});
+
+test('old status poll cannot overwrite a reference update that finishes while the poll waits',async()=>{
+  const code=panel.slice(panel.indexOf('  async function refresh()'),panel.indexOf('  async function syncReferenceForRun('));
+  let finish;const updates=[];
+  const runtime=Function('window','request','apply','fail',
+    'let pending=false,actionRevision=0,referenceState,plan={},promptVersions=null;const pid="p",anchored=()=>true;'+code+
+    ';return {refresh,changed:()=>{actionRevision++;}};')({frameElement:{}},()=>new Promise(r=>finish=r),p=>updates.push(p),e=>{throw e;});
+  const poll=runtime.refresh();runtime.changed();finish({old:true});await poll;
+  assert.equal(updates.length,0);
+});
+
+test('real close handler cancels capture and closes without waiting for generation',async()=>{
+  const code=panel.slice(panel.indexOf('  async function closePanel('),panel.indexOf('  function syncHost('));
+  let cancelled=0,closed=0;
+  const win={frameElement:{__h3talkCancelReference:()=>{cancelled++;return true;}}};
+  const close=Function('window','fail','let pending=true,closing=false;'+code+';return closePanel;')(win,e=>{throw e;});
+  await close({__h3talkOriginalClose:()=>closed++});assert.equal(cancelled,1);assert.equal(closed,1);
 });

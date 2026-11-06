@@ -176,8 +176,9 @@ class Client:
                     for block in response.iter_content(1024*1024):
                         stream.write(block)
             partial.replace(target)
-        except requests.RequestException:
-            raise RemoteError('RH结果下载失败。已保存任务ID，继续时只下载同一任务，不重复生成。') from None
+        except requests.RequestException as exc:
+            reason=f'HTTP {exc.response.status_code}' if exc.response is not None else type(exc).__name__
+            raise RemoteError(f'RH结果下载失败（{reason}）。已保存任务ID，继续时只下载同一任务，不重复生成。') from None
         finally:
             if created:
                 try:

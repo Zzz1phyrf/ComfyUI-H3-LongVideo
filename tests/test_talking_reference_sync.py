@@ -12,6 +12,7 @@ from unittest.mock import patch,AsyncMock
 import numpy as np
 from PIL import Image
 from test_talking_flat_rh import project, flat, config, runner
+from test_talking_rh import FakeClient,remote
 
 
 class ReferenceSyncTests(unittest.TestCase):
@@ -85,6 +86,74 @@ class ReferenceSyncTests(unittest.TestCase):
         self.plan['segments'][0]['job']={'status':'failed'}
         project.write_plan(self.root,self.plan)
         with self.assertRaises(ValueError):self.sync(confirmed_sha256='wrong-image')
+
+    def test_unchanged_image_allows_recovery_of_successful_task_pending_download(self):
+        self.plan['segments'][0]['job']={'status':'submitted','provider_status':'SUCCESS','task_id':'123'}
+        project.write_plan(self.root,self.plan)
+        before=(project.project_path(self.root,self.plan['id'])/'state/segments.json').read_bytes()
+        result=self.refs.update(self.root,self.plan['id'],Image.new('RGB',(94,167),'white'),project.fingerprint(self.plan))
+        self.assertEqual(result['status'],'unchanged')
+        self.assertEqual((project.project_path(self.root,self.plan['id'])/'state/segments.json').read_bytes(),before)
+        with self.assertRaises(ValueError):self.sync()
+
+    def run_with(self,client):
+        def merge(root,pid):
+            path=project.project_path(root,pid)/'final.mp4';path.write_bytes(b'assembled');return str(path)
+        runner.run_project(self.root,self.plan['id'],client,validate=lambda *_:{},assemble=merge,sleep=lambda _:None)
+        return project.read_plan(self.root,self.plan['id'])
+
+    def sync_same(self):
+        current=project.read_plan(self.root,self.plan['id'])
+        result=self.refs.update(self.root,current['id'],Image.new('RGB',(94,167),'white'),project.fingerprint(current))
+        self.assertEqual(result['status'],'unchanged')
+        return result['plan']
+
+    def test_seven_segment_run_download_sixth_fails_then_sync_and_resume_without_duplicate_tasks(self):
+        cfg=config();cfg['reference_geometry']=flat.GEOMETRY
+        self.plan=project.prepare(self.root,np.zeros((2029392,1),np.float32),24000,
+                                  [Image.new('RGB',(94,167),'white')],None,cfg,'input')
+        self.plan=project.update_cuts(self.root,self.plan['id'],[294*i/24 for i in range(1,7)])
+        self.plan.update(approved=True,approved_fingerprint=project.fingerprint(self.plan));project.write_plan(self.root,self.plan)
+        client=FakeClient();download=client.download
+        def fail_sixth(url,target):
+            if len(client.created)==6:raise remote.RemoteError('download interrupted')
+            return download(url,target)
+        client.download=fail_sixth
+        with self.assertRaises(remote.RemoteError):self.run_with(client)
+        failed=self.sync_same();prefix=copy.deepcopy(failed['segments'][:5]);task=failed['segments'][5]['job']['task_id']
+        self.assertEqual(len(client.created),6)
+        self.assertEqual(failed['segments'][5]['job']['provider_status'],'SUCCESS')
+        self.assertNotIn('job',failed['segments'][6])
+        client.download=download
+        completed=self.run_with(client)
+        self.assertEqual(len(client.created),7)
+        self.assertEqual(completed['segments'][:5],prefix)
+        self.assertEqual(completed['segments'][5]['job']['task_id'],task)
+        self.assertEqual(completed['run_status'],'completed')
+        self.assertTrue(all(row['job']['status']=='completed' for row in completed['segments']))
+
+    def test_pause_stop_then_sync_resume_and_single_redo_keep_completed_takes(self):
+        for flag in ('pause_requested','stop_requested'):
+            with self.subTest(flag=flag):
+                client=FakeClient()
+                # Reset only this temporary test plan, never a user's project.
+                plan=copy.deepcopy(self.plan);project.write_plan(self.root,plan)
+                client.after_query=lambda _:runner.change(self.root,plan['id'],lambda p:p.update({flag:True}))
+                stopped=self.run_with(client);first=copy.deepcopy(stopped['segments'][0]['job'])
+                self.assertEqual(len(client.created),1)
+                self.sync_same()
+                client.after_query=None;runner.change(self.root,plan['id'],lambda p:p.update({flag:False}))
+                complete=self.run_with(client);count=len(client.created)
+                self.assertEqual(complete['segments'][0]['job'],first)
+                project.request_regeneration(self.root,plan['id'],1)
+                self.sync_same()
+                current=project.read_plan(self.root,plan['id'])
+                with self.assertRaises(ValueError):
+                    self.refs.update(self.root,plan['id'],self.image,project.fingerprint(current))
+                redo=self.run_with(client)
+                self.assertEqual(len(client.created),count+1)
+                self.assertEqual(redo['segments'][0]['job'],first)
+                self.assertEqual(redo['segments'][2]['job'],complete['segments'][2]['job'])
 
     def test_capture_matches_prepare_rounding_and_rejects_batch_and_outside_paths(self):
         import torch
@@ -182,6 +251,9 @@ class ReferenceRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(preview._path.name,'reference_0.png')
         stale=await self.invoke('POST','/h3talk/project/{pid}/{action}',{'expected_fingerprint':'old'},action='run')
         self.assertEqual(stale.status,400)
+        old_ui=await self.invoke('POST','/h3talk/project/{pid}/{action}',{},action='run')
+        self.assertEqual(old_ui.status,400)
+        self.assertIn('刷新',json.loads(old_ui.text)['error'])
 
 
 if __name__=='__main__':unittest.main()

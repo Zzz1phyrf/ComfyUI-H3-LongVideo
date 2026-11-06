@@ -271,6 +271,9 @@ def register():
                         plan['run_status']='stopping' if plan.get('stop_requested') else 'pausing'
                     write_plan(root(),plan)
                 elif name=='run':
+                    from . import flat
+                    if flat.enabled(plan) and not data.get('expected_fingerprint'):
+                        raise ValueError('口播界面尚未核对当前参考图，请刷新ComfyUI主页面并重新打开分段面板后继续。已有项目和任务保留。')
                     if data.get('expected_fingerprint') not in (None,project.fingerprint(plan)):
                         raise ValueError('参考图或切点已在其他窗口改变，请重新核对后生成。')
                     client_id=str(data.get('client_id') or '')[:128]

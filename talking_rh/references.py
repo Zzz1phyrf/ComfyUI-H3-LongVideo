@@ -50,9 +50,9 @@ def update(root,pid,picture,expected_fingerprint,*,confirmed_sha256=None):
         if not flat.enabled(plan) or len(plan['assets'])!=1:
             raise ValueError('参考图独立更新适用于当前首尾锚定口播；旧版项目请保持原图。')
         project.verify_assets(root,plan)
-        project.require_settled(plan['segments'])
         if same_picture(original(directory,plan['assets'][0]),picture):
             return {'status':'unchanged','plan':plan}
+        project.require_settled(plan['segments'])
         if plan.get('regeneration'):
             raise ValueError('请先完成或取消当前单段重做，再更换整条口播的参考图。')
         has_results=bool(plan.get('final_video') or any(r.get('job') or r.get('previous_jobs') for r in plan['segments']))

@@ -22,6 +22,17 @@ class RHErrorDetailsTests(unittest.TestCase):
             self.client = remote.Client({'base_url':'https://www.runninghub.ai',
                 'workflow_id':'123', 'instance_type':'plus', 'seed':42})
 
+    def test_download_failure_identifies_http_or_timeout_without_signed_url(self):
+        for error,label in [(requests.HTTPError('private-signed-url',response=Mock(status_code=403)),'HTTP 403'),
+                            (requests.ReadTimeout('private-signed-url'),'ReadTimeout')]:
+            with self.subTest(label=label),tempfile.TemporaryDirectory() as temp,\
+                 patch.object(remote.requests,'get',side_effect=error):
+                with self.assertRaises(remote.RemoteError) as caught:
+                    self.client.download('https://example.test/private-signed-url',Path(temp)/'raw.mp4')
+                self.assertIn(label,str(caught.exception))
+                self.assertNotIn('private-signed-url',str(caught.exception))
+                self.assertFalse((Path(temp)/'raw.mp4').exists())
+
     def test_creation_rejection_reaches_ui_and_log_without_secrets(self):
         reply = {'code':416, 'msg':'TASK_CREATE_FAILED_BY_NOT_ENOUGH_WALLET',
                  'data':{'errorMessage':'余额不足 private-fixture-key https://example.test/private',
