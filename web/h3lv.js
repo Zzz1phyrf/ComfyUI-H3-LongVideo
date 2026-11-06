@@ -504,7 +504,7 @@ function showFinalOnVideoNode(preview, projectId, videoId) {
   const ownerProjects = owners.map(node => String(
     node.properties?.h3lv_project || node.widgets?.find(item => item.name === "project_id")?.value || ""
   ).trim()).filter(Boolean);
-  if (projectId && ownerProjects.length && !ownerProjects.includes(String(projectId))) return false;
+  if (!projectId || !ownerProjects.includes(String(projectId))) return false;
   const videos = nodes.filter(node => ["VHS_VideoCombine", "SaveVideo"].includes(node.comfyClass)
     && (!videoId || String(node.id) === String(videoId)));
   if (videos.length !== 1) return false;

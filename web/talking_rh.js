@@ -40,13 +40,22 @@ function status(node,text) {
 }
 function syncTalkingVideo(owner,plan) {
   const preview=plan.canvas_preview;
-  if(projectId(owner)!==plan.id)return;
+  // A poll started on a previous tab may return after a different graph is active.
+  if(!(app.graph?._nodes || []).includes(owner) ||
+    !['H3LVTalkingAvatar','H3LVTalkingRH'].includes(owner.comfyClass) || projectId(owner)!==plan.id)return;
   owner.__talkingCanvasVideoId=plan.canvas_video_id;
-  if(!preview?.filename)return;
   const videos=(app.graph?._nodes || []).filter(node=>node.comfyClass==='SaveVideo' &&
     (!plan.canvas_video_id || String(node.id)===String(plan.canvas_video_id)));
   if(videos.length!==1)return;
   const video=videos[0];
+  if(!preview?.filename) {
+    const key=`${plan.id}/empty`;
+    if(video.__talkingPreview!==key) {
+      api.dispatchCustomEvent('executed',{node:String(video.id),display_node:String(video.id),output:{images:[],animated:[true]}});
+      video.__talkingPreview=key;video.title='视频输出 · 等待当前项目生成';
+    }
+    return;
+  }
   const key=`${plan.id}/${preview.subfolder || ''}/${preview.filename}/${plan.canvas_preview_kind}`;
   if(video.__talkingPreview===key)return;
   video.title=plan.canvas_preview_kind==='final' ? '视频输出 · 完整成片' :

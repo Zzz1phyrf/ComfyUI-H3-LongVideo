@@ -124,7 +124,7 @@ test("native final preview targets the selected saver and uses the native output
   const vhs = {id: 5, comfyClass: "VHS_VideoCombine", updateParameters() {throw new Error("wrong saver");}};
   const events = [];
   const show = vm.runInNewContext(`${source.slice(start, end)}\nshowFinalOnVideoNode`, {
-    app: {graph: {_nodes: [saver, vhs]}},
+    app: {graph: {_nodes: [saver, vhs, {comfyClass:'H3LVUnified',properties:{h3lv_project:'project'}}]}},
     api: {dispatchCustomEvent(name, output) {events.push({name, output});}},
   });
   assert.equal(show({filename: "final.mp4", subfolder: "H3LongVideo/final_videos"}, "project", "4"), true);
@@ -134,6 +134,21 @@ test("native final preview targets the selected saver and uses the native output
   assert.equal(events[0].output.output.animated[0], true);
   assert.equal(show({filename: "final.mp4", subfolder: "H3LongVideo/final_videos"}, "project", "4"), true);
   assert.equal(events.length, 1);
+});
+
+test('live MV completion events cannot write a talking or unbound canvas with the same node ID',()=>{
+  const start=source.indexOf('function showFinalOnVideoNode('),end=source.indexOf('function clearVideoNodePreview(',start);
+  for(const owner of [null,{comfyClass:'H3LVTalkingAvatar'},
+    {comfyClass:'H3LVUnified',properties:{}},
+    {comfyClass:'H3LVUnified',properties:{h3lv_project:'other'}}]) {
+    const events=[],saver={id:273,comfyClass:'SaveVideo'};
+    const show=vm.runInNewContext(source.slice(start,end)+'\nshowFinalOnVideoNode',{
+      app:{graph:{_nodes:[saver,...(owner?[owner]:[])]}},
+      api:{dispatchCustomEvent:(...args)=>events.push(args)},
+    });
+    assert.equal(show({filename:'mv-segment.mp4'},'project',273),false);
+    assert.equal(events.length,0);
+  }
 });
 
 test("output selection dialog defaults to native, allows VHS, and cleans up on cancel", async () => {
