@@ -8,6 +8,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 import requests
+import copy
+import numpy as np
 from test_talking_rh import remote
 
 diagnostics = importlib.import_module('h3talk_test.diagnostics')
@@ -75,6 +77,37 @@ class RHErrorDetailsTests(unittest.TestCase):
         with patch.object(self.client,'_post',return_value={'code':0,'data':{}}):
             with self.assertRaises(remote.RemoteError) as caught:self.client.create({})
         self.assertNotIsInstance(caught.exception,remote.Rejected)
+
+    def test_json_encoded_msg_extracts_node_error_without_input_metadata(self):
+        reply={'code':433,'msg':json.dumps({'error':{'type':'prompt_outputs_failed_validation'},
+            'node_errors':{'272':{'class_type':'CreateVideo','errors':[{
+                'type':'value_not_in_list','details':"chroma_subsampling: 'none' not in ['auto', '444', '422', '420']",
+                'extra_info':{'received_value':'PRIVATE-INPUT'}}]}}})}
+        with patch.object(self.client,'_post',return_value=reply):
+            with self.assertRaises(remote.Rejected) as caught:self.client.create({})
+        message=str(caught.exception)
+        for value in ('433','272','CreateVideo','chroma_subsampling'):self.assertIn(value,message)
+        self.assertNotIn('PRIVATE-INPUT',message)
+        self.assertNotIn('node_errors',message)
+
+    def test_mv_build_translates_legacy_video_auto_value_without_changing_snapshot(self):
+        mv=importlib.import_module('h3talk_test.mv_rh')
+        nodes=importlib.import_module('h3talk_test.nodes')
+        progress=importlib.import_module('h3talk_test.progress')
+        graph={str(n):{'class_type':kind,'inputs':{}} for n,kind in
+               [(10,'LoadAudio'),(11,'LoadAudio'),(20,'MiniMaxH3ReferenceToVideo'),(272,'CreateVideo'),(273,'SaveVideo')]}
+        mapping={'original':'10','vocals':'11','reference':'20','creator':'272','output':'273'}
+        audio={'waveform':[types.SimpleNamespace(numpy=lambda:np.zeros((1,1000),dtype=np.float32))],'sample_rate':24000}
+        loaded=[audio,audio,141,'prefix',{'visual_type':'performance','paths':[]}]+[None]*6+['']
+        for value in ('none','auto','444','422','420'):
+            graph['272']['inputs']={'chroma_subsampling':value,'codec':'none'}
+            snapshot={'remote_graph':graph,'binding':mapping,'prompt_source':{'kind':'literal','text':'test'}}
+            before=copy.deepcopy(snapshot)
+            with tempfile.TemporaryDirectory() as temp,patch.object(nodes.LoadSegment,'load',return_value=loaded),patch.object(progress,'report'):
+                actual,_=mv.build_segment(Path(temp),'a'*32,0,snapshot,Mock(upload=Mock(return_value='uploaded.wav')),Path(temp))
+            self.assertEqual(actual['272']['inputs']['chroma_subsampling'],'auto' if value=='none' else value)
+            self.assertEqual(actual['272']['inputs']['codec'],'none')
+            self.assertEqual(snapshot,before)
 
 
 if __name__ == '__main__':unittest.main()

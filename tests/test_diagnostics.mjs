@@ -7,9 +7,19 @@ const source = fs.readFileSync(new URL("../web/diagnostics.js", import.meta.url)
   .replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
 
 function moduleContext(extra) {
-  return vm.runInNewContext(`${source}\n({reportUiError, withUiLogging, downloadErrorLog})`,
+  return vm.runInNewContext(`${source}\n({reportUiError, withUiLogging, downloadErrorLog, renderFailure})`,
     {AbortController, setTimeout, clearTimeout, ...extra});
 }
+
+test("RH node validation reason remains visible outside collapsed technical details", () => {
+  function element(tag) {return {tag, children:[], textContent:'', append(child){this.children.push(child);},
+    replaceChildren(){this.children=[];}, setAttribute(){}};}
+  const parent=element('div');
+  const functions=moduleContext({document:{createElement:element}});
+  const reason="RH code: 433; prompt_outputs_failed_validation; node 272 CreateVideo chroma_subsampling none";
+  functions.renderFailure(parent,{summary:'RH失败',reason,issues:[]});
+  assert.ok(parent.children.some(node=>node.tag==='p' && node.textContent===reason));
+});
 
 test("UI error reports are bounded and contain no arbitrary input payload", async () => {
   const requests = [];

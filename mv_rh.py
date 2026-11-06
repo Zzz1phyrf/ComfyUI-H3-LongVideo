@@ -291,6 +291,11 @@ def build_segment(root,pid,index,snapshot,client,folder):
         ref['ref_images.ref_image_'+str(i)] = [key,0]
     ref.update(prompt=text,length=loaded[2])
     graph[mapping['creator']]['inputs']['fps'] = 24
+    # Older RH canvases serialized the automatic chroma mode as "none".
+    # Current CreateVideo accepts "auto"; codec="none" remains valid and separate.
+    video_inputs = graph[mapping['creator']]['inputs']
+    if video_inputs.get('chroma_subsampling') == 'none':
+        video_inputs['chroma_subsampling'] = 'auto'
     graph[mapping['output']]['inputs']['filename_prefix'] = f'{MV_PREFIX}/projects/{pid}/takes/{index:04d}/{folder.name}/generated/video'
     return graph,text
 

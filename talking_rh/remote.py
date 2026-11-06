@@ -41,7 +41,10 @@ def response_reason(data, key='', status=None):
             for name in fields:
                 item = value.get(name)
                 if isinstance(item, (str, int, float)) and not isinstance(item, bool):
-                    parts.append(f'{name}: {item}')
+                    if isinstance(item,str) and item.lstrip().startswith(('{','[')):
+                        collect(item,depth+1)
+                    else:
+                        parts.append(f'{name}: {item}')
             for name in ('error', 'errors', 'data', 'promptTips'):
                 if name in value:collect(value[name], depth+1)
             nodes = value.get('node_errors')

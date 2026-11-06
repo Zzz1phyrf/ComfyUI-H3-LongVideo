@@ -59,8 +59,7 @@ export function renderFailure(parent, info, {locate, copy} = {}) {
   };
   parent.setAttribute("role", "alert");
   add("strong", info.summary || "操作失败");
-  // Unstructured legacy errors stay in technical details instead of the status bar.
-  if (!String(info.reason || "").includes("prompt_outputs_failed_validation")) add("p", info.reason || "");
+  add("p", info.reason || "");
   for (const issue of info.issues || []) {
     const row = add("div", "");
     add("p", `${issue.title || issue.node_type || "节点"}${issue.node_id ? ` #${issue.node_id}` : ""}：${issue.reason}`, row);
