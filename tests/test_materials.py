@@ -35,6 +35,24 @@ class MaterialTests(unittest.TestCase):
         self.assertEqual(materials.effective(self.plan,self.plan['segments'][1])['refs'],self.names[2:])
         self.assertFalse(self.plan['approved'])
 
+    def test_material_notes_do_not_remove_the_planned_shot(self):
+        before = copy.deepcopy(self.plan)
+        for row in self.plan['segments']:
+            packet = materials.packet(self.plan, row, self.directory)
+            self.assertTrue(packet['material_note'])
+            self.assertIn('镜头运动：', packet['brief'])
+            self.assertEqual(packet['brief_source'], 'automatic')
+        self.assertEqual(self.plan, before)
+
+    def test_explicit_request_and_edited_brief_are_both_preserved(self):
+        row = self.plan['segments'][0]
+        row.update(shot_request='图1人物，图2场景，人物转身。',
+            brief_source='user', prompt='正面中近景，镜头向右横移。')
+        packet = materials.packet(self.plan, row, self.directory)
+        self.assertEqual(packet['material_note'], row['shot_request'])
+        self.assertEqual(packet['brief'], row['prompt'])
+        self.assertEqual(packet['brief_source'], 'user')
+
     def test_custom_empty_is_not_inheritance(self):
         row = self.plan['segments'][0]; row.update(reference_source='custom', refs=[])
         with self.assertRaisesRegex(ValueError,'没有有效参考图'):
@@ -107,7 +125,20 @@ class MaterialTests(unittest.TestCase):
         packet = materials.packet(self.plan,self.plan['segments'][0],self.directory)
         packet['material_note'] = '@图1是人物，@图2是环境'
         with patch.object(expansion,'public_settings',return_value={'base_url':'https://example.test/v1'}), patch.object(expansion,'call',return_value={'choices':[{'message':{'content':TEXT}}]}) as call:
-            self.assertEqual(expansion.expand(packet,'vision','m','r'),TEXT)
+            result = expansion.expand(packet,'vision','m','r')
+            self.assertIn('<Picture 2>', result)
+            self.assertIn('<Audio 1>', result)
+            self.assertIn('[Shot 1] Move.', result)
+            sections = expansion.prompt_sections(result)
+            original = expansion.prompt_sections(TEXT)
+            self.assertEqual(set(sections), set(original))
+            for section in ('retention_analysis', 'detailed_description', 'overall_soundscape', 'non_diegetic_music'):
+                self.assertEqual(sections[section], original[section])
+            self.assertIn('One shot.', sections['summary'])
+            self.assertIn('<Audio 1>', sections['summary'])
+            self.assertIn('<Audio 1>', sections['subject_definitions'])
+            self.assertIn('<Subject 1> from <Picture 1>.', sections['subject_definitions'])
+            self.assertIn('<Picture 2> as the source for environment.', sections['subject_definitions'])
             expansion.expand(packet,'vision','m','r')
             self.assertEqual(call.call_count,1)
             content = call.call_args.args[1]['messages'][1]['content']
@@ -122,7 +153,7 @@ class MaterialTests(unittest.TestCase):
             self.assertIn('environment means only the declared environment is visible', system)
             self.assertIn('generation_seconds', system)
             self.assertIn('do not quote, transcribe, translate, paraphrase or describe its wording', system)
-            other = copy.deepcopy(packet); other['material_note'] = 'different roles'
+            other = copy.deepcopy(packet); other['material_note'] = '@图1是环境，@图2是人物'
             expansion.expand(other,'vision','m','r')
             self.assertEqual(call.call_count,2)
             other['hashes'].reverse()
@@ -220,8 +251,11 @@ class MaterialTests(unittest.TestCase):
             self.assertEqual(expansion.cache_source(packet,key,'vision'),'api')
             cache = Path(packet['cache_dir']); cache.mkdir(parents=True)
             (cache/(key+'.json')).write_text('{"text":"cached"}',encoding='utf-8')
+            self.assertEqual(expansion.cache_source(packet,key,'vision'),'api')
+            valid = TEXT.replace('<Subject 1> from <Picture 1>.', '<Subject 1> from <Picture 1>. <Subject 2> from <Picture 2>.')
+            (cache/(key+'.json')).write_text(__import__('json').dumps({'text':valid}),encoding='utf-8')
             self.assertEqual(expansion.cache_source(packet,key,'vision'),'cache')
-            packet.update(expanded_key=key, expanded_prompt=TEXT)
+            packet.update(expanded_key=key, expanded_prompt=valid)
             self.assertEqual(expansion.cache_source(packet,key,'vision'),'saved')
 
     def test_secret_not_returned_and_host_change_clears_old_key(self):

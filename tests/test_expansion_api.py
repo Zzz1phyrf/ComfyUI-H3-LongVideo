@@ -53,6 +53,52 @@ class ExpansionAPITests(unittest.TestCase):
                 self.assertIs(payload['enable_thinking'], False)
                 self.assertNotIn('reasoning', payload)
 
+    def test_image_notes_and_partial_intent_keep_the_segment_brief_in_request(self):
+        brief = '正面中近景，人物自然演唱，镜头持续向右横移，结束仍为正面中近景。'
+        for index, (note, intent) in enumerate([
+                ('@图1是人物，保持深蓝衣服。', ''),
+                ('@图1是人物。镜头按各段简报变化。', ''),
+                ('@图1是人物，人物走向栏杆。', '镜头固定。')]):
+            with self.subTest(note=note, intent=intent):
+                self.packet.update(material_note=note, shot_intent=intent, brief=brief,
+                    cache_dir=str(self.directory/f'case-{index}'))
+                payload = self.payload('fixture')
+                context = json.loads(payload['messages'][1]['content'][0]['text'])
+                self.assertEqual(context['brief'], brief)
+                self.assertEqual(context['material_note'], note.replace('@图1', '<Picture 1>'))
+                self.assertEqual(context['shot_intent'], intent)
+                system = payload['messages'][0]['content']
+                self.assertNotIn('ignore brief entirely', system)
+                self.assertNotIn('fallback used only when both are empty', system)
+                self.assertIn('Preserve every field that the user has not explicitly overridden', system)
+                self.assertIn('A user-specified action alone keeps the planned camera', system)
+
+    def test_new_priority_does_not_reuse_or_overwrite_old_expansion(self):
+        profile = {'base_url': 'https://compatible.test/v1'}
+        old_rule = 'When material_note is nonempty, ignore brief entirely.'
+        with patch.object(expansion, 'public_settings', return_value=profile):
+            with patch.object(expansion, 'INTENT_RULE', old_rule):
+                old_key = expansion.cache_key(self.packet, 'vision', 'fixture', 'rule', 0)
+            old_text = fixtures.TEXT.replace('Move.', 'The camera is static.')
+            old_path = Path(self.packet['cache_dir'])/(old_key+'.json')
+            expansion.store_prompt(old_path, old_text, 'fixture')
+            old_bytes = old_path.read_bytes()
+            self.packet.update(expanded_key=old_key, expanded_prompt=old_text)
+            with patch.object(expansion, 'call', return_value={'choices': [{'message': {'content': fixtures.TEXT}}]}) as request:
+                result = expansion.expand(self.packet, 'vision', 'fixture', 'rule')
+            request.assert_called_once()
+            self.assertNotIn('camera is static', result)
+            self.assertEqual(old_path.read_bytes(), old_bytes)
+            self.assertEqual(self.packet['expanded_prompt'], old_text)
+
+    def test_manual_mode_keeps_user_text_without_api_call(self):
+        self.packet.update(material_note='@图1人物自然演唱。', shot_intent='固定镜头。')
+        with patch.object(expansion, 'public_settings', return_value={'base_url': 'https://compatible.test/v1'}), \
+             patch.object(expansion, 'call') as request:
+            result = expansion.expand(self.packet, 'manual', 'fixture', 'rule')
+        self.assertEqual(result, '@图1人物自然演唱。\n\n固定镜头。')
+        request.assert_not_called()
+
     def test_omni_uses_its_own_control(self):
         payload = self.payload('qwen3.8-omni-flash', 'dashscope.aliyuncs.com')
         self.assertEqual(payload['reasoning_effort'], 'none')

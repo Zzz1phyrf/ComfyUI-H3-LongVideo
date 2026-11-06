@@ -1,3 +1,0 @@
-# Current development instructions
-
-README.md and CHANGELOG.md describe the current public behavior. DEVELOPMENT.md and HANDOFF.md retain historical decisions; their older branch and publication restrictions are superseded by the user's 2026-09-26 authorization to publish the segment-materials feature and example repair to main. Keep unaccepted anchor-guide experiments and separate RunningHub work out of this release. API configuration belongs outside this repository. Do not print secrets. Keep unchanged legacy plans compatible through the controller's snapshot migration; keep the current node outputs and shipped example aligned. No delegation is needed for implementation.

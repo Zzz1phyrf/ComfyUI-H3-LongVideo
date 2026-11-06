@@ -88,6 +88,9 @@ class WorkerCacheTests(unittest.TestCase):
             self.resolve()
 
     def test_worker_reuses_resolved_path_during_cpu_fallback(self):
+        import soundfile as sf
+        import numpy as np
+        sf.write(self.root / "audio.wav", np.zeros(1600, dtype=np.float32), 16000)
         model = Mock()
         model.transcribe.return_value = (iter([]), types.SimpleNamespace(language="zh"))
         factory = Mock(side_effect=[RuntimeError("CUDA unavailable"), model])

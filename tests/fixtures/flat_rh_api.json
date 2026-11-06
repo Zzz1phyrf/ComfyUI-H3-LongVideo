@@ -1,0 +1,288 @@
+{
+  "248": {
+    "class_type": "LTXVAudioVAEEncode",
+    "inputs": {
+      "audio": [
+        "9000",
+        0
+      ],
+      "audio_vae": [
+        "10004",
+        0
+      ]
+    }
+  },
+  "251": {
+    "class_type": "LTXVSeparateAVLatent",
+    "inputs": {
+      "av_latent": [
+        "270",
+        0
+      ]
+    }
+  },
+  "122": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "251",
+        0
+      ],
+      "vae": [
+        "10003",
+        0
+      ]
+    }
+  },
+  "249": {
+    "class_type": "SolidMask",
+    "inputs": {
+      "value": 0,
+      "width": 64,
+      "height": 64
+    }
+  },
+  "250": {
+    "class_type": "SetLatentNoiseMask",
+    "inputs": {
+      "samples": [
+        "248",
+        0
+      ],
+      "mask": [
+        "249",
+        0
+      ]
+    }
+  },
+  "246": {
+    "class_type": "LTXVConcatAVLatent",
+    "inputs": {
+      "video_latent": [
+        "9101",
+        0
+      ],
+      "audio_latent": [
+        "250",
+        0
+      ]
+    }
+  },
+  "268": {
+    "class_type": "MiniMaxH3ImageToVideo",
+    "inputs": {
+      "clip": [
+        "10001",
+        0
+      ],
+      "vae": [
+        "10003",
+        0
+      ],
+      "width": 768,
+      "height": 1376,
+      "length": 226,
+      "prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 9.42-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera stays fixed, with framing consistent with the reference image. The person speaks naturally with natural hand gestures. Their appearance, clothing colors, background and lighting remain consistent throughout.\n\noverall_soundscape:\nThe supplied speech forms the soundtrack of this recording.\n\nnon_diegetic_music:\nN/A\n",
+      "first_frame": [
+        "9001",
+        0
+      ],
+      "last_frame": [
+        "9001",
+        0
+      ]
+    }
+  },
+  "270": {
+    "class_type": "SamplerCustom",
+    "inputs": {
+      "negative": [
+        "10008",
+        0
+      ],
+      "cfg": 1,
+      "model": [
+        "10009",
+        0
+      ],
+      "sigmas": [
+        "10007",
+        0
+      ],
+      "add_noise": true,
+      "sampler": [
+        "10006",
+        0
+      ],
+      "positive": [
+        "26000",
+        0
+      ],
+      "latent_image": [
+        "246",
+        0
+      ],
+      "noise_seed": 1013
+    }
+  },
+  "272": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "fps": 24.0,
+      "bit_depth": 8,
+      "color_space": "sRGB",
+      "codec": "none",
+      "images": [
+        "122",
+        0
+      ],
+      "audio": [
+        "9000",
+        0
+      ]
+    }
+  },
+  "273": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "filename_prefix": "H3LongVideo/FriendFlat20261031/male1_s01",
+      "format": "auto",
+      "format.codec": "auto",
+      "format.codec.encoding": "auto",
+      "video": [
+        "272",
+        0
+      ]
+    }
+  },
+  "9000": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "condition.wav",
+      "audioUI": ""
+    }
+  },
+  "9001": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "reference.png"
+    }
+  },
+  "9101": {
+    "class_type": "LTXVSeparateAVLatent",
+    "inputs": {
+      "av_latent": [
+        "268",
+        1
+      ]
+    }
+  },
+  "10000": {
+    "class_type": "ModelAttentionBackend",
+    "inputs": {
+      "attention": "comfy kitchen attention",
+      "model": [
+        "10005",
+        0
+      ]
+    }
+  },
+  "10009": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "zhnehisgan_c1-st900.safetensors",
+      "strength_model": 0.6,
+      "model": [
+        "10002",
+        0
+      ]
+    }
+  },
+  "10006": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    }
+  },
+  "10007": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "10009",
+        0
+      ],
+      "steps": 6
+    }
+  },
+  "10008": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "26000",
+        0
+      ]
+    }
+  },
+  "10003": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+    }
+  },
+  "10004": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    }
+  },
+  "10002": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "dmad_minimax_h3_4step_full_critic_comfy.safetensors",
+      "strength_model": 0.8,
+      "model": [
+        "10000",
+        0
+      ]
+    }
+  },
+  "10005": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "weight_dtype": "default",
+      "unet_name": "minimax_h3_fl2va_bf16.safetensors"
+    }
+  },
+  "10001": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+      "type": "minimax",
+      "device": "default"
+    }
+  },
+  "26000": {
+    "class_type": "MiniMaxH3AddGuide",
+    "inputs": {
+      "positive": [
+        "268",
+        0
+      ],
+      "latent": [
+        "268",
+        1
+      ],
+      "audio": [
+        "9000",
+        0
+      ],
+      "audio_vae": [
+        "10004",
+        0
+      ],
+      "frame_idx": 0
+    }
+  }
+}

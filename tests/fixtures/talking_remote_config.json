@@ -1,0 +1,350 @@
+{
+  "250": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "243",
+        0
+      ]
+    }
+  },
+  "210": {
+    "class_type": "ModelAttentionBackend",
+    "inputs": {
+      "attention": "comfy kitchen attention",
+      "model": [
+        "216",
+        0
+      ]
+    }
+  },
+  "232": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    }
+  },
+  "212": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+      "type": "minimax",
+      "device": "default"
+    }
+  },
+  "234": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "213",
+        0
+      ],
+      "steps": 6
+    }
+  },
+  "213": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "dmad_minimax_h3_4step_full_critic_comfy.safetensors",
+      "strength_model": 0.8,
+      "model": [
+        "210",
+        0
+      ]
+    }
+  },
+  "214": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+    }
+  },
+  "236": {
+    "class_type": "AudioCrop",
+    "inputs": {
+      "start_time": "0:00",
+      "end_time": "0:15",
+      "audio": [
+        "241",
+        0
+      ]
+    }
+  },
+  "215": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    }
+  },
+  "237": {
+    "class_type": "Audio Duration (mtb)",
+    "inputs": {
+      "audio": [
+        "236",
+        0
+      ]
+    }
+  },
+  "216": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "weight_dtype": "default",
+      "unet_name": "minimax_h3_fl2va_bf16.safetensors"
+    }
+  },
+  "238": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "fixture"
+    }
+  },
+  "239": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "fixture"
+    }
+  },
+  "219": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": [
+        "208",
+        0
+      ],
+      "pix_fmt": "yuv420p",
+      "format": "video/h264-mp4",
+      "frame_rate": [
+        "222",
+        0
+      ],
+      "pingpong": false,
+      "save_output": true,
+      "filename_prefix": "video/MiniMax_H3",
+      "loop_count": 0,
+      "save_metadata": false,
+      "crf": 19,
+      "trim_to_audio": false,
+      "no_preview": false,
+      "audio": [
+        "236",
+        0
+      ]
+    }
+  },
+  "240": {
+    "class_type": "ResolutionSelector",
+    "inputs": {
+      "aspect_ratio": "16:9 (Widescreen)",
+      "megapixels": 1,
+      "multiple": 32
+    }
+  },
+  "241": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "fixture",
+      "audioUI": ""
+    }
+  },
+  "243": {
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "inputs": {
+      "ref_images.ref_image_0": [
+        "238",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "239",
+        0
+      ],
+      "width": [
+        "240",
+        0
+      ],
+      "length": [
+        "223",
+        1
+      ],
+      "vae": [
+        "214",
+        0
+      ],
+      "prompt": "fixture",
+      "ref_image_size": "match",
+      "audio_vae": [
+        "215",
+        0
+      ],
+      "ref_audios.ref_audio_0": [
+        "225",
+        3
+      ],
+      "clip": [
+        "212",
+        0
+      ],
+      "height": [
+        "240",
+        1
+      ]
+    }
+  },
+  "222": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 24
+    }
+  },
+  "244": {
+    "class_type": "SelfLiftAvatarH3Sampler",
+    "inputs": {
+      "upscaler_model": "h3_upscaler_lms_v0.1.safetensors",
+      "latent_image": [
+        "249",
+        0
+      ],
+      "seed": 0,
+      "cfg": 1,
+      "w_max": 1,
+      "tiling_axis": "auto",
+      "transition_step": 4,
+      "positive": [
+        "243",
+        0
+      ],
+      "lowres_scale": 0.5,
+      "tiling_mode": "auto",
+      "sampler": [
+        "232",
+        0
+      ],
+      "negative": [
+        "250",
+        0
+      ],
+      "w_min": 0.5,
+      "low_res_model": [
+        "213",
+        0
+      ],
+      "rho": 0,
+      "vae": [
+        "214",
+        0
+      ],
+      "sigmas": [
+        "234",
+        0
+      ],
+      "tiling_tiles": 2,
+      "highres_tiling": false
+    }
+  },
+  "223": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "max(5, ceil(a * b)) + (5 - (max(5, ceil(a * b)) % 17)) % 17",
+      "values.b": [
+        "222",
+        0
+      ],
+      "values.a": [
+        "224",
+        1
+      ]
+    }
+  },
+  "245": {
+    "class_type": "LTXVAudioVAEEncode",
+    "inputs": {
+      "audio": [
+        "236",
+        0
+      ],
+      "audio_vae": [
+        "215",
+        0
+      ]
+    }
+  },
+  "224": {
+    "class_type": "MathExpression|pysssss",
+    "inputs": {
+      "a": [
+        "237",
+        0
+      ],
+      "expression": "a/1000"
+    }
+  },
+  "246": {
+    "class_type": "LTXVSeparateAVLatent",
+    "inputs": {
+      "av_latent": [
+        "243",
+        1
+      ]
+    }
+  },
+  "225": {
+    "class_type": "AudioSeparation",
+    "inputs": {
+      "chunk_fade_shape": "linear",
+      "chunk_length": 10,
+      "audio": [
+        "236",
+        0
+      ],
+      "chunk_overlap": 0.1
+    }
+  },
+  "247": {
+    "class_type": "SolidMask",
+    "inputs": {
+      "width": 64,
+      "value": 0,
+      "height": 64
+    }
+  },
+  "248": {
+    "class_type": "SetLatentNoiseMask",
+    "inputs": {
+      "samples": [
+        "245",
+        0
+      ],
+      "mask": [
+        "247",
+        0
+      ]
+    }
+  },
+  "249": {
+    "class_type": "LTXVConcatAVLatent",
+    "inputs": {
+      "audio_latent": [
+        "248",
+        0
+      ],
+      "video_latent": [
+        "246",
+        0
+      ]
+    }
+  },
+  "208": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "vae": [
+        "214",
+        0
+      ],
+      "samples": [
+        "244",
+        0
+      ]
+    }
+  }
+}

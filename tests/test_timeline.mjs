@@ -1,7 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {fitWindow, zoomWindow, pcmWavePeaks, createTimeline} from '../web/timeline.js';
+import {fitWindow, zoomWindow, pcmWavePeaks, createTimeline, cutRange} from '../web/timeline.js';
+
+test('MV short splits and late tail cuts retain one frame and the fifteen-second cap',()=>{
+  const split=cutRange(0,5.62);
+  assert.ok(split.min<=2.59 && split.max>=2.59);
+  const tail=cutRange(28.633,36.688);
+  assert.ok(tail.max>33.5);
+  assert.ok(cutRange(0,.04).min>cutRange(0,.04).max);
+  assert.deepEqual(cutRange(0,30),{min:15,max:15});
+  assert.ok(cutRange(0,30.1).min>cutRange(0,30.1).max);
+  assert.ok(cutRange(0,5.62,15,4).min>cutRange(0,5.62,15,4).max);
+  assert.equal(cutRange(28.633,36.688,15,4).max,32.688);
+});
+
+test('production MV drag handler moves the last cut forward while preserving the cap',async()=>{
+  const source=await readFile(new URL('../web/h3lv.js',import.meta.url),'utf8');
+  const handler=source.slice(source.indexOf('  function moveBoundary('),source.indexOf('  createTimeline(canvas, state,'));
+  const rows=[{end:{value:'28.633'}},{end:{value:'32.688'}},{end:{value:'36.688'}}];
+  const move=Function('rows','plan','cutRange','refreshDraftDisplays','markDirty','updateSelected',
+    handler+';return moveBoundary;')(rows,{max_seconds:15},cutRange,()=>{},()=>{},()=>{});
+  move(1,33.2);
+  assert.equal(Number(rows[1].end.value),33.2);
+  move(1,50);
+  assert.ok(Number(rows[1].end.value)<36.688);
+  assert.ok(36.688-Number(rows[1].end.value)>=1/24);
+  rows[0].end.value='0';rows[2].end.value='30';move(1,16);
+  assert.equal(Number(rows[1].end.value),15);
+});
 
 test('long-song zoom keeps the pointer time anchored', () => {
   const view={start:0,span:209.269};

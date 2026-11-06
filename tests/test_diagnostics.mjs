@@ -79,7 +79,8 @@ test("long-video node exposes a non-serialized download widget without changing 
     .replace(/^import .*;\r?\n/gm, "")
     .replace('new URL("./h3lv.css", import.meta.url).href', '"h3lv.css"');
   vm.runInNewContext(script, {app, document: {querySelector: () => ({})},
-    setTimeout: callback => callback(), downloadErrorLog: async () => {downloads++;}});
+    setTimeout: callback => callback(), downloadErrorLog: async () => {downloads++;},
+    syncHiddenWidgetConnections:()=>{},alignProjectNode:()=>{},setTalkingStatus:()=>{}});
   function Node() {}
   await extension.beforeRegisterNodeDef(Node, {name: "H3LVUnified"});
   const node = {widgets: [], inputs: [],

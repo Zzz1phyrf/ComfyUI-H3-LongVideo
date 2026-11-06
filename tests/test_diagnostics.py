@@ -130,9 +130,9 @@ class DiagnosticsTests(unittest.TestCase):
         controller = importlib.import_module("h3lv_test.controller")
         with patch.object(nodes, "audio_array", side_effect=ValueError("invalid audio")):
             with self.assertRaisesRegex(ValueError, "invalid audio"):
-                nodes.Unified().process(None, "speaking", 15, 10, "", "", "auto")
+                nodes.Unified().process(None, "singing", 15, 10, "", "", "auto")
         packet = {"project_id": "abc", "segment_index": 2, "paths": ["fixture.png"], "hashes": ["fixture"],
-                  "material_note": "", "visual_type": "performance", "mode": "speaking",
+                  "material_note": "", "visual_type": "performance", "mode": "singing",
                   "brief": "PRIVATE-PROMPT", "duration": 10, "generation_frames": 242,
                   "generation_seconds": 242 / 24, "cache_dir": self.directory.name + "/cache",
                   "audio_role": "vocal", "audio_section": "vocal", "audio_role_reason": "fixture"}
@@ -250,7 +250,7 @@ class DiagnosticRouteTests(unittest.IsolatedAsyncioTestCase):
                     text = await download.text()
                     self.assertNotIn("private-configured-key", text)
                     self.assertNotIn("PRIVATE-PROMPT", text)
-                    events = [json.loads(line) for line in text.splitlines()]
+                    events = [value for line in text.splitlines() if (value:=json.loads(line)).get('level')=='ERROR']
                     self.assertEqual(events[0]["source"], "expansion_models")
                     self.assertEqual(events[-1]["stage"], "frontend")
                     too_large = await client.post("/h3lv/logs/frontend", json={"message": "x" * 40000})
