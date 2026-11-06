@@ -1,4 +1,4 @@
-import {createTimeline} from "./timeline.js?v=segments-20261027b";
+import {createTimeline, alignAnchoredCuts} from "./timeline.js?v=anchor-cuts-20261106";
 import {talkingStatus} from './talking_status.js?v=segments-20261027';
 import {syncWorkflowStatus} from './talking_progress.js?v=progress-20261028c';
 
@@ -10,7 +10,21 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
   let promptVersions, promptDirty=false, promptSignature='', promptLoading=false;
   const promptEdits=new Map();
   let rowsSignature='';
+  let cutNotice='',closing=false;
   window.h3talkHasUnsavedChanges=()=>dirty || promptDirty;
+  async function closePanel(close) {
+    if(pending){fail(new Error('请等待当前保存操作完成后再关闭。'));return;}
+    if(closing)return;
+    closing=true;
+    try {
+      if(window.h3talkHasUnsavedChanges()) {
+        const confirm=window.parent?.comfyAPI?.app?.app?.h3lvConfirmDialog;
+        const options={title:'放弃未保存的修改并关闭？',message:'只放弃本面板尚未保存的切点和提示词修改。已保存项目、视频和正在运行的任务不受影响。',confirmText:'放弃修改并关闭',confirmClass:'stop',tone:'warning'};
+        if(confirm?!await confirm(options):!window.confirm(options.message))return;
+      }
+      close.__h3talkOriginalClose?.();
+    } finally {closing=false;}
+  }
   function syncHost() {
     if(window.parent===window){document.body.classList.add('h3talk-standalone');return;}
     const frame=window.frameElement,shade=frame?.closest('#h3talk-modal');
@@ -37,7 +51,7 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     }
     if(close && select) {
       close.__h3talkOriginalClose ??= close.onclick;select.__h3talkOriginalChange ??= select.onchange;
-      close.onclick=()=>{if(window.h3talkHasUnsavedChanges()){fail(new Error('请先保存或撤销切点、提示词修改，再关闭面板。'));return;}close.__h3talkOriginalClose?.();};
+      close.onclick=()=>closePanel(close);
       select.onchange=()=>{if(window.h3talkHasUnsavedChanges()){select.value=pid;fail(new Error('请先保存或撤销修改，再切换项目。'));return;}select.__h3talkOriginalChange?.();};
     }
     frame.removeAttribute('style');frame.className='h3talk-host-frame';
@@ -67,7 +81,12 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
   }
   function promptKey(value) {return JSON.stringify([value.editing_fingerprint,value.segments.map(row=>[row.job?.directory,row.job?.task_id,row.job?.status,row.prompt_draft?.sha256])]);}
   function draftEnds() {return rows.slice(0,-1).map(row=>Number(row.end.value));}
+  function anchored() {return plan?.config.talking_profile==='fl2va-flat-rh-v1';}
   function validCutDraft() {
+    if(anchored()) {
+      try {return alignAnchoredCuts(draftEnds(),plan.duration).every((t,i)=>Math.abs(t-Number(rows[i].end.value))<1e-5);}
+      catch {return false;}
+    }
     let start=0;
     return rows.every(row=>{const end=Number(row.end.value),length=end-start;start=end;return row.end.value!=='' && Number.isFinite(end) && length>0 && length<=15 && (length>=4 || rows.length===1 && plan.duration<4);});
   }
@@ -123,9 +142,22 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     await perform('prompt',{index,text:draft.text,expected_sha256:promptVersions.windows[index].draft?.sha256 ?? null,expected_fingerprint:draft.expected});
   }
   function resetPrompt(index) {promptEdits.delete(index);promptDirty=promptEdits.size>0;actionError='';showPrompts();apply(plan);}
+  function alignedEnds(ends) {
+    if(!anchored())return ends;
+    const cuts=alignAnchoredCuts(ends.slice(0,-1),plan.duration);
+    const changes=cuts.map((t,i)=>Math.abs(t-ends[i])).filter(delta=>delta>1e-5);
+    if(changes.length)cutNotice=`已对齐 ${changes.length} 个切点，最大调整 ${Math.max(...changes).toFixed(3)} 秒。请试听后保存。`;
+    return [...cuts,plan.duration];
+  }
+  function normalizeCutDraft() {
+    try {
+      const ends=alignedEnds(rows.map(row=>Number(row.end.value)));
+      ends.forEach((time,i)=>rows[i].end.value=time.toFixed(6));actionError='';return true;
+    } catch(error){fail(error);return false;}
+  }
   function changeLayout(ends,sources) {
     if(cutBlocked()){fail(new Error('请先保存提示词修改，或等待当前操作完成，再调整切点。'));return;}
-    dirty=true;renderRows(ends,sources);refreshTimes();apply(plan);
+    ends=alignedEnds(ends);actionError='';dirty=true;renderRows(ends,sources);refreshTimes();apply(plan);
   }
   function splitAt(time) {
     const index=rows.findIndex(row=>time<Number(row.end.value));if(index<0)return;
@@ -141,11 +173,13 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     ends.splice(index,1);sources.splice(index+1,1);selected=index;changeLayout(ends,sources);
   }
   function moveCut(index,time) {
-    if(cutBlocked())return;
+    if(cutBlocked() || index>=rows.length-1 || !Number.isFinite(time))return;
     const previous=index?Number(rows[index-1].end.value):0,next=Number(rows[index+1].end.value);
     const low=Math.max(previous+4,next-15),high=Math.min(previous+15,next-4);
     if(low>high)return;
-    rows[index].end.value=Math.max(low,Math.min(high,time)).toFixed(6);refreshTimes();mark();
+    rows[index].end.value=Math.max(low,Math.min(high,time)).toFixed(6);
+    if(!normalizeCutDraft())return;
+    refreshTimes();mark();
   }
   function renderRows(ends,sources=ends.map((_,i)=>i)) {
     const signature=JSON.stringify([ends,sources,plan.preview_intervals,plan.segments.map(row=>row.job)]);
@@ -208,13 +242,14 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
   }
   function apply(value,force=false) {
     plan=value;const active=plan.controller_active,local=plan.config.backend==='local',regenerating=Boolean(plan.regeneration);
-    if(force){dirty=false;renderRows(savedEnds());}
+    if(force){dirty=false;cutNotice='';renderRows(savedEnds());}
     else if(!dirty)renderRows(savedEnds());
     $('state').textContent=talkingStatus(plan)+(plan.approved?' · 分段已确认':' · 分段待确认');
     if(typeof window!=='undefined' && window.parent!==window)syncWorkflowStatus(window.parent,plan.id,talkingStatus(plan));
     $('overview-meta').textContent=`${plan.duration.toFixed(3)}秒 · ${plan.segments.length}段 · ${plan.resolution_summary || (plan.config.megapixels+' MP')} · ${local?'本地生成':'RunningHub / '+plan.config.instance_type} · 音频：${plan.config.audio_processing || '旧项目沿用原处理'}`;
     $('error').textContent=actionError || plan.error || (!plan.credential_configured?'请在节点的RH API设置中保存凭据，再刷新状态。':'');
-    $('dirty').textContent=dirty?'切点尚未保存。保存并确认后，受影响的段将等待重新生成，旧视频保留。':plan.segmentation_summary || '拖动彩色切点调整分段；新增或合并后的每段为4–15秒。';
+    const cutHelp=anchored()?'切点自动对齐到首尾锚定可用位置；增删切点可能联动后续切点，请试听后保存。':'';
+    $('dirty').textContent=dirty?cutNotice+'切点尚未保存。保存后受影响的段将等待重新生成，旧视频保留。':cutHelp || plan.segmentation_summary || '拖动彩色切点调整分段；新增或合并后的每段为4–15秒。';
     $('approve').disabled=active || pending || regenerating || promptDirty || dirty && !validCutDraft();
     $('reset-cuts').hidden=!dirty;$('reset-cuts').disabled=active || pending;
     $('run').disabled=active || pending || dirty || promptDirty || !plan.approved || !plan.credential_configured;
@@ -279,7 +314,7 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     const reference=document.querySelector('.h3talk-reference');reference.ontoggle=()=>{reference.querySelector('.h3lv-default-materials-toggle').textContent=reference.open?'收起':'展开';};
     if(typeof window.frameElement?.__h3talkAnalyze==='function'){$('reanalyze').hidden=false;$('reanalyze').onclick=()=>window.frameElement.__h3talkAnalyze();}
     analysis=await request('waveform');plan=await request('');
-    timeline=createTimeline($('timeline'),()=>({plan:{...plan,max_seconds:independent()?15:plan.max_seconds,controller_active:cutBlocked(),segments:rows.map(()=>({}))},rows,selected,analysis,singleTrack:true}),index=>selectedWindow(index),moveCut,()=>{},async(start,end,signal)=>{
+    timeline=createTimeline($('timeline'),()=>({plan:{...plan,max_seconds:anchored()?345/24:independent()?15:plan.max_seconds,controller_active:cutBlocked(),segments:rows.map(()=>({}))},rows,selected,analysis,singleTrack:true,anchorCuts:anchored()}),index=>selectedWindow(index),moveCut,()=>{},async(start,end,signal)=>{
       const response=await fetch(base+`/waveform?start=${start}&end=${end}`,{signal});if(!response.ok)throw new Error('局部波形加载失败');return (await response.json()).waveform;
     },splitAt,removeCut);
     apply(plan,true);await loadPrompts();

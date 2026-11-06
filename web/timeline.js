@@ -50,6 +50,39 @@ export function cutRange(start, end, maximum = 15, minimum = 1/24) {
           max: Math.floor(Math.min(end-minimum, start+maximum)*1000)/1000};
 }
 
+// Keep the accepted first/last-frame generation clock. Only the draft cuts move;
+// no padding/cropping of intermediate segments or audio retiming is introduced.
+export function alignAnchoredCuts(cuts, duration) {
+  const total = Math.ceil(duration*24), targets = cuts.map(time => Math.round(time*24));
+  if (!Number.isFinite(duration) || total < 1 || targets.some((frame,i) =>
+    !Number.isFinite(frame) || frame <= (i ? targets[i-1] : 0) || frame >= total)) {
+    throw new Error('切点必须递增且位于原声范围内。');
+  }
+  const tailMin = Math.min(96,total);
+  let states = new Map([[0,{frame:0,cost:0,previous:null}]]);
+  for (let i=0; i<targets.length; i++) {
+    const next = new Map(), remaining = targets.length-i-1;
+    for (const state of states.values()) {
+      for (let length=107; length<=345; length+=17) {
+        const frame=state.frame+length, rest=total-frame;
+        if (rest < remaining*107+tailMin || rest > remaining*345+345) continue;
+        const cost=state.cost+(frame-targets[i])**2;
+        if (!next.has(frame) || cost<next.get(frame).cost) next.set(frame,{frame,cost,previous:state});
+      }
+    }
+    states=next;
+  }
+  let best=null;
+  for (const state of states.values()) {
+    const tail=total-state.frame;
+    if (tail>=tailMin && tail<=345 && (!best || state.cost<best.cost)) best=state;
+  }
+  if (!best) throw new Error('当前段数无法满足首尾锚定时长，请减少或增加切点。');
+  const result=[];
+  while (best.previous) {result.push(best.frame/24);best=best.previous;}
+  return result.reverse();
+}
+
 export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loadDetail, onSplit, onRemove) {
   let project = null, view = {start: 0, span: 1}, dragIndex = -1, changed = false;
   let hover = null, pan = null, detail = null, detailKey = "", detailStatus = "";
@@ -115,7 +148,9 @@ export function createTimeline(canvas, getState, onSelect, onMove, onCommit, loa
   const hint = document.createElement("div");
   hint.className = "h3lv-help";
   hint.textContent = "双击波形放大附近；Ctrl / ⌘ + 滚轮缩放；Shift + 滚轮横移。拖动彩色切点线调整，普通滚轮滚动页面。"+
-    (onSplit ? (getState().singleTrack
+    (onSplit ? (getState().anchorCuts
+      ? " 单击波形或输入秒数增加切点；切点自动对齐可用位置，可能联动相邻切点，保存前请试听。"
+      : getState().singleTrack
       ? " 单击波形选择新切点，或输入秒数；拆分后两段均须4–15秒，新增后需保存并确认。"
       : " 单击波形选择新切点，或输入秒数；每段至少保留一帧，最长15秒，新增后需保存并确认。") : '')+
     (onRemove ? ` 点击彩色切点线，再点删除切点合并两侧片段；沿用前段${getState().singleTrack?'提示词':'素材'}，检查后保存并确认。` : '');

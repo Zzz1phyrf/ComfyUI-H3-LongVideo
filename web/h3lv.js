@@ -550,6 +550,17 @@ function clearVideoNodePreview(videoId) {
   return true;
 }
 
+function showProjectVideoPreview(plan) {
+  // A state request can finish after the user switches workflow tabs.
+  const bound=(app.graph?._nodes || []).some(node=>node.comfyClass==='H3LVUnified' &&
+    String(node.properties?.h3lv_project || node.widgets?.find(w=>w.name==='project_id')?.value || '')===String(plan.id));
+  if(!bound)return false;
+  const latest=[...(plan.segments || [])].reverse().find(row=>
+    row.job?.status==='completed' && !needsReplacement(row) && row.video_preview?.filename);
+  const preview=!plan.final_stale && plan.final_preview?.filename ? plan.final_preview : latest?.video_preview;
+  return showFinalOnVideoNode(preview,plan.id,plan.video_output_id);
+}
+
 async function restoreFinalVideoPreview() {
   const owners = (app.graph?._nodes || []).filter(node => node.comfyClass === "H3LVUnified");
   const projectIds = [...new Set(owners.map(node => String(
@@ -558,7 +569,7 @@ async function restoreFinalVideoPreview() {
   for (const projectId of projectIds) {
     try {
       const plan = await request(`/h3lv/project/${encodeURIComponent(projectId)}`);
-      if (plan.final_preview) showFinalOnVideoNode(plan.final_preview, projectId, plan.video_output_id);
+      showProjectVideoPreview(plan);
     } catch {}
   }
 }
@@ -1125,7 +1136,7 @@ async function openReview(owner) {
     analysis = await request(endpoint("/analysis"));
     if (widget) widget.value = plan.id;
     owner.properties = {...owner.properties, h3lv_project: plan.id};
-    if (plan.final_preview) showFinalOnVideoNode(plan.final_preview, plan.id, plan.video_output_id);
+    showProjectVideoPreview(plan);
     dirty = false; selected = Math.min(selected, plan.segments.length-1);
     status.textContent = statusText(plan);
     canvasProgress(owner,canvasProgressText(plan));
@@ -1321,6 +1332,7 @@ app.registerExtension({
         // The stage event has no completed jobs or task ID; read the saved state only.
         try {
           const latest=await request(`/h3lv/project/${data.project_id}`);
+          showProjectVideoPreview(latest);
           for (const node of nodes) {
             const current=node.properties?.h3lv_project || node.widgets?.find(w=>w.name==='project_id')?.value;
             if (current===data.project_id) canvasProgress(node,canvasProgressText(latest));

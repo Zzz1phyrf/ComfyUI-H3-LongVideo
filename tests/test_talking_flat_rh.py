@@ -34,6 +34,32 @@ def config():
 
 
 class FlatTests(unittest.TestCase):
+    def test_frontend_cut_alignment_saves_with_actual_backend_for_both_modes(self):
+        # Use the shipped JS draft normalizer and the real save/verify path together.
+        script = """
+import {alignAnchoredCuts} from './web/timeline.js';
+const duration=944170/24000;
+const draft=[9.417,18.739,29.667];
+const aligned=alignAnchoredCuts(draft,duration);
+const split=alignAnchoredCuts([4.5,...aligned],duration);
+const removed=alignAnchoredCuts(aligned.filter((_,i)=>i!==1),duration);
+console.log(JSON.stringify([aligned,split,removed]));
+"""
+        result=subprocess.run(['node','--input-type=module','-e',script],cwd=HERE.parent,
+                              capture_output=True,text=True,check=True)
+        variants=json.loads(result.stdout)
+        for backend in ('local','RunningHub'):
+            with self.subTest(backend=backend),tempfile.TemporaryDirectory() as temp:
+                root=Path(temp)/'projects';cfg=config();cfg['backend']=backend
+                p=project.prepare(root,np.zeros((944170,1),np.float32),24000,[Image.new('RGB',(32,32))],None,cfg,'test')
+                for cuts in variants:
+                    p=project.update_cuts(root,p['id'],cuts)
+                    project.verify_assets(root,p)
+                    self.assertEqual(p['manual_cuts'],[round(t*24) for t in cuts])
+                    self.assertEqual(p['segments_clock'][-1]['end_sample'],944170)
+                    self.assertEqual(sum(r['edit_frames'] for r in p['segments_clock']),945)
+                    self.assertTrue(all(r['edit_frames']==r['generation_frames'] for r in p['segments_clock'][:-1]))
+
     def test_reference_geometry_symmetric_crop_and_configurable_size(self):
         rng=np.random.default_rng(123)
         for size,target,box in [((941,1672),(768,1376),(4,0,937,1672)),

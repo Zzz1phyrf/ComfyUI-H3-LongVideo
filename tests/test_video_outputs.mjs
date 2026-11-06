@@ -6,6 +6,49 @@ import {generationOutputs} from "../web/video_outputs.js";
 
 const source = fs.readFileSync(new URL("../web/h3lv.js", import.meta.url), "utf8");
 
+function previewRecovery(plan) {
+  const owner={comfyClass:'H3LVUnified',properties:{h3lv_project:'project'}};
+  const saver={id:273,comfyClass:'SaveVideo'},events=[];
+  const app={graph:{_nodes:[owner,saver]}};
+  const start=source.indexOf('function showFinalOnVideoNode('),end=source.indexOf('function statusText(',start);
+  const needs=source.slice(source.indexOf('function needsReplacement('),source.indexOf('function outputPreviewUrl('));
+  const restore=vm.runInNewContext(needs+source.slice(start,end)+'\nrestoreFinalVideoPreview',{
+    app,request:async()=>plan,api:{dispatchCustomEvent:(name,detail)=>events.push(detail)},
+  });
+  return {restore,events,owner,app};
+}
+
+test('missed RH segment event recovers latest saved preview without submitting a task',async()=>{
+  const plan={id:'project',video_output_id:273,final_preview:null,segments:[
+    {job:{status:'completed'},video_preview:{filename:'first.mp4'}},
+    {job:{status:'completed'},video_preview:{filename:'second.mp4'}},
+    {job:{status:'submitted'}},
+  ]};
+  const r=previewRecovery(plan);await r.restore();
+  assert.equal(r.events.length,1);
+  assert.equal(r.events[0].output.images[0].filename,'second.mp4');
+  await r.restore();assert.equal(r.events.length,1);
+});
+
+test('recovery prefers current final and does not publish stale replacement clips',async()=>{
+  const plan={id:'project',video_output_id:273,final_preview:{filename:'final.mp4'},segments:[
+    {job:{status:'completed'},video_preview:{filename:'fresh.mp4'}},
+    {needs_regeneration:true,job:{status:'completed',video:'old.mp4'},video_preview:{filename:'old.mp4'}},
+    {job:{status:'submitted'},replacement_previous_job:{status:'completed'},video_preview:{filename:'previous.mp4'}},
+  ]};
+  const r=previewRecovery(plan);await r.restore();
+  assert.equal(r.events[0].output.images[0].filename,'final.mp4');
+  plan.final_stale=true;await r.restore();
+  assert.equal(r.events[1].output.images[0].filename,'fresh.mp4');
+});
+
+test('late recovery response cannot populate a different workflow canvas',async()=>{
+  const plan={id:'project',video_output_id:273,final_preview:{filename:'final.mp4'},segments:[]};
+  const r=previewRecovery(plan),pending=r.restore();
+  r.app.graph._nodes=r.app.graph._nodes.filter(n=>n!==r.owner);
+  await pending;assert.equal(r.events.length,0);
+});
+
 async function payloadFor(prompt, chooseVideoOutput = () => {throw new Error("unexpected output selection");}) {
   const start = source.indexOf("async function buildGenerationPayload()");
   const end = source.indexOf("const startingProjects", start);
