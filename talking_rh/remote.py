@@ -8,6 +8,7 @@ import uuid
 
 import requests
 from ..rh_credentials import api_key
+from ..diagnostics import redact
 
 
 class RemoteError(RuntimeError):
@@ -20,6 +21,40 @@ class Rejected(RemoteError):
 
 class TransientRemoteError(RemoteError):
     """A read-only query may retry this transport failure."""
+
+
+def response_reason(data, key='', status=None):
+    """Keep provider error evidence, never request bodies, credentials or graphs."""
+    parts = [f'HTTP {status}'] if status is not None else []
+    fields = ('code', 'errorCode', 'msg', 'message', 'errorMessage', 'errorMsg',
+              'errorType', 'type', 'class_type', 'node_id', 'nodeId', 'details')
+
+    def collect(value, depth=0):
+        if depth > 8 or len(parts) >= 24:return
+        if isinstance(value, str):
+            # promptTips can contain ComfyUI's JSON validation errors.
+            if value.lstrip().startswith(('{', '[')):
+                try:collect(json.loads(value), depth+1)
+                except ValueError:parts.append(value)
+            else:parts.append(value)
+        elif isinstance(value, dict):
+            for name in fields:
+                item = value.get(name)
+                if isinstance(item, (str, int, float)) and not isinstance(item, bool):
+                    parts.append(f'{name}: {item}')
+            for name in ('error', 'errors', 'data', 'promptTips'):
+                if name in value:collect(value[name], depth+1)
+            nodes = value.get('node_errors')
+            if isinstance(nodes, dict):
+                for node_id, detail in list(nodes.items())[:8]:
+                    parts.append(f'node: {node_id}')
+                    collect(detail, depth+1)
+        elif isinstance(value, list):
+            for item in value[:8]:collect(item, depth+1)
+
+    collect(data)
+    text = '；'.join(dict.fromkeys(parts)) or '服务未返回具体错误原因'
+    return redact(text, key, 2000)
 
 
 def validate_config(config):
@@ -52,7 +87,13 @@ class Client:
             retryable = (not isinstance(exc,requests.HTTPError) or
                          exc.response is not None and (exc.response.status_code==429 or exc.response.status_code>=500))
             error = TransientRemoteError if retryable else RemoteError
-            raise error('RH请求或返回内容未能确认。任务ID如已保存，继续时只查询该任务；不会自动重建。') from None
+            response = getattr(exc, 'response', None)
+            data = {}
+            if response is not None:
+                try:data = response.json()
+                except ValueError:pass
+            detail = response_reason(data, self.key, response.status_code if response is not None else None)
+            raise error(f'RH请求或返回内容未能确认：{detail}。任务ID如已保存，继续时只查询该任务；不会自动重建。') from None
 
     def upload(self,path):
         try:
@@ -66,7 +107,7 @@ class Client:
             record = data.get('data')
             name = (record.get('filename') or record.get('fileName')) if isinstance(record,dict) else None
             if data.get('code') not in (0,200) or not isinstance(name,str) or not name.strip():
-                raise RemoteError('RH素材上传被拒绝，请检查账号权限及文件类型。')
+                raise RemoteError('RH素材上传被拒绝：'+response_reason(data,self.key))
             return name
         except (requests.RequestException,ValueError):
             raise RemoteError('素材上传失败，尚未提交新的生成任务。请检查网络后继续。') from None
@@ -87,7 +128,7 @@ class Client:
             'nodeInfoList':overrides,
             'instanceType':self.config['instance_type'],'addMetadata':True,'apiKey':self.key},120)
         if data.get('code')!=0:
-            raise Rejected('RH明确拒绝创建任务，请检查工作流权限、额度或节点配置后手动重试。')
+            raise Rejected('RH拒绝创建任务：'+response_reason(data,self.key))
         record = data.get('data')
         task_id = str(record.get('taskId') or '') if isinstance(record,dict) else ''
         if not task_id.isdigit():
@@ -100,7 +141,7 @@ class Client:
         record = data.get('data')
         value = record.get('prompt') if isinstance(record,dict) else None
         if data.get('code') != 0 or not isinstance(value,(str,dict)):
-            raise RemoteError('无法读取RH工作流，请检查ID、区域及访问权限。尚未提交生成任务。')
+            raise RemoteError('无法读取RH工作流：'+response_reason(data,self.key)+'。尚未提交生成任务。')
         try:
             graph = json.loads(value) if isinstance(value,str) else value
             if not isinstance(graph,dict):raise ValueError('RH workflow must be an object')

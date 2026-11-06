@@ -341,8 +341,8 @@ async def segment(root,pid,index,snapshot,client):
         report(root,pid,'rh_submitting',index)
         try:
             task_id = await asyncio.to_thread(client.create,graph)
-        except Rejected:
-            job.update(status='failed',provider_status='REJECTED',error='RH明确拒绝创建；请检查配置后手动重试。')
+        except Rejected as exc:
+            job.update(status='failed',provider_status='REJECTED',error=str(exc))
             plan = read_plan(root,pid);plan['segments'][index]['job'] = job;write_plan(root,plan)
             raise
         job.update(task_id=task_id,status='submitted')

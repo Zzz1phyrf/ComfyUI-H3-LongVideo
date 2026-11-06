@@ -193,8 +193,8 @@ def run_project(root,pid,client,*,validate=validate_outputs,assemble=None,sleep=
             report(root,pid,'submitting',index)
             try:
                 task_id = client.create(graph,job['task_id']) if plan['config'].get('backend')=='local' else client.create(graph)
-            except Rejected:
-                job['status']='rejected'
+            except Rejected as exc:
+                job.update(status='rejected',error=redact(str(exc),configured_key(),2400))
                 change(root,pid,lambda p:p['segments'][index].update(job=job))
                 raise
             job.update(task_id=task_id,status='submitted')
