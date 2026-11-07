@@ -20,7 +20,7 @@ function dialog(title) {
   const close = element("button", header, "关闭"); close.onclick = () => shade.remove();
   const main = element("main", panel); main.className = "h3lv-content";
   const status = element("p", main); status.setAttribute("role", "status");
-  return {main, status};
+  return {main, status, close, shade};
 }
 function button(parent, text, status, action) {
   const b = element("button", parent, text); b.className = "h3lv-button";
@@ -36,9 +36,9 @@ const options = node => ({mode:widget(node,"mode").value, model:widget(node,"mod
   rule:widget(node,"rule").value, expansion_revision:Number(widget(node,"revision").value)});
 
 async function settingsDialog(node) {
-  const {main, status} = dialog("MiniMax H3 · MV Prompt Expander — API 设置");
+  const {main, status, close, shade} = dialog("MiniMax H3 · MV Prompt Expander — API 设置");
   const profile = await request("/h3lv/expansion/settings");
-  element("p", main, "配置仅保存在本机，不随工作流导出。更换服务后请填写对应密钥。");
+  element("p", main, "配置仅保存在本机，不随工作流导出。更换服务后请填写对应密钥。读取模型列表或使用所选模型时，会先保存当前配置。");
   const addressLabel = element("label", main, "API 基础地址");
   const address = element("input", addressLabel); address.value = profile.base_url; address.type = "url";
   const keyLabel = element("label", main, "API Key");
@@ -63,21 +63,47 @@ async function settingsDialog(node) {
   const extra = element("textarea", advanced); extra.rows = 5; extra.value = JSON.stringify(profile.extra_body || {}, null, 2);
   extra.setAttribute("aria-label", "额外请求参数");
   element("p", main, "不自动重试：超时请求可能已产生费用。支持标准 /chat/completions 的服务；多图扩写还需模型支持图片输入。");
-  button(main, "保存本机配置", status, async () => {
+  const fields = [address, key, timeout, responseMode, thinking, extra];
+  const formValue = () => JSON.stringify(fields.map(field => String(field.value)));
+  let savedValue = formValue(), saving = null;
+  const dirty = () => formValue() !== savedValue;
+  for (const field of fields) field.oninput = field.onchange = () => {
+    status.textContent = dirty() ? "配置已修改，尚未保存。点击保存、读取模型列表或使用所选模型后生效。" : "";
+  };
+  close.onclick = () => {
+    if (!saving && dirty() && !window.confirm("API 配置尚未保存。确定放弃修改并关闭？取消可返回保存。")) return;
+    shade.remove();
+  };
+  async function saveCurrent() {
+    if (saving) return saving;
+    if (!dirty()) return;
     let extraBody;
     try {extraBody = JSON.parse(extra.value);} catch {throw new Error("额外请求参数不是有效 JSON，请修正或填写 {}。");}
-    await request("/h3lv/expansion/settings", {base_url:address.value, api_key:key.value,
+    const payload = {base_url:address.value, api_key:key.value,
       timeout_seconds:Number(timeout.value), response_mode:responseMode.value,
-      thinking_mode:thinking.value, extra_body:extraBody});
-    key.value = ""; status.textContent = "配置已保存。";
+      thinking_mode:thinking.value, extra_body:extraBody};
+    for (const field of fields) field.disabled = true;
+    saving = request("/h3lv/expansion/settings", payload).then(result => {
+      address.value = result.base_url;
+      key.value = "";
+      key.placeholder = result.configured ? "已配置，留空保留当前密钥" : "粘贴密钥";
+      savedValue = formValue();
+    }).finally(() => {
+      for (const field of fields) field.disabled = false;
+      saving = null;
+    });
+    return saving;
+  }
+  button(main, "保存本机配置", status, async () => {
+    await saveCurrent(); status.textContent = "配置已保存。";
   });
   const search = element("input", main); search.placeholder = "筛选模型名称，例如 qwen";
   const models = element("select", main); models.size = 9;
   let names = [];
   const render = () => {models.replaceChildren(); names.filter(name => name.toLowerCase().includes(search.value.toLowerCase())).forEach(name => element("option", models, name).value = name);};
   search.oninput = render;
-  button(main, "读取模型列表", status, async () => {names = (await request("/h3lv/expansion/models")).models; render(); status.textContent = `读取到 ${names.length} 个模型；多图扩写需选择支持视觉的模型。`;});
-  button(main, "使用所选模型", status, async () => {if (!models.value) throw new Error("请先选择模型。"); widget(node,"model").value = models.value; node.setDirtyCanvas(true); status.textContent = `已选择 ${models.value}`;});
+  button(main, "读取模型列表", status, async () => {await saveCurrent(); names = (await request("/h3lv/expansion/models")).models; render(); status.textContent = `读取到 ${names.length} 个模型；多图扩写需选择支持视觉的模型。`;});
+  button(main, "使用所选模型", status, async () => {if (!models.value) throw new Error("请先选择模型。"); await saveCurrent(); widget(node,"model").value = models.value; node.setDirtyCanvas(true); status.textContent = `配置已保存，已选择 ${models.value}`;});
 }
 async function previewDialog(node) {
   const {main, status} = dialog("MiniMax H3 · MV Prompt Expander — 分段预览与编辑");
