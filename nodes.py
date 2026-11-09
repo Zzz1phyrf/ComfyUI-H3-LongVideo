@@ -279,9 +279,8 @@ def run_asr(project):
                 child.wait(timeout=5)
             raise
     if child.returncode:
-        raise RuntimeError(
-            "语音识别失败。首次使用可能正在下载模型；请检查网络、磁盘空间和运行环境。"
-            f"详细日志：{project/'state'/'asr.log'}")
+        from .diagnostics import asr_failure
+        raise asr_failure(project, child.returncode)
     return json.loads((project/"state"/"transcript.json").read_text(encoding="utf-8"))
 
 

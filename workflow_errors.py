@@ -2,7 +2,7 @@
 import json
 import os
 
-from .diagnostics import configured_key, redact
+from .diagnostics import ASRError, configured_key, redact
 
 
 class WorkflowFailure(ValueError):
@@ -66,7 +66,9 @@ def failure_report(error, stage='', index=None, plan=None):
     issues = getattr(error, 'issues', [])
     combined = text + ' ' + ' '.join(str(i.get('node_type', '')) + ' ' + str(i.get('reason', '')) for i in issues)
     action = '核对下方原因，修复后再继续；不要通过重新分析丢弃已有进度。'
-    if 'out of memory' in combined.lower():
+    if isinstance(error, ASRError):
+        category, action = 'ASR 语音识别', '按具体错误检查语音识别模型和运行环境；下载错误日志已包含子进程详情。'
+    elif 'out of memory' in combined.lower():
         category, action = '显存不足', '降低分辨率或单段时长，或选择显存更大的实例后重试失败段。'
     elif any(word in combined for word in ('H3LVPromptExpand', '扩写', 'PromptExpand')):
         category, action = '提示词扩写', '检查扩写服务的模型、额度和网络；修复后重试失败段。'

@@ -9,13 +9,45 @@ from pathlib import Path
 import re
 import threading
 import traceback
-from .storage import MV_PREFIX, TALKING_PREFIX, output_path
+from .storage import MV_PREFIX, TALKING_PREFIX, output_path, project_roots
 
 MAX_BYTES = 2 * 1024 * 1024
 BACKUP_COUNT = 2
 LOG_LOCK = threading.RLock()
 CONTEXT_FIELDS = {"project_id", "segment_index", "prompt_id", "node_id", "node_type",
                   "source", "action", "model", "backend", "task_id"}
+
+
+class ASRError(RuntimeError):
+    """Identifies a failed speech-recognition child process in ComfyUI events."""
+
+
+def asr_log_tail(project):
+    """Read bounded child output, preserving the final exception and redacting secrets."""
+    try:
+        with (Path(project)/'state/asr.log').open('rb') as stream:
+            size = stream.seek(0, 2)
+            start = max(0, size - 65536)
+            stream.seek(start)
+            raw = stream.read(65536)
+        if start:
+            # Do not expose a partial credential or URL at a clipped line boundary.
+            raw = raw.partition(b'\n')[2]
+        text = redact(raw.decode('utf-8', errors='replace'), configured_key(), 65536).strip()
+        return ('[ASR 日志仅保留末尾]\n' + text[-11000:]) if len(text) > 11000 else text
+    except OSError as error:
+        return f'无法读取 ASR 子进程日志（{type(error).__name__}）。'
+
+
+def asr_failure(project, exit_code):
+    detail = asr_log_tail(project)
+    reason = detail.splitlines()[-1] if detail else '子进程未输出具体错误。'
+    if len(reason) > 1800:
+        reason = reason[:400] + ' … ' + reason[-1400:]
+    error = ASRError(f'语音识别（ASR）失败，退出码 {exit_code}。\n具体原因：{reason}\n'
+                     '点击“下载错误日志”可取得子进程详情，无需单独查找 asr.log。')
+    record_event('asr_worker', str(error), 'ASRError', detail, project_id=Path(project).name)
+    return error
 
 
 class ErrorFileHandler(RotatingFileHandler):
@@ -194,4 +226,44 @@ def download_report():
         if content.startswith('尚未记录错误'.encode('utf-8')):
             content = (json.dumps({'workflow': workflow, 'message': '尚未记录错误。'},ensure_ascii=False)+'\n').encode('utf-8')
         parts.append(content.rstrip(b'\n')+b'\n')
+        if workflow == 'MV':
+            parts.extend(legacy_asr_logs(content))
     return b''.join(parts)
+
+
+def legacy_asr_logs(content):
+    """Backfill up to five retained pre-upgrade ASR failures from managed projects."""
+    pending, recorded = {}, set()
+    for line in content.splitlines():
+        try:
+            event = json.loads(line)
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if not isinstance(event, dict):
+            continue
+        pid = event.get('project_id')
+        if not isinstance(pid, str) or not re.fullmatch('[0-9a-f]{32}', pid):
+            continue
+        if event.get('stage') == 'asr_worker':
+            recorded.add(pid)
+        elif event.get('stage') == 'speech_recognition':
+            pending.pop(pid, None)
+            pending[pid] = event.get('timestamp')
+    parts = []
+    roots = project_roots(output_path(MV_PREFIX)/'projects')
+    for pid in [pid for pid in pending if pid not in recorded][-5:]:
+        for root in roots:
+            project = root/pid
+            try:
+                path = (project/'state/asr.log').resolve()
+                if not path.is_relative_to(root.resolve()) or not path.is_file():
+                    continue
+                detail = asr_log_tail(project)
+            except OSError:
+                continue
+            event = {'section': 'ASR', 'workflow': 'MV', 'project_id': pid,
+                     'timestamp': pending[pid], 'source': 'asr.log',
+                     'message': '历史 ASR 子进程日志', 'traceback': detail}
+            parts.append((json.dumps(event, ensure_ascii=False)+'\n').encode('utf-8'))
+            break
+    return parts

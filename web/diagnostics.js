@@ -85,3 +85,34 @@ export function renderFailure(parent, info, {locate, copy} = {}) {
     } catch { button.textContent = "复制失败，请展开详情手动复制"; }
   };
 }
+
+export function showAsrFailure(reason) {
+  document.getElementById("h3lv-asr-error")?.remove();
+  const add = (tag, parent, text, className) => {
+    const item = document.createElement(tag);
+    if (text !== undefined) item.textContent = text;
+    if (className) item.className = className;
+    parent.append(item);
+    return item;
+  };
+  const shade = add("div", document.body, undefined, "h3lv-shade h3lv-settings-shade");
+  shade.id = "h3lv-asr-error";
+  const panel = add("div", shade, undefined, "h3lv-settings-panel");
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-label", "ASR 语音识别失败");
+  const close = add("button", panel, "关闭", "h3lv-button h3lv-close");
+  close.onclick = () => shade.remove();
+  const host = add("section", panel, undefined, "h3lv-error-card");
+  renderFailure(host, {summary: "ASR 语音识别失败", reason,
+    action: "根据具体错误检查识别模型或运行环境；下载错误日志即可取得子进程详情。"});
+  const download = add("button", panel, "下载错误日志", "h3lv-button");
+  const status = add("p", panel, "");
+  status.setAttribute("role", "status");
+  download.onclick = async () => {
+    download.disabled = true;
+    try {await downloadErrorLog(); status.textContent = "错误日志已下载，已包含 ASR 子进程详情。";}
+    catch (error) {status.textContent = error.message;}
+    finally {download.disabled = false;}
+  };
+}

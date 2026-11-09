@@ -12,7 +12,7 @@ function canvasProgress(node, text) {
   if (!node || node.comfyClass !== 'H3LVUnified') return;
   setWorkflowProgress(node,text);
 }
-import { downloadErrorLog, reportUiError, withUiLogging, renderFailure } from "./diagnostics.js";
+import { downloadErrorLog, reportUiError, withUiLogging, renderFailure, showAsrFailure } from "./diagnostics.js";
 
 if (!document.querySelector("link[data-h3lv-style]")) {
   const link = document.createElement("link");
@@ -1355,6 +1355,16 @@ app.registerExtension({
   async setup() {
     if (!app.__h3lvFinalListenerInstalled) {
       app.__h3lvFinalListenerInstalled = true;
+      api.addEventListener('execution_error', event => {
+        const data = event.detail || {};
+        if (String(data.exception_type || '').split('.').pop() !== 'ASRError') return;
+        const owner = (app.graph?._nodes || []).find(node =>
+          ['H3LVUnified', 'H3LVAnalyze'].includes(node.comfyClass) &&
+          node.comfyClass === data.node_type && String(node.id) === String(data.node_id));
+        if (!owner) return;
+        canvasProgress(owner, '语音识别失败，请查看错误面板或下载错误日志。');
+        showAsrFailure(String(data.exception_message || 'ASR 子进程执行失败。'));
+      });
       api.addEventListener('h3lv-progress', async event=>{
         const data=event.detail || {};
         const nodes=(app.graph?._nodes || []).filter(node=>node.comfyClass==='H3LVUnified' &&
