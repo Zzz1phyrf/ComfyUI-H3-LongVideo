@@ -251,7 +251,7 @@ async def prepare(root,pid,snapshot,client):
     client.config.update(seed=snapshot['binding']['seed'],seed_node=snapshot['binding']['sampler'])
 
 
-def build_segment(root,pid,index,snapshot,client,folder):
+def build_segment(root,pid,index,snapshot,client,folder,seed_row=None):
     import soundfile as sf
     from .nodes import LoadSegment
     from .expansion import PromptExpand
@@ -269,6 +269,9 @@ def build_segment(root,pid,index,snapshot,client,folder):
     if not text.strip():
         raise ValueError('本段没有手写提示词，请填写segment_prompt或使用MV Prompt Expander。')
     graph, mapping = copy.deepcopy(snapshot['remote_graph']), snapshot['binding']
+    if seed_row is not None:
+        from .segment_seeds import apply_seed_overrides
+        apply_seed_overrides(graph,seed_row)
     report(root,pid,'upload',index)
     for value, key, name in zip(loaded[:2],('original','vocals'),('original.wav','vocals.wav')):
         path = folder/name
@@ -332,7 +335,7 @@ async def segment(root,pid,index,snapshot,client):
     if not job:
         folder = directory/'takes'/f'seg_{index:04d}'/uuid.uuid4().hex[:12]
         folder.mkdir(parents=True)
-        graph,text = await asyncio.to_thread(build_segment,root,pid,index,snapshot,client,folder)
+        graph,text = await asyncio.to_thread(build_segment,root,pid,index,snapshot,client,folder,row)
         save(folder/'submitted_graph.json',graph)
         plan = read_plan(root,pid)
         from .controller import halt_status
@@ -340,6 +343,9 @@ async def segment(root,pid,index,snapshot,client):
             return None,None
         job = {'backend':'runninghub','status':'creating_unknown','directory':str(folder),
                'created':time.time(),'final_prompt':text,'remote':snapshot['remote']}
+        from .segment_seeds import seed_values, save_seed_intent
+        job['seeds'] = seed_values(graph)
+        save_seed_intent(plan['segments'][index],row)
         plan['segments'][index]['job'] = job
         write_plan(root,plan)
         from .progress import report

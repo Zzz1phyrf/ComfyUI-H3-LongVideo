@@ -590,7 +590,9 @@ def register_routes():
             row = plan["segments"][int(payload["index"])]
             if row.get("job", {}).get("prompt_id") in controller.queued_ids(server):
                 raise ValueError("该段仍在队列中，不能重复提交。")
+            reroll = row.get('job', {}).get('status') == 'completed' and (payload.get('reroll') is True or not row.get('needs_regeneration'))
             request_regeneration(row, "用户要求重新生成本段")
+            if reroll: row['reroll_pending'] = True
             plan.update(run_status="paused", error="")
             if plan.get("final_video"):
                 plan["final_stale"] = True
@@ -609,7 +611,9 @@ def register_routes():
             row = plan["segments"][int(payload["index"])]
             if row.get("job", {}).get("prompt_id") in controller.queued_ids(server):
                 raise ValueError("该段仍在队列中，不能重复提交。")
+            reroll = row.get('job', {}).get('status') == 'completed'
             request_regeneration(row, "用户要求重新生成本段")
+            if reroll: row['reroll_pending'] = True
             plan.update(run_status="paused", error="")
             if plan.get("final_video"):
                 plan["final_stale"] = True
@@ -638,6 +642,9 @@ def register_routes():
             if current and current.get("status") == "completed":
                 archive_take(row, current)
             row["job"] = copy.deepcopy(previous)
+            row.pop('reroll_pending', None)
+            if previous.get('seeds'): row['seed_overrides'] = copy.deepcopy(previous['seeds'])
+            else: row.pop('seed_overrides', None)
             row.pop("needs_regeneration", None)
             row.pop("regeneration_reason", None)
             row.pop("replacement_previous_job", None)

@@ -118,7 +118,9 @@ class Client:
     def create(self,graph):
         seed_node=str(self.config.get('seed_node','270'))
         seed_field='noise_seed' if graph.get(seed_node,{}).get('class_type')=='SamplerCustom' else 'seed'
-        overrides=[{'nodeId':seed_node,'fieldName':seed_field,'fieldValue':self.config['seed']}]
+        actual_seed=graph.get(seed_node,{}).get('inputs',{}).get(seed_field)
+        if type(actual_seed) is not int:actual_seed=self.config['seed']  # Legacy project-seed wire.
+        overrides=[{'nodeId':seed_node,'fieldName':seed_field,'fieldValue':actual_seed}]
         # RH randomizes other literal sampler seeds unless each is overridden.
         for key,node in graph.items():
             if str(key)==seed_node or node.get('class_type') not in ('SamplerCustom','SelfLiftAvatarH3Sampler'):continue

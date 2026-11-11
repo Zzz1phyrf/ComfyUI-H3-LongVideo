@@ -1,4 +1,11 @@
 export const busy = plan => ['running','pausing','stopping','merging'].includes(plan?.run_status);
+
+export function seedText(row) {
+  if (row?.reroll_pending) return '本段抽卡：开始生成时更换种子，提交后固定。';
+  const seeds = row?.job?.seeds || row?.seed_overrides || {};
+  const values = Object.entries(seeds).map(([node, seed]) => `#${node}：${seed}`);
+  return values.length ? `本段任务种子 · ${values.join('；')}` : '';
+}
 const stages = {
   workflow:'本地已接收 · 检查 RH 工作流', prepare:'准备本段素材（尚未提交生成）',
   expansion:'提示词扩写（尚未提交 RH）', upload:'上传素材（尚未提交 RH）',

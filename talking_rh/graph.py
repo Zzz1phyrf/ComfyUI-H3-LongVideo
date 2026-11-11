@@ -9,6 +9,15 @@ TEMPLATE = Path(__file__).resolve().parents[1]/'defaults/talking_rh_graph.json'
 
 
 def build(plan,row,uploaded,previous=None):
+    from ..segment_seeds import apply_seed_overrides
+    value = _build(plan,row,uploaded,previous)
+    sampler_id = plan['config'].get('canvas',{}).get('sampler_id','270')
+    bound = {sampler_id:plan['config']['seed']} if 'seed' in plan['config'] else {}
+    apply_seed_overrides(value,row,bound)
+    return value
+
+
+def _build(plan,row,uploaded,previous=None):
     from . import flat
     if plan['config'].get('execution_mode')=='canvas':
         from .canvas import build as build_canvas

@@ -188,8 +188,15 @@ def run_project(root,pid,client,*,validate=validate_outputs,assemble=None,sleep=
             (folder/'submitted_graph.json').write_text(json.dumps(graph,ensure_ascii=False,indent=2),encoding='utf-8')
             if halt_requested(root,pid):return
             job = {'status':'creating_unknown','directory':str(folder),'created':time.time()}
+            from ..segment_seeds import seed_values, save_seed_intent
+            sampler_id = plan['config'].get('canvas',{}).get('sampler_id','270')
+            bound = {sampler_id:plan['config']['seed']} if 'seed' in plan['config'] else {}
+            job['seeds'] = seed_values(graph,bound)
             if plan['config'].get('backend')=='local':job['task_id']=client.reserve()
-            change(root,pid,lambda p:p['segments'][index].update(job=job))
+            def store_intent(p):
+                save_seed_intent(p['segments'][index],row)
+                p['segments'][index]['job'] = job
+            change(root,pid,store_intent)
             report(root,pid,'submitting',index)
             try:
                 task_id = client.create(graph,job['task_id']) if plan['config'].get('backend')=='local' else client.create(graph)

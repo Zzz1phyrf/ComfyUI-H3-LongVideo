@@ -5,7 +5,7 @@ import { materialEditor } from "./materials.js";
 import { createTimeline, pcmWavePeaks, cutRange } from "./timeline.js";
 import { generationOutputs } from "./video_outputs.js";
 import { syncHiddenWidgetConnections } from "./widget_visibility.js";
-import {busy, progressText, canvasProgressText} from "./progress.js?v=mv-canvas-20261028";
+import {busy, progressText, canvasProgressText, seedText} from "./progress.js?v=seed-reroll-20261111";
 import {setTalkingStatus as setWorkflowProgress} from "./talking_progress.js";
 
 function canvasProgress(node, text) {
@@ -1091,16 +1091,17 @@ async function openReview(owner) {
         if (row.job.status === "creating_unknown") element('p','请在面板底部“RH 异常任务恢复”中绑定已有任务ID。',resultControls,'h3lv-help');
       }
       if (row.job || needsReplacement(row)) {
+        element('p',seedText(row),resultControls,'h3lv-help');
         element("p", `生成状态：${segmentStatus(row)}${needsReplacement(row) ? ` · ${row.regeneration_reason || "需要重新生成"}` : ""}`+
           `${row.job?.error ? ` · ${row.job.error}` : ""}`, resultControls, "h3lv-job");
         actionButton(resultControls, "将本段加入重做", async () => {
           if (dirty) throw new Error("请先保存并确认当前修改。");
           if (!plan.approved) throw new Error("请先保存并确认分段方案。");
-          await request(endpoint("/retry"), {index: row.index});
+          await request(endpoint("/retry"), {index: row.index, reroll:true});
           toast('已加入重做','点击顶部“开始 / 继续生成”执行。当前结果保留。');
           await load();
         }, "segment-run");
-        element('p','加入后，点击顶部“开始 / 继续生成”执行。当前结果保留。',resultControls,'h3lv-help');
+        element('p','加入后，点击顶部“开始 / 继续生成”换种子重做。失败重试沿用本次种子，当前结果保留。',resultControls,'h3lv-help');
       }
       if (row.takes?.length) {
         actionButton(resultControls, `恢复上一版（${row.takes.length}）`, async () => {

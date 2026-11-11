@@ -185,10 +185,11 @@ class RegenerationTests(unittest.TestCase):
         p=project.read_plan(self.root,self.pid)
         self.assertEqual(p['segments'][:2],self.before['segments'][:2])
 
-    def test_redo_first_segment_rebuilds_entire_chain_with_original_seed(self):
+    def test_redo_first_segment_changes_its_seed_and_keeps_descendant_seeds(self):
         self.prepare_chain();project.request_regeneration(self.root,self.pid,0);self.run_chain()
         self.assertEqual(len(self.client.created),6)
-        self.assertTrue(all(g['270']['inputs']['seed']==999 for g in self.client.created))
+        self.assertNotEqual(self.client.created[3]['270']['inputs']['seed'],999)
+        self.assertTrue(all(self.client.created[i]['270']['inputs']['seed']==999 for i in (0,1,2,4,5)))
         p=project.read_plan(self.root,self.pid)
         self.assertTrue(all(a['job']['directory']!=b['job']['directory']
                             for a,b in zip(p['segments'],self.before['segments'])))

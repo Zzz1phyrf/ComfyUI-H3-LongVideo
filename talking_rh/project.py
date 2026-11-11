@@ -344,6 +344,7 @@ def request_regeneration(root,pid,index):
             'final_sha256':verify_final(root,pid,plan.get('final_video','')),
             'run_status':plan.get('run_status','paused')}
         for row in plan['segments'][index:stop]:
+            if row['index'] == index: row['reroll_pending'] = True
             if overlap.enabled(plan):
                 from .prompts import freeze_redo
                 row['generation_prompt']=freeze_redo(directory,plan,row)

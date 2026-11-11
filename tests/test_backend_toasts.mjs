@@ -23,7 +23,7 @@ for(const [backend,oldBackend,label,other] of [['本地','runninghub','本地','
       'return async()=>{'+redo+'};')(false,{approved:true,generation_backend:oldBackend},{index:1},
       async(path,body)=>{requests.push({path,body});},x=>x,(...args)=>notices.push(args),async()=>{});
     await run();
-    assert.deepEqual(requests,[{path:'/retry',body:{index:1}}]);
+    assert.deepEqual(requests,[{path:'/retry',body:{index:1,reroll:true}}]);
     assert.equal(notices[0][0],'已加入重做');
     assert.match(notices[0][1],/开始 \/ 继续生成/);
     assert.match(notices[0][1],/当前结果保留/);

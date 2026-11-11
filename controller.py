@@ -16,6 +16,7 @@ from .core import (LOCK, REFERENCE_MIRROR_ROOT, archive_take, audio_file, finger
                    request_regeneration, segment_fingerprint, write_plan)
 from .diagnostics import logged, record_error, record_history_error
 from .workflow_errors import validation_failure, execution_failure, failure_report
+from .segment_seeds import apply_seed_overrides
 
 TASKS = {}
 SEGMENT_NODE_TYPES = {"H3LVUnified"}
@@ -423,12 +424,14 @@ async def execute_project(root, project_id, server):
                 prompt[snapshot["loader_id"]]["inputs"].update(project_id=project_id, segment_index=index)
                 apply_segment_references(prompt, plan, row, directory)
                 bind_video_output(prompt, snapshot["loader_id"], snapshot["video_id"])
+                seeds = apply_seed_overrides(prompt, row)
+                write_plan(root, plan)
                 stage = "workflow_validation"
                 valid = await execution.validate_prompt(prompt_id, prompt, [snapshot["video_id"]])
                 if not valid[0]:
                     raise validation_failure(valid, prompt)
                 # Save intent before enqueue; uncertain interrupted jobs are never blindly resubmitted.
-                row["job"] = job = {"prompt_id": prompt_id, "status": "queued", "created": time.time()}
+                row["job"] = job = {"prompt_id": prompt_id, "status": "queued", "created": time.time(), 'seeds':seeds}
                 write_plan(root, plan)
                 extra = {
                     "extra_pnginfo": {"workflow": snapshot.get("workflow", {})},

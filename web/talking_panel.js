@@ -1,6 +1,7 @@
 import {createTimeline, alignAnchoredCuts} from "./timeline.js?v=anchor-cuts-20261106";
 import {talkingStatus} from './talking_status.js?v=segments-20261027';
 import {syncWorkflowStatus} from './talking_progress.js?v=progress-20261028c';
+import {seedText} from './progress.js?v=seed-reroll-20261111';
 
 if (document.getElementById("timeline") && location.pathname.includes("/h3talk/project/")) {
   const pid = location.pathname.match(/project\/([0-9a-f]{32})\//)?.[1];
@@ -220,6 +221,7 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
       const actual=element('textarea',undefined,actualBlock,'h3lv-rule-editor');actual.readOnly=true;
       const historyBlock=element('details',undefined,versions);element('summary','历史生成版本',historyBlock);const history=element('div',undefined,historyBlock);
       const result=element('div',undefined,content,'h3lv-segment-result');let video,caption,mode,regenerate,retry;
+      const seedLabel=element('p',seedText(segment || {}),result,'h3lv-help');
       if(job?.status==='completed') {
         const selector=element('label','预览内容',result,'h3talk-preview-select');mode=element('select',undefined,selector);mode.setAttribute('aria-label',`第${index+1}段预览内容`);
         for(const [value,text] of [['used','成片中使用的画面'],['raw','完整生成视频（含重叠部分）']]){const option=element('option',text,mode);option.value=value;}
@@ -233,7 +235,7 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
         }
         mode.value=independent() && !used?'raw':'used';mode.children[0].disabled=independent() && !used;mode.onchange=showVideo;
         regenerate=element('button',redoSingle()?'将本段加入重做':'将本段及后续加入重做',result,'h3lv-button segment-run');regenerate.onclick=()=>perform('regenerate',{index});
-        element('p','加入后，点击顶部“开始 / 继续生成”执行。当前结果保留。',result,'h3lv-help h3talk-redo-help');
+        element('p','加入后，点击顶部“开始 / 继续生成”换种子重做。失败重试沿用本次种子，当前结果保留。',result,'h3lv-help h3talk-redo-help');
         card.ontoggle=()=>{if(!card.open)return;selectedWindow(index);clipAudio.preload='metadata';if(!video.getAttribute('src'))showVideo();};
         if(card.open)showVideo();
       } else {
@@ -241,7 +243,7 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
         card.ontoggle=()=>{if(card.open){selectedWindow(index);clipAudio.preload='metadata';}};
       }
       if(['failed','rejected'].includes(job?.status)){retry=element('button','重试本段',result,'h3lv-button segment-run');retry.onclick=()=>perform('retry',{index});}
-      rows.push({source,end:input,card,time,duration,metrics,clipAudio,editor,promptState,savePrompt:save,resetPrompt:reset,version,actual,actualLabel,history,historyBlock,video,caption,mode,regenerate,retry});
+      rows.push({source,end:input,card,time,duration,metrics,clipAudio,editor,promptState,savePrompt:save,resetPrompt:reset,version,actual,actualLabel,history,historyBlock,video,caption,mode,regenerate,retry,seedLabel});
     });
     selected=Math.min(selected,rows.length-1);refreshTimes();showPrompts();
   }
@@ -276,6 +278,7 @@ if (document.getElementById("timeline") && location.pathname.includes("/h3talk/p
     $('seam-warnings').replaceChildren();for(const w of plan.seam_warnings || [])element('li',w,$('seam-warnings'));
     const editable=promptVersions?.editable && !active && !pending && !regenerating && !dirty && !promptLoading;
     rows.forEach((row,index)=>{
+      row.seedLabel.textContent=seedText(plan.segments[row.source]);
       row.end.disabled=index===rows.length-1 || cutBlocked();
       row.editor.disabled=!editable;row.savePrompt.disabled=!editable || !promptEdits.has(index);
       row.resetPrompt.disabled=pending || !promptEdits.has(index);
