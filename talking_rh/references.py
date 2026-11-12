@@ -2,7 +2,6 @@
 import copy
 import hashlib
 import math
-import shutil
 import time
 import uuid
 
@@ -61,25 +60,7 @@ def update(root,pid,picture,expected_fingerprint,*,confirmed_sha256=None):
             return {'status':'confirmation_required','candidate_sha256':candidate,'plan':plan}
         updated=copy.deepcopy(plan)
         if has_results:
-            # Copy only the inputs and reviewed timeline. Never copy take paths,
-            # progress, failures or final output into a different-image project.
-            keep=('kind','schema','mode','sample_rate','samples','duration','max_seconds','config',
-                  'input_fingerprint','source_sha256','segments_clock','speech_segmentation',
-                  'audio_preparation','manual_cuts','overlap_cuts','approved','first_condition',
-                  'multi_reference_visual_accepted')
-            updated={k:copy.deepcopy(plan[k]) for k in keep if k in plan}
-            updated.update(id=uuid.uuid4().hex,created=time.time(),parent_project=pid,
-                           run_status='ready' if plan.get('approved') else 'draft',pause_requested=False,
-                           stop_requested=False,segments=[])
-            for timing,row in zip(plan['segments_clock'],plan['segments']):
-                new=copy.deepcopy(timing)
-                for key in ('prompt_draft','generation_prompt'):
-                    if key in row:new[key]=copy.deepcopy(row[key])
-                updated['segments'].append(new)
-            destination=project_path(root,updated['id'])
-            for name in ('audio','refs','state','takes','cache','work'):(destination/name).mkdir(parents=True,exist_ok=True)
-            for path in (directory/'audio').iterdir():
-                if path.is_file():shutil.copy2(path,destination/'audio'/path.name)
+            updated,destination=project.clone_reviewed(root,plan)
         else:destination=directory
         # New filenames leave the old plan's inputs intact even if saving fails.
         asset={}

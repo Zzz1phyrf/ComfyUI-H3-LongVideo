@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 import math
+import shutil
 from pathlib import Path
 import time
 import uuid
@@ -123,6 +124,35 @@ def crop_box(size, target):
 def fingerprint(plan):
     value = {k:plan[k] for k in ('config','assets','segments_clock','samples')}
     return hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
+
+
+def clone_reviewed(root,plan,*,copy_refs=False):
+    """New input version with the reviewed timeline, without old generated outputs."""
+    keep=('kind','schema','mode','sample_rate','samples','duration','max_seconds','config','assets',
+          'input_fingerprint','source_sha256','segments_clock','speech_segmentation',
+          'audio_preparation','manual_cuts','overlap_cuts','approved','first_condition',
+          'multi_reference_visual_accepted','reference_revision')
+    updated={k:copy.deepcopy(plan[k]) for k in keep if k in plan}
+    updated.update(id=uuid.uuid4().hex,created=time.time(),parent_project=plan['id'],
+                   run_status='ready' if plan.get('approved') else 'draft',pause_requested=False,
+                   stop_requested=False,segments=[])
+    for timing,row in zip(plan['segments_clock'],plan['segments']):
+        new=copy.deepcopy(timing)
+        for key in ('prompt_draft','generation_prompt'):
+            if key in row:new[key]=copy.deepcopy(row[key])
+        updated['segments'].append(new)
+    destination=project_path(root,updated['id'])
+    for name in ('audio','refs','state','takes','cache','work'):(destination/name).mkdir(parents=True,exist_ok=True)
+    directory=project_path(root,plan['id'])
+    for path in (directory/'audio').iterdir():
+        if path.is_file():shutil.copy2(path,destination/'audio'/path.name)
+    if copy_refs:
+        for asset in plan['assets']:
+            for record in (asset,asset.get('original')):
+                if record:
+                    path=inside(directory/'refs',directory/'refs'/record['name'])
+                    shutil.copy2(path,destination/'refs'/path.name)
+    return updated,destination
 
 
 def unmasked(plan):

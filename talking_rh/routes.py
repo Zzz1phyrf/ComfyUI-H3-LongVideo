@@ -117,7 +117,7 @@ def register():
     @routes.get('/h3talk/assets/{name}')
     async def asset(request):
         name=request.match_info['name']
-        if name not in ('talking_panel.js','talking_status.js','talking_progress.js','timeline.js'):
+        if name not in ('talking_panel.js','talking_status.js','talking_progress.js','timeline.js','progress.js'):
             raise web.HTTPNotFound()
         return web.FileResponse(WEB/name)
 

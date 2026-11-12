@@ -72,7 +72,8 @@ class LocalFlatTests(unittest.TestCase):
             self.assertEqual(project.read_plan(node.root(),pid),plan)
             client.assert_not_called()
             edited=copy.deepcopy(src);edited['270']['inputs']['cfg']=1.3
-            with self.assertRaisesRegex(ValueError,'新建项目'):
-                node.TalkingAvatar().prepare(**{**args,'prompt':edited},project_id=pid)
+            updated=node.TalkingAvatar().prepare(**{**args,'prompt':edited},project_id=pid)
+            self.assertEqual(updated['result'][0],pid)
+            self.assertEqual(project.read_plan(node.root(),pid)['config']['canvas']['prompt']['270']['inputs']['cfg'],1.3)
 
 if __name__=='__main__':unittest.main()
