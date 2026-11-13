@@ -1,3 +1,15 @@
+let captureSequence=0;
+
+// Temporary graph node IDs, not credentials. HTTP pages may lack randomUUID.
+export function referenceCaptureId() {
+  const crypto=globalThis.crypto;
+  const nonce=typeof crypto?.randomUUID==='function' ? crypto.randomUUID() :
+    typeof crypto?.getRandomValues==='function' ?
+      Array.from(crypto.getRandomValues(new Uint8Array(16)),value=>value.toString(16).padStart(2,'0')).join('') :
+      Math.random().toString(36).slice(2);
+  return `h3talk-reference-${Date.now().toString(36)}-${++captureSequence}-${nonce}`;
+}
+
 // Evaluate the actual IMAGE input, including upstream image processing, without
 // executing audio analysis or the downstream video generation graph.
 export function referenceBranch(snapshot,owner,id='h3talk-reference-capture') {

@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import vm from 'node:vm';
 import {referenceBranch,captureReference} from '../web/reference_sync.js';
+
+const referenceCode=fs.readFileSync(new URL('../web/reference_sync.js',import.meta.url),'utf8').replace(/^export /gm,'');
+const captureIdRuntime=scope=>vm.runInNewContext(referenceCode+';referenceCaptureId;',scope);
 
 function graph() {return {output:{
   '1':{class_type:'LoadImage',inputs:{image:'new.png'}},
@@ -57,11 +61,11 @@ test('closing while waiting for capture cancels continuation and removes listene
 
 const parent=fs.readFileSync(new URL('../web/talking_rh.js',import.meta.url),'utf8');
 const syncCode=parent.slice(parent.indexOf('async function syncReference('),parent.indexOf('function hideUnusedLegacyMask('));
-function syncRuntime({confirm=true,response='updated',busy=false,changeDuringCapture=false,switchAfterCommit=false}={}) {
+function syncRuntime({confirm=true,response='updated',busy=false,changeDuringCapture=false,switchAfterCommit=false,browserCrypto=globalThis.crypto}={}) {
   const id='a'.repeat(32),newId='b'.repeat(32),calls=[];
   const owner={id:5,widgets:[{name:'project_id',value:id}],setDirtyCanvas(){}};
   const plan={id,config:{talking_profile:'fl2va-flat-rh-v1'},editing_fingerprint:'old',controller_active:busy};
-  const current=graph();let captures=0;
+  const current=graph(),captureIds=[];let captures=0;
   const app={graph:{_nodes:[owner]},graphToPrompt:async()=>current,h3lvConfirmDialog:async()=>confirm};
   const request=async(path,body)=>{
     calls.push({path,body});
@@ -69,11 +73,61 @@ function syncRuntime({confirm=true,response='updated',busy=false,changeDuringCap
     if(switchAfterCommit)app.graph._nodes=[];
     return {status:response==='confirmation_required'?'forked':response,plan:{...plan,id:response==='confirmation_required'?newId:id}};
   };
-  const capture=async()=>{captures++;if(changeDuringCapture)current.output['1'].inputs.image='changed.png';return {filename:'capture.png',type:'temp'};};
-  const fn=Function('app','api','projectId','currentProject','referenceBranch','captureReference','request','status','talkingStatus','syncTalkingVideo','showMessage',
-    syncCode+';return syncReference;')(app,{},node=>node.widgets[0].value,async()=>plan,referenceBranch,capture,request,()=>{},()=>'',()=>{},async()=>{});
-  return {fn,owner,app,calls,id,newId,get captures(){return captures;}};
+  const capture=async(api,branch)=>{captures++;captureIds.push(branch.id);if(changeDuringCapture)current.output['1'].inputs.image='changed.png';return {filename:'capture.png',type:'temp'};};
+  const fn=Function('app','api','projectId','currentProject','referenceBranch','captureReference','request','status','talkingStatus','syncTalkingVideo','showMessage','crypto','referenceCaptureId',
+    syncCode+';return syncReference;')(app,{},node=>node.widgets[0].value,async()=>plan,referenceBranch,capture,request,()=>{},()=>'',()=>{},async()=>{},browserCrypto,captureIdRuntime({crypto:browserCrypto}));
+  return {fn,owner,app,calls,captureIds,id,newId,get captures(){return captures;}};
 }
+
+test('actual node reference sync works over HTTP without randomUUID',async()=>{
+  const browserCrypto={getRandomValues:bytes=>{bytes.fill(42);return bytes;}};
+  const r=syncRuntime({browserCrypto});
+  for(let i=0;i<3;i++)assert.equal((await r.fn(r.owner)).status,'updated');
+  assert.equal(r.captures,3);assert.equal(r.calls.length,3);
+  assert.equal(new Set(r.captureIds).size,3);
+  assert.ok(r.captureIds.every(id=>id.startsWith('h3talk-reference-')));
+});
+
+test('actual node reference sync also works without browser crypto',async()=>{
+  const r=syncRuntime({browserCrypto:null});
+  assert.equal((await r.fn(r.owner)).status,'updated');
+  assert.equal(r.captures,1);assert.equal(r.owner.__talkingReferenceSync,false);
+});
+
+test('non-callable randomUUID does not block reference sync',async()=>{
+  const r=syncRuntime({browserCrypto:{randomUUID:'unavailable'}});
+  assert.equal((await r.fn(r.owner)).status,'updated');assert.equal(r.captures,1);
+});
+
+test('secure browser IDs prefer the native UUID generator',()=>{
+  let calls=0;
+  const createId=captureIdRuntime({crypto:{randomUUID(){calls++;return 'native-uuid';},getRandomValues(){throw new Error('native UUID available');}}});
+  assert.ok(createId().endsWith('-native-uuid'));assert.equal(calls,1);
+});
+
+test('fallback IDs stay distinct with a frozen clock and repeated random output',()=>{
+  for(const crypto of [undefined,{getRandomValues:bytes=>{bytes.fill(42);return bytes;}}]) {
+    const createId=captureIdRuntime({crypto,Date:{now:()=>1000},Math:{random:()=>.5}});
+    const ids=Array.from({length:100},()=>createId());
+    assert.equal(new Set(ids).size,100);
+  }
+});
+
+test('concurrent HTTP capture IDs match only their own executed event',async()=>{
+  const createId=captureIdRuntime({crypto:{getRandomValues:bytes=>{bytes.fill(42);return bytes;}}});
+  const ids=[createId(),createId()],queued=[];
+  const a=new EventTarget();
+  a.queuePrompt=async(index,snapshot,options)=>{queued.push(options.partialExecutionTargets[0]);return {prompt_id:queued.length.toString()};};
+  const captures=ids.map(id=>captureReference(a,referenceBranch(graph(),'5',id)));
+  await Promise.resolve();
+  assert.deepEqual(queued,ids);
+  for(const i of [1,0]) {
+    const event=new Event('executed');
+    event.detail={node:ids[i],output:{images:[{filename:`reference-${i}.png`,type:'temp'}]}};
+    a.dispatchEvent(event);
+  }
+  assert.deepEqual((await Promise.all(captures)).map(image=>image.filename),['reference-0.png','reference-1.png']);
+});
 test('actual node sync updates unrendered project and preserves its binding',async()=>{
   const r=syncRuntime();const result=await r.fn(r.owner);
   assert.equal(result.status,'updated');assert.equal(r.owner.widgets[0].value,r.id);

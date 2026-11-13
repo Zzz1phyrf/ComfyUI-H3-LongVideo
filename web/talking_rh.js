@@ -5,7 +5,7 @@ import {talkingStatus} from './talking_status.js';
 import {setTalkingStatus} from './talking_progress.js';
 import {alignProjectNode} from './node_ui.js';
 import {downloadErrorLog,reportUiError} from './diagnostics.js';
-import {referenceBranch,captureReference} from './reference_sync.js';
+import {referenceCaptureId,referenceBranch,captureReference} from './reference_sync.js';
 
 const projectId=node=>node.widgets?.find(w=>w.name==='project_id')?.value;
 const validId=id=>/^[0-9a-f]{32}$/.test(id || '');
@@ -123,7 +123,7 @@ async function syncReference(node,expectedId=projectId(node)) {
     if(!plan)throw new Error('请先分析音频分段。');
     if(plan.config?.talking_profile!=='fl2va-flat-rh-v1')return {status:'unchanged',plan};
     if(plan.controller_active)throw new Error('正在生成的项目继续使用原图，请等任务结束或暂停后再换图。');
-    const branch=referenceBranch(await app.graphToPrompt(),node.id,`h3talk-reference-${crypto.randomUUID()}`);
+    const branch=referenceBranch(await app.graphToPrompt(),node.id,referenceCaptureId());
     checkOwner();status(node,'正在读取画布参考图 · 保留音频与切点');
     node.__talkingReferenceAbort=new AbortController();
     let image;
