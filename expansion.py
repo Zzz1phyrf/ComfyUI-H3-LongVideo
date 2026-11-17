@@ -45,7 +45,7 @@ Each supplied image used as evidence must retain its original Picture number, in
 '''
 API_DEFAULTS = {'timeout_seconds': 300, 'response_mode': 'json', 'thinking_mode': 'auto', 'extra_body': {}}
 FORMAT_RULE = '''Output-format contract (creative instructions above remain unchanged):
-Return the six named English sections as plain text, each with a standalone field label and ASCII colon. Each visual section contains actual completed prose. Every reference uses the literal token <Picture N>, <Subject N> or <Audio N> with its original integer; Picture and Subject numbers are independent. Each Subject used later has an explicit definition. The available numbered assets are listed below; they establish availability, not image roles. State the role of every supplied image in subject_definitions or retention_analysis using the user's assignments and visible evidence. Place exactly one [Shot 1] at the start of detailed_description. Both sound fields contain N/A because the workflow restores the original soundtrack. Custom style rules affect creative content within this fixed format. Check all section bodies, reference numbers and definitions before returning the final text.'''
+Return the six named English sections as plain text, each with a standalone field label and ASCII colon. Each visual section contains actual completed prose. Every reference uses the literal token <Picture N>, <Subject N> or <Audio N> with its original integer; Picture and Subject numbers are independent. Each Subject used later has an explicit definition. The available numbered assets are listed below; they establish availability, not image roles. Reference tags identify supplied assets. Express any absence of an audio asset in plain words. State the role of every supplied image in subject_definitions or retention_analysis using the user's assignments and visible evidence. Place exactly one [Shot 1] at the start of detailed_description. Both sound fields contain N/A because the workflow restores the original soundtrack. Custom style rules affect creative content within this fixed format. Check all section bodies, reference numbers and definitions before returning the final text.'''
 
 
 def model_material_note(note, count):
@@ -446,11 +446,56 @@ def declared_picture_roles(material):
     return {number:roles for number,roles in result.items() if roles}
 
 
+def normalize_audio_absence(text, available):
+    """Remove asset syntax only from complete, unambiguous absence declarations."""
+    # A later instruction may refer back to a denied asset without repeating its
+    # tag. Leave such mixed/ambiguous prompts for the existing reference check.
+    back_reference = (r'(?:it\b|its\b|(?:this|that|the)\s+'
+                      r'(?:(?:missing|unavailable|nonexistent)\s+)?'
+                      r'(?:audio|vocal|voice|recording|soundtrack|'
+                      r'reference(?!\s+(?:image|picture|photo|frame)\b))\b)')
+    audio_action = (r'(?:us(?:e[sd]?|ing)|follow(?:s|ed|ing)?|match(?:es|ed|ing)?|'
+                    r'sync(?:s|ed|ing)?|synchroni[sz](?:e[sd]?|ing)|align(?:s|ed|ing)?|'
+                    r'sing(?:s|ing)?(?: along)?|according)')
+    vocal_motion = r'\b(?:mouth|lips?|lip[- ]sync|articulation|singing)\b'
+    audio_pronoun = r'(?:it\b|its\s+(?:timing|rhythm|beats?|cadence|audio|vocals?|voice|soundtrack)\b)'
+    if (re.search(r'\b' + audio_action + r'\s+(?:to\s+|with\s+)?' + back_reference, text, re.I)
+            or re.search(r'\b' + back_reference + r'\s+(?:drives?|guides?|controls?|sets?|determines?)\b', text, re.I)
+            or re.search(vocal_motion + r'[^.!?;。！？；\n]*\b' + audio_pronoun, text, re.I)
+            or re.search(r'(?:口型|嘴唇|演唱|人声)[^.!?;。！？；\n]*(?:它|其)(?:的)?'
+                         r'(?:节奏|节拍|韵律|时序|人声|声音|音频)', text)
+            or re.search(r'(?:跟随|使用|参考|根据|同步|匹配)\s*(?:它|其|该音频|此音频)', text)):
+        return text
+    tag = r'<Audio \d+>'
+    visual_type = r'(?:atmosphere|environment(?:-only)?)'
+    silent = (r'(?:no performer is present|the (?:on-screen )?performer '
+              r'(?:(?:must )?remains? non-vocal|never opens (?:her|his|their) mouth to sing or speak))')
+    reason = (r'(?: because (?:this is (?:an? )?' + visual_type + r'(?: segment| shot)?|'
+              r'(?:the )?visual_type is ' + visual_type + r')(?: and ' + silent + r')?)?')
+    prefix = (r'(?:(?:the|this) (?:segment|shot) is (?:an? )?' + visual_type +
+              r'(?: performance| segment| shot)?, so )?')
+    denial = (prefix + r'(?:no ' + tag + r'(?: (?:is (?:defined|provided|supplied|available|attached|included|present)|exists))?|'
+              r'there is no ' + tag + r'|' + tag + r' is not (?:defined|provided|supplied|available|attached|included|present))' +
+              reason + r'(?: and ' + silent + r')?')
+    chinese = (r'(?:(?:本段|此段|当前片段)(?:中)?(?:没有|未)(?:提供|接入|定义|包含)?|未(?:提供|接入|定义|包含))\s*' + tag)
+    parts = re.split(r'([.!?;。！？；\n])', text)
+    for index in range(0, len(parts), 2):
+        clause = parts[index].strip()
+        if not re.fullmatch(r'(?:' + denial + r'|' + chinese + r')', clause, re.I):
+            continue
+        reference = re.search(r'<Audio (\d+)>', clause)
+        if reference[1] not in available:
+            parts[index] = parts[index].replace(reference[0], 'vocal reference')
+    return ''.join(parts)
+
+
 def validate_result(text, material):
     modern = material.get('contract_version', 1) >= 2
     text = validate_prompt(text, len(material['paths']), complete_sound=modern)
     if not modern:
         return text
+    available_audio = {'1'} if material['visual_type'] == 'performance' else set()
+    text = normalize_audio_absence(text, available_audio)
     sections = prompt_sections(text)
     subjects = set(re.findall(r'<Subject (\d+)>',text))
     defined_subjects = set(re.findall(r'<Subject (\d+)>',sections['subject_definitions']))
