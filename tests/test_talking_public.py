@@ -1,5 +1,6 @@
 """Public single-image interface and exact local/RH request routing; no generation."""
 import copy
+from pathlib import Path
 import tempfile
 import types
 import unittest
@@ -78,6 +79,42 @@ class PublicTalkingTests(unittest.TestCase):
                 node.TalkingAvatar().prepare(**{**kwargs,'reference_image':torch.ones(1,64,32,3)},project_id=pid)
             self.assertEqual(client.return_value.workflow.call_count,1)
             client.return_value.create.assert_not_called()
+
+    def test_confirm_and_resume_legacy_projects_when_template_line_endings_change(self):
+        lf=graph.TEMPLATE.read_bytes().replace(b'\r\n',b'\n')
+        crlf=lf.replace(b'\n',b'\r\n')
+        for recorded,current in ((lf,crlf),(crlf,lf)):
+            with self.subTest(legacy_crlf=recorded==crlf),tempfile.TemporaryDirectory() as tmp:
+                template=Path(tmp)/'talking_rh_graph.json'
+                template.write_bytes(recorded)
+                with (patch.object(node,'root',return_value=Path(tmp)/'projects'),
+                      patch('h3talk_test.diagnostics.error_log_path',return_value=Path(tmp)/'errors.log'),
+                      patch.object(node,'TEMPLATE',template),
+                      patch.object(graph,'TEMPLATE',template),patch.object(node,'Client') as client):
+                    client.return_value.workflow.return_value=fixture()
+                    kwargs=dict(audio={'waveform':torch.zeros(1,1,24000),'sample_rate':24000},
+                                reference_image=torch.zeros(1,64,32,3),backend='RunningHub',workflow_id='123')
+                    avatar=node.TalkingAvatar()
+                    # Older projects stored the raw file hash as part of their input fingerprint.
+                    with patch.object(project,'template_digest',side_effect=lambda path,recorded=None:project.digest(path),create=True):
+                        pid=avatar.prepare(**kwargs)['result'][0]
+                    plan=project.read_plan(node.root(),pid)
+                    template.write_bytes(current)
+                    project.verify_assets(node.root(),plan)
+                    plan.update(approved=True,approved_fingerprint=project.fingerprint(plan))
+                    project.write_plan(node.root(),plan)
+                    self.assertEqual(avatar.prepare(**kwargs,project_id=pid)['result'][0],pid)
+                    self.assertEqual(project.read_plan(node.root(),pid),plan)
+                    self.assertEqual(client.return_value.workflow.call_count,1)
+                    client.return_value.create.assert_not_called()
+
+                    edited=current.replace(b'"ModelAttentionBackend"',b'"OtherAttentionBackend"',1)
+                    self.assertNotEqual(edited,current)
+                    template.write_bytes(edited)
+                    with self.assertRaisesRegex(ValueError,'模板.*已变化'):
+                        project.verify_assets(node.root(),plan)
+                    with self.assertRaisesRegex(ValueError,'新建项目'):
+                        avatar.prepare(**kwargs,project_id=pid)
 
     def test_legacy_background_argument_is_not_accepted(self):
         with self.assertRaises(TypeError):

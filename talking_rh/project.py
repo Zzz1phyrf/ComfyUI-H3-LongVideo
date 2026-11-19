@@ -27,6 +27,18 @@ def digest(path):
     return value.hexdigest()
 
 
+def template_digest(path, recorded=None):
+    """Match legacy line endings while keeping new project hashes stable."""
+    raw = Path(path).read_bytes()
+    lf = raw.replace(b'\r\n', b'\n')
+    canonical = hashlib.sha256(lf).hexdigest()
+    if recorded and recorded != canonical:
+        crlf = lf.replace(b'\n', b'\r\n')
+        if recorded in (hashlib.sha256(raw).hexdigest(), hashlib.sha256(crlf).hexdigest()):
+            return recorded
+    return canonical
+
+
 def dimensions(megapixels):
     if float(megapixels) not in (.6, .8, 1.0):
         raise ValueError('支持0.6、0.8或1.0 MP。')
@@ -274,8 +286,9 @@ def verify_assets(root,plan):
     if plan['config'].get('rh_sampling'):
         from .sampling import verify
         verify(plan['config']['rh_sampling'])
-    if digest(TEMPLATE)!=plan['config']['template_sha256']:
-        raise ValueError('云端生成模板已变化，请保留旧项目并新建项目。')
+    recorded = plan['config']['template_sha256']
+    if template_digest(TEMPLATE, recorded)!=recorded:
+        raise ValueError('插件本地生成模板内容已变化，请保留旧项目并新建项目。')
     if digest(audio_file(directory,'source.wav')) != plan['source_sha256']:
         raise ValueError('项目原音频已变化，请新建项目。')
     if plan['config'].get('audio_preparation_version')==1:

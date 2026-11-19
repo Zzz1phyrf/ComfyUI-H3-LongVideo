@@ -118,10 +118,11 @@ class TalkingRH:
                 if size!=project.output_size(prior['config']):
                     raise ValueError('外部宽高与旧项目不同，请新建项目；旧结果保留。')
                 resolution={'megapixels':prior['config']['megapixels']}
+        recorded_template=prior['config']['template_sha256'] if prior else None
         config={'base_url':'https://www.runninghub.ai' if region=='海外版' else 'https://www.runninghub.cn',
                 'workflow_id':str(workflow_id).strip(),'instance_type':instance_type,
                 **resolution,'seed':int(seed),'first_seconds':float(first_seconds),
-                'segment_seconds':float(segment_seconds),'template_sha256':project.digest(TEMPLATE)}
+                'segment_seconds':float(segment_seconds),'template_sha256':project.template_digest(TEMPLATE,recorded_template)}
         if execution_mode not in ('内置','画布'):raise ValueError('口播执行方式无效。')
         if execution_mode=='画布' and backend!='本地':raise ValueError('展开画布用于本地执行；RH请使用云端工作流入口。')
         if backend=='本地':
