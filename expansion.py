@@ -226,7 +226,7 @@ def call(path, payload=None):
     options = api_options(c)
     req = Request(c['base_url'].rstrip('/')+path, data=None if payload is None else json.dumps(payload).encode(),
                   headers={'Authorization': 'Bearer '+c['api_key'], 'Content-Type': 'application/json',
-                           'Accept': 'application/json, text/event-stream'})
+                           'Accept': 'application/json, text/event-stream', 'User-Agent': 'ComfyUI-H3-LongVideo'})
     started = time.monotonic()
 
     def context(): return f"等待超时设置 {options['timeout_seconds']:g}s，已耗时 {time.monotonic()-started:.1f}s"

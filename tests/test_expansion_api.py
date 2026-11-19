@@ -170,6 +170,18 @@ class ExpansionAPITests(unittest.TestCase):
             finally:
                 self.assertEqual(request.call_count, 1, 'No automatic paid retries')
 
+    def test_model_list_and_chat_requests_identify_the_plugin(self):
+        for path, method, payload in [('/models', 'GET', None),
+                                      ('/chat/completions', 'POST', {'model': 'fixture'})]:
+            with self.subTest(path=path), patch.object(expansion, 'settings', return_value=self.config), \
+                 patch.object(expansion, 'urlopen', return_value=Response(b'{}')) as transport:
+                expansion.call(path, payload)
+                request = transport.call_args.args[0]
+                self.assertEqual(request.get_method(), method)
+                self.assertEqual(request.full_url, self.config['base_url'] + path)
+                self.assertEqual(request.get_header('Authorization'), 'Bearer ' + KEY)
+                self.assertEqual(request.get_header('User-agent'), 'ComfyUI-H3-LongVideo')
+
     def test_timeout_connection_and_format_errors_are_distinct(self):
         messages = []
         for error in [TimeoutError('fixture'), URLError(socket.gaierror(-2, 'fixture'))]:
