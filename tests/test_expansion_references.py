@@ -55,6 +55,32 @@ class ExpansionAudioReferenceTests(unittest.TestCase):
                 result = expansion.validate_result(self.body('There is no <Audio 1>.', heading), self.packet())
                 self.assertNotIn('<Audio', result)
 
+    def test_scoped_missing_asset_declarations_keep_the_visual_direction(self):
+        examples = (
+            ('No <Audio 1> reference exists for this segment because the performers remain closed-mouth throughout.',
+             'No vocal reference exists for this segment because the performers remain closed-mouth throughout.'),
+            ('There is no <Audio 1> track in this shot.', 'There is no vocal reference in this shot.'),
+            ('<Audio 1> is not available for this segment.', 'vocal reference is not available for this segment.'),
+            ('No <Audio 1> input is provided because no performer is present.',
+             'No vocal reference is provided because no performer is present.'),
+        )
+        for source, expected in examples:
+            with self.subTest(source=source):
+                result = expansion.validate_result(self.body(source), self.packet())
+                self.assertIn(expected, result)
+                self.assertNotIn('<Audio', result)
+
+    def test_scoped_denial_cannot_hide_a_use_or_unverified_reason(self):
+        denial = 'No <Audio 1> reference exists for this segment'
+        for suffix in (' because the performer follows its timing.',
+                       ' because <Audio 2> supplies the vocals.',
+                       ' unless a performer sings.',
+                       '. Use it for lip sync.',
+                       '. It is used for lip sync.',
+                       ' because the performers remain closed-mouth throughout. Follow <Audio 1>.'):
+            with self.subTest(suffix=suffix), self.assertRaisesRegex(ValueError, '人声参考'):
+                expansion.validate_result(self.body(denial + suffix), self.packet())
+
     def test_absence_allows_explicit_visual_reference_instructions(self):
         for visual_type in ('atmosphere', 'environment'):
             for asset in ('reference image', 'reference picture', 'reference photo', 'reference frame'):
