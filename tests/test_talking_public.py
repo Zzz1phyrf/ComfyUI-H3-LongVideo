@@ -116,6 +116,24 @@ class PublicTalkingTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError,'新建项目'):
                         avatar.prepare(**kwargs,project_id=pid)
 
+    def test_canvas_run_opens_controls_for_confirmed_waiting_rh_project(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(node,'root',return_value=Path(temp)/'projects'), patch.object(node,'Client') as client:
+            client.return_value.workflow.return_value=fixture()
+            avatar=node.TalkingAvatar()
+            inputs=dict(audio={'waveform':torch.zeros(1,1,24000),'sample_rate':24000},
+                        reference_image=torch.zeros(1,64,32,3),backend='RunningHub',workflow_id='123')
+            pid=avatar.prepare(**inputs)['result'][0]
+            plan=project.read_plan(node.root(),pid)
+            plan.update(approved=True,approved_fingerprint=project.fingerprint(plan))
+            for state,expected in [('draft',True),('ready',True),('running',False),('completed',False)]:
+                with self.subTest(state=state):
+                    plan['run_status']=state
+                    project.write_plan(node.root(),plan)
+                    result=avatar.prepare(**inputs,project_id=pid)
+                    self.assertEqual(result['ui']['talking_rh_open_review'],[expected])
+                    self.assertEqual(project.read_plan(node.root(),pid),plan)
+            client.return_value.create.assert_not_called()
+
     def test_legacy_background_argument_is_not_accepted(self):
         with self.assertRaises(TypeError):
             node.TalkingAvatar().prepare(None,None,background_image=torch.zeros(1))

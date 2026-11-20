@@ -226,8 +226,10 @@ class TalkingRH:
             plan=project.prepare(root(),wave,sr,pictures,None if mask is None else mask[0],config,input_id)
         result=(canvas.blocked(plan) if execution_mode=='画布' or flat_new and prompt is not None else
                 (plan['id'],plan.get('final_video',''),len(plan['segments']),*(None for _ in canvas.FIELDS)))
-        return {'ui':{'talking_rh_project':[plan['id']],'talking_rh_open_review':[configuration_changed or reference_changed or not plan.get('approved')],
-                      'text':['口播项目已准备，请打开分段审核，试听后保存并确认。']},
+        waiting=plan.get('approved') and plan.get('run_status') in ('draft','ready')
+        open_review=configuration_changed or reference_changed or not plan.get('approved') or waiting
+        return {'ui':{'talking_rh_project':[plan['id']],'talking_rh_open_review':[open_review],
+                      'text':['分段已确认，请在面板点击“开始 / 继续生成”。' if waiting else '口播项目已准备，请打开分段与生成控制查看。']},
                 'result':result}
 
 
